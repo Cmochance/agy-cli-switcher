@@ -44,7 +44,14 @@ struct InteractiveAgy: AgyLaunching {
             }
         }
         while true {
-            if let observed = try poll() {
+            let observed: ObservedLogin?
+            do {
+                observed = try poll()
+            } catch {
+                terminate(pid)
+                throw error
+            }
+            if let observed {
                 terminate(pid)
                 return .loggedIn(observed)
             }

@@ -135,40 +135,64 @@ struct AccountCommands {
 
     private func addAccount() throws {
         let snapshot = try captureLogin()
-        if let snapshot, profile.slots(forEmail: snapshot.meta.email).isEmpty {
-            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
+        if let snapshot {
+            try keepSnapshot(snapshot)
         }
         try keychain.deleteBlob()
-        stdout(text.line(.loginOpening))
-        let outcome: LoginWatchResult
+        let name: String
+        let observed: ObservedLogin
         do {
-            outcome = try launcher.runUntilLoggedIn {
+            stdout(text.line(.loginOpening))
+            let outcome = try launcher.runUntilLoggedIn {
                 try self.observeLogin()
             }
-        } catch let error as AccountFailure where error.key == .agyLaunchFailed {
+            guard case .loggedIn(let login) = outcome else {
+                throw AccountFailure(snapshot == nil ? .loginNotFinished : .loginCancelled)
+            }
+            name = try availableDefaultName(login.meta.email)
+            try storeLogin(name: name, blob: login.blob, meta: login.meta)
+            observed = login
+        } catch {
             if let snapshot {
                 try keychain.writeBlob(snapshot.blob)
+                if (error as? AccountFailure)?.key != .loginCancelled {
+                    stderr(text.line(.loginRestored))
+                }
             }
             throw error
         }
-        switch outcome {
-        case .exited:
-            if let snapshot {
-                try keychain.writeBlob(snapshot.blob)
-                throw AccountFailure(.loginCancelled)
+        if let snapshot, snapshot.meta.email != observed.meta.email {
+            if let quota = files.clearQuotaCache() {
+                stderr(text.line(.quotaFailed, quota.path, quota.detail))
             }
-            throw AccountFailure(.loginNotFinished)
-        case .loggedIn(let observed):
-            let name = try availableDefaultName(observed.meta.email)
-            try storeLogin(name: name, blob: observed.blob, meta: observed.meta)
-            if let snapshot, snapshot.meta.email != observed.meta.email {
-                if let quota = files.clearQuotaCache() {
-                    stderr(text.line(.quotaFailed, quota.path, quota.detail))
-                }
+        }
+        stdout(text.line(.saved, name, observed.meta.email))
+        reportOtherAgy()
+        try launchAgy()
+    }
+
+    private func keepSnapshot(_ snapshot: ObservedLogin) throws {
+        let recorded = profile.slots(forEmail: snapshot.meta.email)
+        var backedUp = false
+        for name in recorded {
+            let tokenPath = files.locations.tokenURL(name).path
+            if !FileManager.default.fileExists(atPath: tokenPath) {
+                try files.writeSaved(name: name, blob: snapshot.blob, meta: snapshot.meta)
+                try profile.write(name: name, meta: snapshot.meta)
+                backedUp = true
+                continue
             }
-            stdout(text.line(.saved, name, observed.meta.email))
-            reportOtherAgy()
-            try launchAgy()
+            guard let saved = try? files.readSaved(name), saved.meta.email == snapshot.meta.email else {
+                continue
+            }
+            if saved.blob != snapshot.blob {
+                try files.writeSaved(name: name, blob: snapshot.blob, meta: snapshot.meta)
+                try profile.write(name: name, meta: snapshot.meta)
+            }
+            backedUp = true
+        }
+        if !backedUp {
+            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
         }
     }
 
@@ -404,12 +428,16 @@ struct AccountCommands {
     }
 
     private func observeLogin() throws -> ObservedLogin? {
+        let blob: String
         do {
-            let blob = try keychain.readBlob()
-            return ObservedLogin(blob: blob, meta: try decodeLogin(blob, source: .keychain))
+            blob = try keychain.readBlob()
         } catch let error as AccountFailure where error.key == .keychainMissing {
             return nil
         }
+        guard let meta = try? decodeLogin(blob, source: .keychain) else {
+            return nil
+        }
+        return ObservedLogin(blob: blob, meta: meta)
     }
 
     private func availableDefaultName(_ email: String) throws -> String {

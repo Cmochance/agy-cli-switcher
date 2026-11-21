@@ -204,6 +204,9 @@ language は言語コードを一つだけ受け付けます。agy-cs language �
 [loginNotFinished]
 ログインは完了しませんでした。
 
+[loginRestored]
+以前のキーチェーンログインを戻しました。
+
 [startingAgy]
 この端末で agy を起動しています。
 
