@@ -26,7 +26,7 @@
 - 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。
 - 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。
 - `agy-cs switch` 不带名字时在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。选已有账号完成切换后，在当前终端启动 `agy`。`agy-cs switch add` 跳过选择，直接新增账号。新增账号会先保存当前登录，临时移开钥匙串那一项，再启动 `agy` 让用户登录；登录写入新邮箱后按 `@` 前的字符保存，然后重新启动 `agy`。登录没有完成就退出时，把原来的钥匙串登录写回去。`agy-cs switch <名字>` 只切换，不启动 `agy`。`add` 不是账号名：`save`、`rename` 的新名字和按邮箱自动取名都拒绝它；以前留下的 `add` 记录仍能在菜单里选，也能 `rename`、`rm`。
-- 把终端交给 `agy` 之前，要求本进程是终端的前台进程组（`tcgetpgrp` 等于 `getpgrp`）。`agy-cs switch &` 这样放到后台时直接报错，不动钥匙串。交出前台那一步不忽略 `SIGTTOU`，只在交出之后、收回终端期间忽略 `SIGTTOU` / `SIGTTIN`。
+- 把终端交给 `agy` 之前，要求本进程是终端的前台进程组（`tcgetpgrp` 等于 `getpgrp`）。`agy-cs switch &` 这样放到后台时直接报错，不删除也不改写钥匙串那一项。首次运行的那一次读取照常发生，和其他指令一样。交出前台那一步不忽略 `SIGTTOU`，只在交出之后、收回终端期间忽略 `SIGTTOU` / `SIGTTIN`。
 - `rename <新名字>` 改当前账号的名字。`rename <旧名字> <新名字>` 改指定账号的名字。只改保存的副本和 `~/.agy-cs/` 记录，不读钥匙串。
 - 界面语言默认跟随系统。`agy-cs language` 可改成 `zh-Hans`、`zh-Hant`、`en`、`ja`。
 - 界面句子放在 `Sources/AgyAccount/i18n/`。四种语言各一个文件：`zh-Hans.txt`、`zh-Hant.txt`、`en.txt`、`ja.txt`。改文案只改这些文件，格式见同目录 `README.md`。新增句子时，`TextKey` 和四个文件使用同一个键名。
