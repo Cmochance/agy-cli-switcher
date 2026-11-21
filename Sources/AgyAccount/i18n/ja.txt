@@ -1,0 +1,238 @@
+[help]
+Antigravity CLI のアカウントを切り替えます。
+
+使い方
+  agy-cs
+  agy-cs <コマンド>
+
+コマンド
+  current                      記録されているメールアドレスを表示します。キーチェーンは開きません
+  list, ls                     保存したアカウントを表示します。コマンドを省略したときもこれです
+  save <名前>                  現在のキーチェーンログインを名前を付けて保存します
+  switch                       端末で選びます。1 は現在のアカウントで選べません。2 は新しいアカウントです。3 以降は保存済みです。完了後に agy を起動します
+  switch <名前>                保存したアカウントに切り替えます
+  next                         次の保存済みアカウントに切り替えます
+  rename <新しい名前>          現在のアカウントの名前を変えます。キーチェーンは開きません
+  rename <古い名前> <新しい名前>  アカウントの古い名前を新しい名前に変えます。キーチェーンは開きません
+  rm <名前>                    保存したコピーを削除します。キーチェーンのログインは変えません
+  rm <名前> --force            記録中のログインがこのコピーだけのとき、確認して削除します
+  language, lg                 現在の言語を表示します
+  language <コード>, lg <コード>  言語を切り替えます
+  help                         すべてのコマンドと機能を表示します
+
+help、-h、--help はこの説明を表示します。
+言語を指定しないときはシステムの言語に従います。コード: zh-Hans 简体中文、zh-Hant 繁體中文、en English、ja 日本語。
+初回起動でアカウント記録がまだないとき、キーチェーンを一度読み、メールアドレスの @ より前の文字で現在のログインを保存します。
+その後、current、list、rm、rename、language、help は ~/.agy-cs/ の秘密ではない記録だけを読みます。
+save、switch、next、およびこの初回初期化だけがキーチェーンを読みます。秘密のコピーは ~/.gemini/antigravity-cli/accounts/ に残します。
+名前なしの switch だけが、この端末で agy を起動します。新しいアカウントは現在のログインを先に保存してから agy を開きます。新しいメールアドレスが保存される前に終了したときは、元のログインを戻します。
+
+[operationFailed]
+アカウント操作を完了できませんでした。
+
+[helpNoExtra]
+help は他の引数を取りません。agy-cs help で全コマンドを表示します。
+
+[unknownCommand]
+不明なコマンド %1 です。agy-cs help で全コマンドを表示します。
+
+[commandNoExtra]
+%1 は他の引数を取りません。agy-cs help で全コマンドを表示します。
+
+[needsName]
+%1 には名前が必要です。agy-cs help で全コマンドを表示します。
+
+[rmUnknownArgument]
+rm は引数 %1 を認識しません。agy-cs help で全コマンドを表示します。
+
+[rmOnlyOneName]
+rm は名前を一つだけ受け付けます。agy-cs help で全コマンドを表示します。
+
+[rmNeedsName]
+rm には名前が必要です。agy-cs help で全コマンドを表示します。
+
+[useRenamed]
+use は switch に変わりました。agy-cs switch <名前> を実行してください。
+
+[invalidName]
+名前に使えるのは英字、数字、ピリオド、アンダースコア、ハイフンだけで、64 文字までです。
+
+[keychainFormat]
+キーチェーンの agy ログインが go-keyring-base64 形式ではないため、上書きしませんでした。
+
+[savedPrefix]
+保存したログインに go-keyring-base64 の接頭辞がありません。
+
+[loginUnreadable]
+ログイン内容を読み取れないため、使用しませんでした。
+
+[loginNotObject]
+ログイン内容が JSON オブジェクトではありません。
+
+[missingEmail]
+ログインに id_token_email がありません。
+
+[missingRefresh]
+ログインに refresh_token がありません。
+
+[accountMissing]
+アカウント %1 は保存されていません。保存済み: %2
+
+[accountMissingNone]
+アカウント %1 は保存されていません。保存済み: なし
+
+[keychainMissing]
+キーチェーンに service が gemini、account が antigravity の agy ログインがありません。
+
+[keychainDenied]
+キーチェーンが agy ログインの読み取りを許可しませんでした。
+
+[keychainFailed]
+キーチェーン操作に失敗しました（エラー %1）。
+
+[writeMismatch]
+キーチェーンへ書き戻した内容が切り替え先と一致しないため、中止しました。
+
+[readFailed]
+%1 を読み取れませんでした。
+
+[writeFailed]
+%1 を書き込めませんでした。
+
+[deleteFailed]
+保存したコピー %1 を削除できませんでした。
+
+[quotaFailed]
+利用枠キャッシュ %1 を削除できませんでした: %2
+
+[noSavedAccounts]
+保存したアカウントはまだありません。agy でログインしてから agy-cs save <名前> を実行してください。
+
+[saved]
+保存しました %1  %2
+
+[alreadyActive]
+すでに %1  %2 です
+
+[refreshedTokens]
+キーチェーンの新しいログインを書き戻しました: %1
+
+[refreshedBeforeSwitch]
+切り替え前に、更新されたキーチェーンのログインを書き戻しました: %1
+
+[currentNotSaved]
+現在のログイン %1 は未保存です。先に agy-cs save <名前> を実行してください。そうしないと戻せません。
+
+[switched]
+切り替えました %1  %2
+
+[agyStillRunning]
+実行中の agy は以前のログインのままです: %1
+
+[reopenAgy]
+開いている agy を終了してください。新しいセッションでこのアカウントを使います。
+
+[needTwoAccounts]
+切り替えるにはアカウントを二つ以上保存してください。先に agy-cs save <名前> を実行してください。
+
+[currentNotInSaved]
+現在のログイン %1 は保存済みアカウントにありません。先に agy-cs save <名前> を実行してください。
+
+[sameEmailOnly]
+保存したアカウントはすべて同じメールアドレスなので、切り替え先がありません。
+
+[onlyCopy]
+%1 は記録中のログイン %2 の唯一のコピーです。削除するなら agy-cs rm %1 --force を実行してください。
+
+[removed]
+保存したコピーを削除しました %1  %2
+
+[keychainUnchanged]
+キーチェーンの現在のログインは変更していません。
+
+[noCurrentAccount]
+現在のアカウントはまだ記録されていません。agy でログインしてから agy-cs save <名前> を実行してください。
+
+[languageUnknown]
+言語 %1 は使えません。コード: zh-Hans、zh-Hant、en、ja。
+
+[languageFollowing]
+現在の言語: %1 %2（システムに従う）
+
+[languageChosen]
+現在の言語: %1 %2
+
+[languageSet]
+言語を切り替えました: %1 %2
+
+[languageAvailableHeader]
+選べる言語:
+
+[languageHint]
+切り替え: agy-cs language <コード>、または agy-cs lg <コード>。
+
+[languageNoExtra]
+language は言語コードを一つだけ受け付けます。agy-cs language で一覧を表示します。
+
+[menuCurrentSuffix]
+ （現在のアカウント、選択できません）
+
+[menuNoCurrent]
+（現在のアカウントはありません、選択できません）
+
+[menuAddAccount]
+アカウントを追加
+
+[menuPrompt]
+番号を選んでください。q で終了:
+
+[menuCurrentLocked]
+現在のアカウントは選べません。2 で追加するか、保存済みのアカウントを選んでください。
+
+[menuBadChoice]
+その番号は一覧にありません。
+
+[switchNeedsTerminal]
+名前なしの switch は端末で選びます。直接切り替えるときは agy-cs switch <名前> を実行してください。
+
+[loginOpening]
+この端末で agy を開き、新しいアカウントにログインします。完了後に保存し、agy を開き直します。
+
+[loginCancelled]
+ログインが完了しなかったため、以前のキーチェーンログインを戻しました。
+
+[loginNotFinished]
+ログインは完了しませんでした。
+
+[startingAgy]
+この端末で agy を起動しています。
+
+[renamed]
+%1 の名前を %2 に変更しました  %3
+
+[renameUnchanged]
+%1 はすでにこの名前です  %2
+
+[renameNeedsName]
+rename には新しい名前、または古い名前と新しい名前が必要です。agy-cs help で全コマンドを表示します。
+
+[renameTooMany]
+rename は名前を二つまで受け付けます。agy-cs help で全コマンドを表示します。
+
+[renameFailed]
+アカウント %1 の名前を変更できませんでした。
+
+[nameTaken]
+名前 %1 はすでに %2 に使われています。
+
+[initializedSaved]
+現在のログインを初期化しました: %1  %2
+
+[initializedNoLogin]
+現在の agy ログインが見つからないため、自動保存しませんでした。ログイン後に agy-cs save <名前> を実行してください。
+
+[initializedNameRejected]
+%1 の @ より前はアカウント名にできません。agy-cs save <名前> を実行してください。
+
+[agyLaunchFailed]
+この端末で agy を起動できませんでした（%1）。

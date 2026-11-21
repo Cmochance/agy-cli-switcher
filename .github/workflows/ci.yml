@@ -1,0 +1,25 @@
+name: ci
+
+# 每次推到 main、打开或更新 pull request 时跑 Swift 测试。
+# draft pull request 跳过。跳过视为通过，不挡住 required check。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Swift tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: swift test
+        run: swift test --disable-sandbox

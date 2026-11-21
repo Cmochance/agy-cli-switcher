@@ -1,0 +1,238 @@
+[help]
+在多个 Antigravity CLI 账号之间切换。
+
+用法
+  agy-cs
+  agy-cs <指令>
+
+指令
+  current                      显示已记录的当前邮箱，不打开钥匙串
+  list, ls                     列出已保存的账号。不写指令时也是这条
+  save <名字>                  把当前钥匙串登录存成一个名字
+  switch                       在终端里选择。第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。完成后启动 agy
+  switch <名字>                切换到已保存的账号
+  next                         切换到下一个已保存的账号
+  rename <新名字>              把当前账号改名为新名字，不打开钥匙串
+  rename <旧名字> <新名字>     把账号旧名字改名为新名字，不打开钥匙串
+  rm <名字>                    删除一个已保存的副本，不改当前钥匙串登录
+  rm <名字> --force            当前记录只剩这一份副本时，确认后删除
+  language, lg                 显示当前语言
+  language <代码>, lg <代码>   切换语言
+  help                         显示已有的全部指令和对应功能
+
+help、-h、--help 都显示这份说明。
+没指定语言时跟随系统。代码: zh-Hans 简体中文、zh-Hant 繁體中文、en English、ja 日本語。
+首次安装且还没有账号记录时，会读取一次钥匙串，用邮箱 @ 前面的字符保存当前登录。
+之后 current、list、rm、rename、language、help 只读 ~/.agy-cs/ 里的非密钥记录。
+save、switch、next，以及上面这次初始化，才会读取钥匙串。密钥副本仍在 ~/.gemini/antigravity-cli/accounts/。
+不带名字的 switch 才会在当前终端启动 agy。新增账号会先保住当前登录，再打开 agy；没有换成新邮箱就退出时，会恢复原来的登录。
+
+[operationFailed]
+没能完成账号操作。
+
+[helpNoExtra]
+help 不接受别的参数。执行 agy-cs help 查看全部指令。
+
+[unknownCommand]
+未知指令 %1。执行 agy-cs help 查看全部指令。
+
+[commandNoExtra]
+%1 不接受别的参数。执行 agy-cs help 查看全部指令。
+
+[needsName]
+%1 需要一个名字。执行 agy-cs help 查看全部指令。
+
+[rmUnknownArgument]
+rm 不认识参数 %1。执行 agy-cs help 查看全部指令。
+
+[rmOnlyOneName]
+rm 只接受一个名字。执行 agy-cs help 查看全部指令。
+
+[rmNeedsName]
+rm 需要一个名字。执行 agy-cs help 查看全部指令。
+
+[useRenamed]
+use 已改为 switch。执行 agy-cs switch <名字>。
+
+[invalidName]
+名字只能用字母、数字、点、下划线和短横线，且不能超过 64 个字符。
+
+[keychainFormat]
+钥匙串里的 agy 登录不是 go-keyring-base64 格式，没有覆盖它。
+
+[savedPrefix]
+保存的登录缺少 go-keyring-base64 前缀。
+
+[loginUnreadable]
+登录内容无法解析，没有使用它。
+
+[loginNotObject]
+登录内容不是 JSON 对象。
+
+[missingEmail]
+登录里没有 id_token_email。
+
+[missingRefresh]
+登录里没有 refresh_token。
+
+[accountMissing]
+没有保存过账号 %1。已有: %2
+
+[accountMissingNone]
+没有保存过账号 %1。已有: 无
+
+[keychainMissing]
+钥匙串里没有 service 为 gemini、account 为 antigravity 的 agy 登录。
+
+[keychainDenied]
+钥匙串没有允许读取 agy 登录。
+
+[keychainFailed]
+钥匙串操作失败（错误码 %1）。
+
+[writeMismatch]
+写回钥匙串后读出来的内容和要切换的账号不一致，已停止。
+
+[readFailed]
+没能读取 %1。
+
+[writeFailed]
+没能写入 %1。
+
+[deleteFailed]
+没能删除保存的副本 %1。
+
+[quotaFailed]
+没能删除额度缓存 %1: %2
+
+[noSavedAccounts]
+还没有保存的账号。先在 agy 里登录，再执行 agy-cs save <名字>。
+
+[saved]
+已保存 %1  %2
+
+[alreadyActive]
+已经是 %1  %2
+
+[refreshedTokens]
+已把钥匙串里较新的 token 写回: %1
+
+[refreshedBeforeSwitch]
+切换前已把当前钥匙串里更新过的 token 写回: %1
+
+[currentNotSaved]
+当前登录 %1 还没保存。先执行 agy-cs save <名字>，否则一切走就找不回来。
+
+[switched]
+已切换到 %1  %2
+
+[agyStillRunning]
+正在运行的 agy 仍使用旧登录: %1
+
+[reopenAgy]
+退出已打开的 agy，再开一个新会话才会用这个账号。
+
+[needTwoAccounts]
+至少保存两个账号之后才能轮换。先 agy-cs save <名字>。
+
+[currentNotInSaved]
+当前登录 %1 不在已保存账号里。先 agy-cs save <名字>。
+
+[sameEmailOnly]
+保存的账号都是同一个邮箱，没有另一个可切换。
+
+[onlyCopy]
+%1 是当前记录 %2 唯一的副本。确认丢掉这个副本再用 agy-cs rm %1 --force。
+
+[removed]
+已删除保存的副本 %1  %2
+
+[keychainUnchanged]
+钥匙串里的当前登录没有改。
+
+[noCurrentAccount]
+还没有记录当前账号。先在 agy 里登录，再执行 agy-cs save <名字>。
+
+[languageUnknown]
+不认识语言 %1。可用代码: zh-Hans、zh-Hant、en、ja。
+
+[languageFollowing]
+当前语言: %1 %2（跟随系统）
+
+[languageChosen]
+当前语言: %1 %2
+
+[languageSet]
+已切换语言: %1 %2
+
+[languageAvailableHeader]
+可选语言:
+
+[languageHint]
+切换: agy-cs language <代码>，或 agy-cs lg <代码>。
+
+[languageNoExtra]
+language 只接受一个语言代码。执行 agy-cs language 查看可选语言。
+
+[menuCurrentSuffix]
+ （当前账号，不可选）
+
+[menuNoCurrent]
+（没有当前账号，不可选）
+
+[menuAddAccount]
+新增账号
+
+[menuPrompt]
+选择序号，q 退出:
+
+[menuCurrentLocked]
+当前账号不能选。选 2 新增账号，或选下面的已有账号。
+
+[menuBadChoice]
+没有这个序号。
+
+[switchNeedsTerminal]
+不带名字的 switch 需要在终端里选择。直接切换请执行 agy-cs switch <名字>。
+
+[loginOpening]
+将在当前终端打开 agy 登录新账号。登录完成后会保存，并重新打开 agy。
+
+[loginCancelled]
+登录没有完成，已恢复原来的钥匙串登录。
+
+[loginNotFinished]
+登录没有完成。
+
+[startingAgy]
+正在当前终端启动 agy。
+
+[renamed]
+已把 %1 改名为 %2  %3
+
+[renameUnchanged]
+%1 已经是这个名字  %2
+
+[renameNeedsName]
+rename 需要一个新名字，或旧名字和新名字。执行 agy-cs help 查看全部指令。
+
+[renameTooMany]
+rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
+
+[renameFailed]
+没能把账号 %1 改名。
+
+[nameTaken]
+名字 %1 已经被 %2 使用。
+
+[initializedSaved]
+已初始化当前登录: %1  %2
+
+[initializedNoLogin]
+没有发现当前 agy 登录，所以没有自动保存。登录后执行 agy-cs save <名字>。
+
+[initializedNameRejected]
+邮箱 %1 的 @ 前一段不能当作账号名。请执行 agy-cs save <名字>。
+
+[agyLaunchFailed]
+没能在当前终端启动 agy（%1）。

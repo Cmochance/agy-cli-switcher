@@ -1,0 +1,238 @@
+[help]
+Switch between Antigravity CLI accounts.
+
+Usage
+  agy-cs
+  agy-cs <command>
+
+Commands
+  current                      Show the recorded email. This does not open the keychain
+  list, ls                     List saved accounts. This is the default command
+  save <name>                  Save the current keychain login under a name
+  switch                       Choose in the terminal. Item 1 is the current account and cannot be selected; item 2 adds an account; later items are saved accounts. agy then starts
+  switch <name>                Switch to a saved account
+  next                         Switch to the next saved account
+  rename <new>                 Rename the current account. This does not open the keychain
+  rename <old> <new>           Rename account old to new. This does not open the keychain
+  rm <name>                    Delete a saved copy. The keychain login stays
+  rm <name> --force            Delete the only remaining copy of the recorded login
+  language, lg                 Show the current language
+  language <code>, lg <code>   Change the language
+  help                         Show every command and what it does
+
+help, -h, and --help show this text.
+With no language chosen, agy-cs follows the system language. Codes: zh-Hans 简体中文, zh-Hant 繁體中文, en English, ja 日本語.
+On the first run, when no account is recorded yet, agy-cs reads the keychain once and saves the current login under the characters before @.
+After that, current, list, rm, rename, language, and help read only the non-secret records in ~/.agy-cs/.
+save, switch, next, and that first-run initialization read the keychain. Secret copies stay in ~/.gemini/antigravity-cli/accounts/.
+Only switch without a name starts agy in this terminal. Adding an account keeps the current login first, then opens agy. If you quit before a new email is stored, the previous login is restored.
+
+[operationFailed]
+Couldn't finish the account operation.
+
+[helpNoExtra]
+help takes no other arguments. Run agy-cs help to see every command.
+
+[unknownCommand]
+Unknown command %1. Run agy-cs help to see every command.
+
+[commandNoExtra]
+%1 takes no other arguments. Run agy-cs help to see every command.
+
+[needsName]
+%1 needs a name. Run agy-cs help to see every command.
+
+[rmUnknownArgument]
+rm does not recognize %1. Run agy-cs help to see every command.
+
+[rmOnlyOneName]
+rm accepts only one name. Run agy-cs help to see every command.
+
+[rmNeedsName]
+rm needs a name. Run agy-cs help to see every command.
+
+[useRenamed]
+use is now switch. Run agy-cs switch <name>.
+
+[invalidName]
+A name can use letters, digits, dots, underscores, and hyphens, and must be at most 64 characters.
+
+[keychainFormat]
+The agy login in the keychain is not go-keyring-base64, so it was left unchanged.
+
+[savedPrefix]
+The saved login is missing the go-keyring-base64 prefix.
+
+[loginUnreadable]
+The login could not be read, so it was not used.
+
+[loginNotObject]
+The login is not a JSON object.
+
+[missingEmail]
+The login has no id_token_email.
+
+[missingRefresh]
+The login has no refresh_token.
+
+[accountMissing]
+No saved account named %1. Saved: %2
+
+[accountMissingNone]
+No saved account named %1. Saved: none
+
+[keychainMissing]
+The keychain has no agy login with service gemini and account antigravity.
+
+[keychainDenied]
+The keychain did not allow reading the agy login.
+
+[keychainFailed]
+The keychain operation failed (error %1).
+
+[writeMismatch]
+The keychain did not contain the account after writing it, so the switch stopped.
+
+[readFailed]
+Couldn't read %1.
+
+[writeFailed]
+Couldn't write %1.
+
+[deleteFailed]
+Couldn't delete the saved copy %1.
+
+[quotaFailed]
+Couldn't delete the quota cache %1: %2
+
+[noSavedAccounts]
+No accounts are saved yet. Log in with agy, then run agy-cs save <name>.
+
+[saved]
+Saved %1  %2
+
+[alreadyActive]
+Already %1  %2
+
+[refreshedTokens]
+Wrote the newer keychain login back to: %1
+
+[refreshedBeforeSwitch]
+Before switching, wrote the updated keychain login back to: %1
+
+[currentNotSaved]
+The current login %1 is not saved. Run agy-cs save <name> first, or it cannot be restored.
+
+[switched]
+Switched to %1  %2
+
+[agyStillRunning]
+agy is still running with the previous login: %1
+
+[reopenAgy]
+Quit the open agy processes. A new session uses this account.
+
+[needTwoAccounts]
+Save at least two accounts before rotating. Run agy-cs save <name> first.
+
+[currentNotInSaved]
+The current login %1 is not among the saved accounts. Run agy-cs save <name> first.
+
+[sameEmailOnly]
+Every saved account uses the same email, so there is nowhere to switch.
+
+[onlyCopy]
+%1 is the only saved copy of the recorded login %2. Run agy-cs rm %1 --force to delete it.
+
+[removed]
+Deleted the saved copy %1  %2
+
+[keychainUnchanged]
+The current keychain login was not changed.
+
+[noCurrentAccount]
+No current account is recorded. Log in with agy, then run agy-cs save <name>.
+
+[languageUnknown]
+Unknown language %1. Codes: zh-Hans, zh-Hant, en, ja.
+
+[languageFollowing]
+Language: %1 %2 (following the system)
+
+[languageChosen]
+Language: %1 %2
+
+[languageSet]
+Language set to %1 %2
+
+[languageAvailableHeader]
+Available languages:
+
+[languageHint]
+Set it with agy-cs language <code> or agy-cs lg <code>.
+
+[languageNoExtra]
+language accepts one language code. Run agy-cs language to see them.
+
+[menuCurrentSuffix]
+ (current account, not selectable)
+
+[menuNoCurrent]
+(no current account, not selectable)
+
+[menuAddAccount]
+Add an account
+
+[menuPrompt]
+Choose a number, or q to quit:
+
+[menuCurrentLocked]
+The current account cannot be selected. Choose 2 to add an account, or choose a saved account.
+
+[menuBadChoice]
+That number is not in the list.
+
+[switchNeedsTerminal]
+switch without a name needs a terminal. Run agy-cs switch <name> to switch directly.
+
+[loginOpening]
+agy will open in this terminal so you can log in. After that, the login is saved and agy opens again.
+
+[loginCancelled]
+Login did not finish, so the previous keychain login was restored.
+
+[loginNotFinished]
+Login did not finish.
+
+[startingAgy]
+Starting agy in this terminal.
+
+[renamed]
+Renamed %1 to %2  %3
+
+[renameUnchanged]
+%1 already has this name  %2
+
+[renameNeedsName]
+rename needs a new name, or an old name and a new name. Run agy-cs help to see every command.
+
+[renameTooMany]
+rename accepts at most two names. Run agy-cs help to see every command.
+
+[renameFailed]
+Couldn't rename account %1.
+
+[nameTaken]
+The name %1 is already used by %2.
+
+[initializedSaved]
+Initialized the current login: %1  %2
+
+[initializedNoLogin]
+No current agy login was found, so nothing was saved. Log in, then run agy-cs save <name>.
+
+[initializedNameRejected]
+The characters before @ in %1 cannot be an account name. Run agy-cs save <name>.
+
+[agyLaunchFailed]
+Couldn't start agy in this terminal (%1).

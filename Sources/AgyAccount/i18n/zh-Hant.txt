@@ -1,0 +1,238 @@
+[help]
+在多個 Antigravity CLI 帳號之間切換。
+
+用法
+  agy-cs
+  agy-cs <指令>
+
+指令
+  current                      顯示已記錄的目前電子郵件，不開啟鑰匙圈
+  list, ls                     列出已保存的帳號。不寫指令時也是這條
+  save <名字>                  把目前鑰匙圈登入存成一個名字
+  switch                       在終端機裡選擇。第 1 項是目前帳號，不能選；第 2 項新增帳號；從第 3 項起是已有帳號。完成後啟動 agy
+  switch <名字>                切換到已保存的帳號
+  next                         切換到下一個已保存的帳號
+  rename <新名字>              把目前帳號改名為新名字，不開啟鑰匙圈
+  rename <舊名字> <新名字>     把帳號舊名字改名為新名字，不開啟鑰匙圈
+  rm <名字>                    刪除一個已保存的副本，不改目前鑰匙圈登入
+  rm <名字> --force            目前記錄只剩這一份副本時，確認後刪除
+  language, lg                 顯示目前語言
+  language <代碼>, lg <代碼>   切換語言
+  help                         顯示已有的全部指令和對應功能
+
+help、-h、--help 都顯示這份說明。
+未指定語言時跟隨系統。代碼: zh-Hans 简体中文、zh-Hant 繁體中文、en English、ja 日本語。
+首次安裝且還沒有帳號記錄時，會讀取一次鑰匙圈，用電子郵件 @ 前面的字元保存目前登入。
+之後 current、list、rm、rename、language、help 只讀 ~/.agy-cs/ 裡的非密鑰記錄。
+save、switch、next，以及上面這次初始化，才會讀取鑰匙圈。密鑰副本仍在 ~/.gemini/antigravity-cli/accounts/。
+不帶名字的 switch 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
+
+[operationFailed]
+沒能完成帳號操作。
+
+[helpNoExtra]
+help 不接受別的參數。執行 agy-cs help 查看全部指令。
+
+[unknownCommand]
+未知指令 %1。執行 agy-cs help 查看全部指令。
+
+[commandNoExtra]
+%1 不接受別的參數。執行 agy-cs help 查看全部指令。
+
+[needsName]
+%1 需要一個名字。執行 agy-cs help 查看全部指令。
+
+[rmUnknownArgument]
+rm 不認識參數 %1。執行 agy-cs help 查看全部指令。
+
+[rmOnlyOneName]
+rm 只接受一個名字。執行 agy-cs help 查看全部指令。
+
+[rmNeedsName]
+rm 需要一個名字。執行 agy-cs help 查看全部指令。
+
+[useRenamed]
+use 已改為 switch。執行 agy-cs switch <名字>。
+
+[invalidName]
+名字只能用字母、數字、點、底線和連字號，且不能超過 64 個字元。
+
+[keychainFormat]
+鑰匙圈裡的 agy 登入不是 go-keyring-base64 格式，沒有覆蓋它。
+
+[savedPrefix]
+保存的登入缺少 go-keyring-base64 前綴。
+
+[loginUnreadable]
+登入內容無法解析，沒有使用它。
+
+[loginNotObject]
+登入內容不是 JSON 物件。
+
+[missingEmail]
+登入裡沒有 id_token_email。
+
+[missingRefresh]
+登入裡沒有 refresh_token。
+
+[accountMissing]
+沒有保存過帳號 %1。已有: %2
+
+[accountMissingNone]
+沒有保存過帳號 %1。已有: 無
+
+[keychainMissing]
+鑰匙圈裡沒有 service 為 gemini、account 為 antigravity 的 agy 登入。
+
+[keychainDenied]
+鑰匙圈沒有允許讀取 agy 登入。
+
+[keychainFailed]
+鑰匙圈操作失敗（錯誤碼 %1）。
+
+[writeMismatch]
+寫回鑰匙圈後讀出來的內容和要切換的帳號不一致，已停止。
+
+[readFailed]
+沒能讀取 %1。
+
+[writeFailed]
+沒能寫入 %1。
+
+[deleteFailed]
+沒能刪除保存的副本 %1。
+
+[quotaFailed]
+沒能刪除額度快取 %1: %2
+
+[noSavedAccounts]
+還沒有保存的帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。
+
+[saved]
+已保存 %1  %2
+
+[alreadyActive]
+已經是 %1  %2
+
+[refreshedTokens]
+已把鑰匙圈裡較新的 token 寫回: %1
+
+[refreshedBeforeSwitch]
+切換前已把目前鑰匙圈裡更新過的 token 寫回: %1
+
+[currentNotSaved]
+目前登入 %1 還沒保存。先執行 agy-cs save <名字>，否則一切換就找不回來。
+
+[switched]
+已切換到 %1  %2
+
+[agyStillRunning]
+正在執行的 agy 仍使用舊登入: %1
+
+[reopenAgy]
+退出已開啟的 agy，再開一個新工作階段才會用這個帳號。
+
+[needTwoAccounts]
+至少保存兩個帳號之後才能輪換。先 agy-cs save <名字>。
+
+[currentNotInSaved]
+目前登入 %1 不在已保存帳號裡。先 agy-cs save <名字>。
+
+[sameEmailOnly]
+保存的帳號都是同一個電子郵件，沒有另一個可切換。
+
+[onlyCopy]
+%1 是目前記錄 %2 唯一的副本。確認丟掉這個副本再用 agy-cs rm %1 --force。
+
+[removed]
+已刪除保存的副本 %1  %2
+
+[keychainUnchanged]
+鑰匙圈裡的目前登入沒有改。
+
+[noCurrentAccount]
+還沒有記錄目前帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。
+
+[languageUnknown]
+不認識語言 %1。可用代碼: zh-Hans、zh-Hant、en、ja。
+
+[languageFollowing]
+目前語言: %1 %2（跟隨系統）
+
+[languageChosen]
+目前語言: %1 %2
+
+[languageSet]
+已切換語言: %1 %2
+
+[languageAvailableHeader]
+可選語言:
+
+[languageHint]
+切換: agy-cs language <代碼>，或 agy-cs lg <代碼>。
+
+[languageNoExtra]
+language 只接受一個語言代碼。執行 agy-cs language 查看可選語言。
+
+[menuCurrentSuffix]
+ （目前帳號，不可選）
+
+[menuNoCurrent]
+（沒有目前帳號，不可選）
+
+[menuAddAccount]
+新增帳號
+
+[menuPrompt]
+選擇序號，q 退出:
+
+[menuCurrentLocked]
+目前帳號不能選。選 2 新增帳號，或選下面的已有帳號。
+
+[menuBadChoice]
+沒有這個序號。
+
+[switchNeedsTerminal]
+不帶名字的 switch 需要在終端機裡選擇。直接切換請執行 agy-cs switch <名字>。
+
+[loginOpening]
+將在目前終端機開啟 agy 登入新帳號。登入完成後會保存，並重新開啟 agy。
+
+[loginCancelled]
+登入沒有完成，已恢復原來的鑰匙圈登入。
+
+[loginNotFinished]
+登入沒有完成。
+
+[startingAgy]
+正在目前終端機啟動 agy。
+
+[renamed]
+已把 %1 改名為 %2  %3
+
+[renameUnchanged]
+%1 已經是這個名字  %2
+
+[renameNeedsName]
+rename 需要一個新名字，或舊名字和新名字。執行 agy-cs help 查看全部指令。
+
+[renameTooMany]
+rename 最多接受兩個名字。執行 agy-cs help 查看全部指令。
+
+[renameFailed]
+沒能把帳號 %1 改名。
+
+[nameTaken]
+名字 %1 已經被 %2 使用。
+
+[initializedSaved]
+已初始化目前登入: %1  %2
+
+[initializedNoLogin]
+沒有發現目前的 agy 登入，所以沒有自動保存。登入後執行 agy-cs save <名字>。
+
+[initializedNameRejected]
+電子郵件 %1 的 @ 前一段不能當作帳號名。請執行 agy-cs save <名字>。
+
+[agyLaunchFailed]
+沒能在目前終端機啟動 agy（%1）。

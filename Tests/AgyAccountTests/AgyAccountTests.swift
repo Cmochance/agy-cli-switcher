@@ -1,0 +1,621 @@
+import XCTest
+@testable import AgyAccount
+
+final class AgyAccountTests: XCTestCase {
+    func testDecodeAndNameRules() throws {
+        let blob = makeBlob(email: "a@b.c", refresh: "r1", expiry: "2026-01-01T00:00:00Z")
+        let meta = try decodeLogin(blob, source: .keychain)
+        XCTAssertEqual(meta.email, "a@b.c")
+        XCTAssertEqual(meta.authMethod, "consumer")
+        XCTAssertEqual(meta.expiry, "2026-01-01T00:00:00Z")
+
+        XCTAssertThrowsError(try decodeLogin("plain", source: .keychain))
+        XCTAssertThrowsError(try decodeLogin("go-keyring-base64:!!!!", source: .saved))
+        XCTAssertThrowsError(try decodeLogin(makeBlob(email: "no-at"), source: .saved))
+        XCTAssertThrowsError(try checkName(""))
+        XCTAssertThrowsError(try checkName("-ab"))
+        XCTAssertNoThrow(try checkName(String(repeating: "a", count: 64)))
+        XCTAssertThrowsError(try checkName(String(repeating: "a", count: 65)))
+    }
+
+    func testHelpListsEveryCommandWithoutReadingKeychain() {
+        let keychain = ExplodingKeychain()
+        let result = runCommand(args: ["help"], keychain: keychain)
+        XCTAssertEqual(result.code, 0)
+        XCTAssertEqual(keychain.reads, 0)
+        for word in ["current", "list", "save", "switch", "next", "rename", "rm", "help", "language", "邮箱", "切换", "删除", "新增"] {
+            XCTAssertTrue(result.output.joined(separator: "\n").contains(word), word)
+        }
+        XCTAssertEqual(runCommand(args: ["-h"], keychain: keychain).code, 0)
+        XCTAssertEqual(runCommand(args: ["--help"], keychain: keychain).code, 0)
+        XCTAssertEqual(runCommand(args: ["nope"], keychain: keychain).code, 2)
+    }
+
+    func testSaveListCurrentAndSameEmailRefresh() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "old"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+        XCTAssertEqual(fixture.run([]).output, ["* alice  alice@example.com"])
+        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(try mode(fixture.locations.accountsDirectory), 0o700)
+        XCTAssertEqual(try mode(fixture.locations.tokenURL("alice")), 0o600)
+        let saved = try String(contentsOf: fixture.locations.metaURL("alice"), encoding: .utf8)
+        XCTAssertEqual(
+            saved,
+            "{\n  \"name\": \"alice\",\n  \"email\": \"alice@example.com\",\n  \"auth_method\": \"consumer\",\n  \"expiry\": \"2026-01-01T00:00:00Z\",\n  \"saved_at\": \"2026-01-01T00:00:00Z\"\n}\n"
+        )
+
+        let profile = try String(contentsOf: fixture.tool.profileURL("alice"), encoding: .utf8)
+        XCTAssertFalse(profile.contains("refresh"))
+        XCTAssertFalse(profile.contains("go-keyring"))
+        XCTAssertEqual(try mode(fixture.tool.root), 0o700)
+        XCTAssertEqual(try mode(fixture.tool.profileURL("alice")), 0o600)
+
+        fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "new")
+        let refreshed = fixture.run(["switch", "alice"])
+        XCTAssertEqual(refreshed.code, 0)
+        XCTAssertEqual(fixture.keychain.writes, [])
+        XCTAssertEqual(refreshed.output, [
+            "已经是 alice  alice@example.com",
+            "已把钥匙串里较新的 token 写回: alice",
+        ])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
+        let stored = stripNewlines(try String(contentsOf: fixture.locations.tokenURL("alice"), encoding: .utf8))
+        XCTAssertEqual(stored, fixture.keychain.blob)
+    }
+
+    func testSwitchClearsQuotaAndKeepsConversations() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.processes.pids = [42, 43]
+        let switched = fixture.run(["switch", "alice"])
+        XCTAssertEqual(switched.code, 0)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
+        XCTAssertEqual(switched.output, [
+            "已切换到 alice  alice@example.com",
+            "正在运行的 agy 仍使用旧登录: 42, 43",
+            "退出已打开的 agy，再开一个新会话才会用这个账号。",
+        ])
+        XCTAssertEqual(fixture.launcher.started, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
+    }
+
+    func testSwitchRefusesUnsavedCurrentLogin() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "carol@example.com")
+        let refused = fixture.run(["switch", "alice"])
+        XCTAssertEqual(refused.code, 1)
+        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("还没保存"))
+        XCTAssertEqual(fixture.keychain.writes, [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.quota.path))
+    }
+
+    func testNextSkipsSameEmailAndStopsWhenOnlyOneMailbox() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a1")
+        let aliceAgain = makeBlob(email: "alice@example.com", refresh: "a2")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice-1"]).code, 0)
+        fixture.keychain.blob = aliceAgain
+        XCTAssertEqual(fixture.run(["save", "alice-2"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        let rotated = fixture.run(["next"])
+        XCTAssertEqual(rotated.code, 0)
+        XCTAssertEqual(rotated.output.first, "已切换到 bob  bob@example.com")
+        XCTAssertEqual(fixture.keychain.blob, bob)
+
+        let onlyAlice = try Fixture(blob: alice)
+        defer { onlyAlice.cleanup() }
+        XCTAssertEqual(onlyAlice.run(["save", "one"]).code, 0)
+        onlyAlice.keychain.blob = aliceAgain
+        XCTAssertEqual(onlyAlice.run(["save", "two"]).code, 0)
+        onlyAlice.keychain.blob = alice
+        XCTAssertEqual(onlyAlice.run(["next"]).code, 1)
+        XCTAssertEqual(onlyAlice.run(["next"]).errors.first?.contains("同一个邮箱"), true)
+    }
+
+    func testRemoveRequiresForceForOnlyCurrentCopy() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "a2")
+        XCTAssertEqual(fixture.run(["save", "alice-copy"]).code, 0)
+        XCTAssertEqual(fixture.keychain.reads, 2)
+        fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "a")
+        XCTAssertEqual(fixture.run(["rm", "alice"]).code, 0)
+        XCTAssertEqual(fixture.keychain.reads, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
+        XCTAssertEqual(fixture.keychain.blob, makeBlob(email: "alice@example.com", refresh: "a"))
+
+        let alone = try Fixture(blob: makeBlob(email: "alice@example.com"))
+        defer { alone.cleanup() }
+        XCTAssertEqual(alone.run(["save", "alice"]).code, 0)
+        let blocked = alone.run(["rm", "alice"])
+        XCTAssertEqual(blocked.code, 1)
+        XCTAssertTrue(blocked.errors.joined(separator: "\n").contains("--force"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: alone.locations.tokenURL("alice").path))
+        XCTAssertEqual(alone.run(["rm", "--force", "alice"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: alone.locations.tokenURL("alice").path))
+        XCTAssertEqual(alone.keychain.writes, [])
+    }
+
+    func testCatalogImportSkipsSecretsAndKeychain() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "bob@example.com", refresh: "secret-value"))
+        defer { fixture.cleanup() }
+        try FileManager.default.createDirectory(at: fixture.locations.accountsDirectory, withIntermediateDirectories: true)
+        let sidecar = encodeSidecar(
+            name: "alice",
+            email: "alice@example.com",
+            authMethod: "consumer",
+            expiry: "2026-01-01T00:00:00Z",
+            savedAt: "2026-01-01T00:00:00Z"
+        )
+        try sidecar.write(to: fixture.locations.metaURL("alice"), atomically: true, encoding: .utf8)
+        try Data("alice\n".utf8).write(to: fixture.locations.activeURL)
+        try Data(makeBlob(email: "bob@example.com").utf8).write(to: fixture.locations.tokenURL("alice"))
+        XCTAssertEqual(fixture.run(["list"]).output, ["* alice  alice@example.com"])
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+        XCTAssertEqual(fixture.keychain.reads, 0)
+        let profile = try String(contentsOf: fixture.tool.profileURL("alice"), encoding: .utf8)
+        XCTAssertFalse(profile.contains("go-keyring"))
+        XCTAssertFalse(profile.contains("bob@example.com"))
+        XCTAssertFalse(profile.contains("secret-value"))
+    }
+
+    func testLanguagesAndRenamedSwitchDoNotReadKeychain() throws {
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["zh-Hans-US"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["zh-TW"]), .traditionalChinese)
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["zh-HK", "en"]), .traditionalChinese)
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["ja-JP"]), .japanese)
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["en-US"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(preferred: ["fr-FR"]), .english)
+
+        let keychain = ExplodingKeychain()
+        let followed = runCommand(args: ["lg"], keychain: keychain, preferred: ["ja-JP"])
+        XCTAssertEqual(followed.code, 0)
+        XCTAssertEqual(keychain.reads, 0)
+        XCTAssertTrue(followed.output.joined(separator: "\n").contains("システムに従う"))
+
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"))
+        defer { fixture.cleanup() }
+        let english = fixture.run(["language", "en"])
+        XCTAssertEqual(english.code, 0)
+        XCTAssertTrue(english.output.joined(separator: "\n").contains("Language set to en English"))
+        XCTAssertTrue(fixture.run(["help"]).output.joined(separator: "\n").contains("Switch to a saved account"))
+        XCTAssertTrue(fixture.run(["language", "zh-Hant"]).output.joined(separator: "\n").contains("已切換語言: zh-Hant 繁體中文"))
+        XCTAssertTrue(fixture.run(["lg", "ja"]).output.joined(separator: "\n").contains("言語を切り替えました: ja 日本語"))
+        let renamed = fixture.run(["use", "alice"])
+        XCTAssertEqual(renamed.code, 2)
+        XCTAssertTrue(renamed.errors.joined(separator: "\n").contains("switch"))
+        XCTAssertEqual(fixture.keychain.reads, 0)
+    }
+
+    func testLiveKeychainRoundTripWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["AGY_ACCOUNT_LIVE"] == "1" else {
+            return
+        }
+        let store = LoginKeychainStore()
+        XCTAssertEqual(try store.matchingItemCount(dataProtection: false), 1)
+        XCTAssertEqual(try store.matchingItemCount(dataProtection: true), 0)
+        let blob = try store.readBlob()
+        let email = try decodeLogin(blob, source: .keychain).email
+        try store.writeBlob(blob)
+        let written = try store.readBlob()
+        XCTAssertEqual(written, blob)
+        XCTAssertEqual(try decodeLogin(written, source: .keychain).email, email)
+        XCTAssertEqual(try store.matchingItemCount(dataProtection: false), 1)
+        XCTAssertEqual(try store.matchingItemCount(dataProtection: true), 0)
+        XCTAssertFalse(email.isEmpty)
+    }
+
+    func testSwitchMenuSelectsSavedAccountAndLaunchesAgy() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.processes.pids = [7]
+        fixture.terminal.isInteractive = true
+        fixture.terminal.lines = ["1", "9", "3"]
+        let readsBefore = fixture.keychain.reads
+        let chosen = fixture.run(["switch"])
+        XCTAssertEqual(chosen.code, 0)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
+        XCTAssertEqual(fixture.launcher.started, 1)
+        XCTAssertGreaterThan(fixture.keychain.reads, readsBefore)
+        XCTAssertTrue(chosen.errors.contains { $0.contains("不能选") })
+        XCTAssertTrue(chosen.errors.contains { $0.contains("没有这个序号") })
+        XCTAssertEqual(chosen.output.last, "正在当前终端启动 agy。")
+        XCTAssertTrue(chosen.output.contains("已切换到 alice  alice@example.com"))
+        XCTAssertTrue(chosen.output.contains("正在运行的 agy 仍使用旧登录: 7"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
+
+        let again = try Fixture(blob: alice)
+        defer { again.cleanup() }
+        XCTAssertEqual(again.run(["save", "alice"]).code, 0)
+        let reads = again.keychain.reads
+        again.terminal.isInteractive = true
+        again.terminal.lines = ["1", "q"]
+        XCTAssertEqual(again.run(["switch"]).code, 0)
+        XCTAssertEqual(again.keychain.reads, reads)
+        XCTAssertEqual(again.launcher.started, 0)
+        XCTAssertEqual(again.run(["switch", "alice", "extra"]).code, 2)
+        again.terminal.isInteractive = false
+        XCTAssertEqual(again.run(["switch"]).code, 2)
+        XCTAssertEqual(again.launcher.started, 0)
+    }
+
+    func testAddAccountSavesLocalPartAndRestoresWhenLoginStops() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.terminal.isInteractive = true
+        fixture.terminal.lines = ["2"]
+        fixture.launcher.supply = {
+            fixture.keychain.blob = carol
+            fixture.keychain.missing = false
+        }
+        let added = fixture.run(["switch"])
+        XCTAssertEqual(added.code, 0)
+        XCTAssertEqual(fixture.launcher.started, 1)
+        XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
+        XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: fixture.locations.tokenURL("alice"), encoding: .utf8)),
+            alice
+        )
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: fixture.locations.tokenURL("carol"), encoding: .utf8)),
+            carol
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
+
+        let cancelled = try Fixture(blob: alice)
+        defer { cancelled.cleanup() }
+        XCTAssertEqual(cancelled.run(["save", "alice"]).code, 0)
+        cancelled.terminal.isInteractive = true
+        cancelled.terminal.lines = ["2"]
+        let stopped = cancelled.run(["switch"])
+        XCTAssertEqual(stopped.code, 1)
+        XCTAssertTrue(stopped.errors.joined(separator: "\n").contains("已恢复"))
+        XCTAssertEqual(cancelled.launcher.started, 0)
+        XCTAssertEqual(cancelled.keychain.blob, alice)
+        XCTAssertFalse(cancelled.keychain.missing)
+        XCTAssertEqual(cancelled.keychain.writes, [alice])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cancelled.quota.path))
+
+        let failed = try Fixture(blob: alice)
+        defer { failed.cleanup() }
+        XCTAssertEqual(failed.run(["save", "alice"]).code, 0)
+        failed.terminal.isInteractive = true
+        failed.terminal.lines = ["2"]
+        failed.launcher.failure = AccountFailure(.agyLaunchFailed, "agy")
+        let broken = failed.run(["switch"])
+        XCTAssertEqual(broken.code, 1)
+        XCTAssertTrue(broken.errors.joined(separator: "\n").contains("agy"))
+        XCTAssertEqual(failed.keychain.blob, alice)
+        XCTAssertFalse(failed.keychain.missing)
+        XCTAssertEqual(failed.keychain.writes, [alice])
+    }
+
+    func testRenameMovesCatalogWithoutReadingKeychain() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        let reads = fixture.keychain.reads
+        let renamed = fixture.run(["rename", "alice", "carol"])
+        XCTAssertEqual(renamed.code, 0)
+        XCTAssertEqual(renamed.output, ["已把 alice 改名为 carol  alice@example.com"])
+        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.writes, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: fixture.locations.tokenURL("carol"), encoding: .utf8)),
+            alice
+        )
+        let profile = try String(contentsOf: fixture.tool.profileURL("carol"), encoding: .utf8)
+        XCTAssertTrue(profile.contains("\"name\": \"carol\""))
+        XCTAssertFalse(profile.contains("go-keyring"))
+        XCTAssertEqual(fixture.run(["current"]).output, ["bob@example.com"])
+        XCTAssertEqual(fixture.run(["rename", "dave"]).output, ["已把 bob 改名为 dave  bob@example.com"])
+        XCTAssertEqual(try String(contentsOf: fixture.tool.activeFile, encoding: .utf8), "dave\n")
+        XCTAssertEqual(try String(contentsOf: fixture.locations.activeURL, encoding: .utf8), "dave\n")
+        XCTAssertEqual(fixture.run(["rename", "dave"]).output, ["dave 已经是这个名字  bob@example.com"])
+        let blocked = fixture.run(["rename", "carol", "dave"])
+        XCTAssertEqual(blocked.code, 1)
+        XCTAssertTrue(blocked.errors.joined(separator: "\n").contains("dave"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("carol").path))
+        XCTAssertEqual(fixture.run(["rename"]).code, 2)
+        XCTAssertEqual(fixture.run(["rename", "a", "b", "c"]).code, 2)
+        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
+    }
+
+    func testFirstRunInitializesCurrentLoginOnce() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"), markInitialized: false)
+        defer { fixture.cleanup() }
+        let listed = fixture.run(["list"])
+        XCTAssertEqual(listed.code, 0)
+        XCTAssertEqual(listed.output, [
+            "已初始化当前登录: alice  alice@example.com",
+            "* alice  alice@example.com",
+        ])
+        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.tool.initializedFile.path))
+        let profile = try String(contentsOf: fixture.tool.profileURL("alice"), encoding: .utf8)
+        XCTAssertFalse(profile.contains("refresh"))
+        XCTAssertFalse(profile.contains("go-keyring"))
+
+        let rejected = try Fixture(blob: makeBlob(email: "a+b@example.com"), markInitialized: false)
+        defer { rejected.cleanup() }
+        let rejectedRun = rejected.run(["current"])
+        XCTAssertEqual(rejectedRun.code, 1)
+        XCTAssertTrue(rejectedRun.errors.joined(separator: "\n").contains("save"))
+        XCTAssertEqual(rejected.keychain.reads, 1)
+        XCTAssertEqual(rejected.run(["list"]).code, 0)
+        XCTAssertEqual(rejected.keychain.reads, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rejected.tool.profileURL("a+b").path))
+
+        let missing = try Fixture(blob: makeBlob(email: "alice@example.com"), markInitialized: false)
+        defer { missing.cleanup() }
+        missing.keychain.missing = true
+        let empty = missing.run(["list"])
+        XCTAssertEqual(empty.code, 0)
+        XCTAssertTrue(empty.errors.joined(separator: "\n").contains("没有自动保存"))
+        XCTAssertEqual(empty.output, ["还没有保存的账号。先在 agy 里登录，再执行 agy-cs save <名字>。"])
+        XCTAssertEqual(missing.keychain.reads, 1)
+        XCTAssertEqual(missing.run(["help"]).code, 0)
+        XCTAssertEqual(missing.keychain.reads, 1)
+
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let denied = ExplodingKeychain()
+        let first = runCommand(args: ["help"], keychain: denied, home: home, markInitialized: false)
+        XCTAssertEqual(first.code, 1)
+        XCTAssertEqual(denied.reads, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".agy-cs/initialized").path))
+        let second = runCommand(args: ["help"], keychain: denied, home: home, markInitialized: false)
+        XCTAssertEqual(second.code, 1)
+        XCTAssertEqual(denied.reads, 4)
+    }
+}
+
+private final class MemoryKeychain: KeychainStoring {
+    var blob: String
+    var writes: [String] = []
+    var reads = 0
+
+    init(_ blob: String) {
+        self.blob = blob
+    }
+
+    var missing = false
+
+    func readBlob() throws -> String {
+        reads += 1
+        if missing {
+            throw AccountFailure(.keychainMissing)
+        }
+        return blob
+    }
+
+    func writeBlob(_ blob: String) throws {
+        writes.append(blob)
+        self.blob = blob
+        missing = false
+    }
+
+    func deleteBlob() throws {
+        missing = true
+    }
+}
+
+private final class ExplodingKeychain: KeychainStoring {
+    var reads = 0
+
+    func readBlob() throws -> String {
+        reads += 1
+        reads += 1
+        throw AccountFailure(.keychainDenied)
+    }
+
+    func writeBlob(_ blob: String) throws {
+        throw AccountFailure(.writeMismatch)
+    }
+
+    func deleteBlob() throws {
+        throw AccountFailure(.keychainDenied)
+    }
+}
+
+private final class FixedProcesses: ProcessListing {
+    var pids: [Int] = []
+
+    func runningAgyPIDs() -> [Int] {
+        pids
+    }
+}
+
+private struct CommandResult {
+    var code: Int32
+    var output: [String]
+    var errors: [String]
+}
+
+private final class ScriptedTerminal: LineReading {
+    var isInteractive: Bool
+    var lines: [String]
+
+    init(isInteractive: Bool = false, lines: [String] = []) {
+        self.isInteractive = isInteractive
+        self.lines = lines
+    }
+
+    func readLine() -> String? {
+        guard !lines.isEmpty else {
+            return nil
+        }
+        return lines.removeFirst()
+    }
+}
+
+private final class ScriptedLauncher: AgyLaunching {
+    var started = 0
+    var supply: (() -> Void)?
+    var failure: AccountFailure?
+
+    func runUntilLoggedIn(_ poll: () throws -> ObservedLogin?) throws -> LoginWatchResult {
+        if let failure {
+            throw failure
+        }
+        supply?()
+        if let observed = try poll() {
+            return .loggedIn(observed)
+        }
+        return .exited
+    }
+
+    func startInCurrentTerminal() throws {
+        started += 1
+    }
+}
+
+private final class Fixture {
+    let home: URL
+    let keychain: MemoryKeychain
+    let processes = FixedProcesses()
+    let terminal = ScriptedTerminal()
+    let launcher = ScriptedLauncher()
+    let locations: AccountLocations
+    let tool: ToolLocations
+    let quota: URL
+    let conversation: URL
+
+    init(blob: String, markInitialized: Bool = true) throws {
+        home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        keychain = MemoryKeychain(blob)
+        locations = AccountLocations(home: home)
+        tool = ToolLocations(home: home)
+        try FileManager.default.createDirectory(at: tool.root, withIntermediateDirectories: true)
+        try Data("zh-Hans\n".utf8).write(to: tool.languageFile)
+        if markInitialized {
+            try Data("1\n".utf8).write(to: tool.initializedFile)
+        }
+        quota = locations.quotaCache
+        conversation = home
+            .appendingPathComponent(".gemini/antigravity-cli/conversations/keep.txt")
+        try FileManager.default.createDirectory(
+            at: quota.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{}".utf8).write(to: quota)
+        try FileManager.default.createDirectory(
+            at: conversation.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("keep".utf8).write(to: conversation)
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    func run(_ args: [String]) -> CommandResult {
+        let capture = Capture()
+        let code = AgyAccountCLI.run(
+            args,
+            home: home,
+            keychain: keychain,
+            processes: processes,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            terminal: terminal,
+            launcher: launcher,
+            stdout: { capture.output.append($0) },
+            stderr: { capture.errors.append($0) }
+        )
+        return CommandResult(code: code, output: capture.output, errors: capture.errors)
+    }
+}
+
+private final class Capture {
+    var output: [String] = []
+    var errors: [String] = []
+}
+
+private func makeBlob(email: String, refresh: String = "refresh-token", expiry: String = "2026-01-01T00:00:00Z") -> String {
+    let object: [String: Any] = [
+        "id_token_email": email,
+        "auth_method": "consumer",
+        "token": [
+            "refresh_token": refresh,
+            "access_token": "access-token",
+            "expiry": expiry,
+        ],
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return "go-keyring-base64:" + data.base64EncodedString()
+}
+
+private func runCommand(
+    args: [String],
+    keychain: any KeychainStoring,
+    preferred: [String] = ["zh-Hans"],
+    home: URL? = nil,
+    markInitialized: Bool = true
+) -> CommandResult {
+    let root = home ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let directory = root.appendingPathComponent(".agy-cs", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    if markInitialized {
+        try? Data("1\n".utf8).write(to: directory.appendingPathComponent("initialized"))
+    }
+    let capture = Capture()
+    let code = AgyAccountCLI.run(
+        args,
+        home: root,
+        keychain: keychain,
+        processes: FixedProcesses(),
+        now: { "2026-01-01T00:00:00Z" },
+        preferredLanguages: preferred,
+        terminal: ScriptedTerminal(),
+        launcher: ScriptedLauncher(),
+        stdout: { capture.output.append($0) },
+        stderr: { capture.errors.append($0) }
+    )
+    return CommandResult(code: code, output: capture.output, errors: capture.errors)
+}
+
+private func mode(_ url: URL) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let value = attributes[.posixPermissions] as? NSNumber
+    return (value?.intValue ?? -1) & 0o777
+}
