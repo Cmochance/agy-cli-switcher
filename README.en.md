@@ -1,14 +1,36 @@
-[简体中文](README.md)
-
 # agy-cli-switcher
 
-Switch Antigravity CLI (`agy`) logins on macOS. The command is `agy-cs`.
+<p align="center">
+  <a href="README.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="documents/CHANGELOG.md">Changelog</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Cmochance/agy-cli-switcher/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Cmochance/agy-cli-switcher?style=social"></a>
+  <a href="LICENSE.txt"><img alt="License" src="https://img.shields.io/github/license/Cmochance/agy-cli-switcher"></a>
+  <a href="https://www.swift.org/"><img alt="Swift" src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white"></a>
+  <a href="https://developer.apple.com/macos/"><img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white"></a>
+</p>
+
+**agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. The command is `agy-cs`.
+
+Current version **v0.1.0** (see [Changelog](documents/CHANGELOG.md)).
+
+## What it does
+
+- Switch between `agy` logins, and keep the name, email, and active record
+- `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal
+- `agy-cs switch <name>` only switches. It does not start `agy`
+- On the first run, when no account is recorded yet, read the current login once and save it under the characters before `@`
+- Switching to another email deletes `~/.gemini/antigravity-cli/.quota_cache.json`. `~/.gemini/antigravity-cli/conversations` stays in place
+- With no language chosen, the interface follows the system language. Codes: `zh-Hans`, `zh-Hant`, `en`, `ja`
+
+## Quick start
 
 Requires macOS 13 and Swift from Xcode or the Command Line Tools.
 
-## Install
-
-```sh
+```bash
 git clone https://github.com/Cmochance/agy-cli-switcher.git
 cd agy-cli-switcher
 make install
@@ -16,14 +38,18 @@ make install
 
 `make install` builds the release binary and points `~/.local/bin/agy-cs` at `build/agy-cs` in this checkout. The terminal needs that directory on `PATH`:
 
-```sh
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+1. Run `agy-cs` to see saved accounts
+2. Run `agy-cs switch` to choose an account, or to sign in to a new one
+3. Run `agy-cs help` to see every command
 
 ## Commands
 
 | Command | What it does |
-| --- | --- |
+|---|---|
 | `agy-cs` | List saved accounts |
 | `current` | Show the recorded email |
 | `list` | List saved accounts. `ls` is the same |
@@ -37,32 +63,29 @@ export PATH="$HOME/.local/bin:$PATH"
 | `language` | Show or change the interface language. `lg` is the same |
 | `help` | Show every command |
 
-With no language chosen, `agy-cs` follows the system language. Codes: `zh-Hans`, `zh-Hant`, `en`, `ja`.
-
-On the first run, when no account is recorded yet, `agy-cs` reads the current login once and saves it under the characters before `@`. Later runs do not read the login just to list accounts.
-
-Switching to another email deletes `~/.gemini/antigravity-cli/.quota_cache.json`. `~/.gemini/antigravity-cli/conversations` is left in place.
-
 ## Where data lives
 
 | Location | Contents |
-| --- | --- |
+|---|---|
 | `~/.agy-cs/` | Names, emails, the active record, and the language. No login secrets |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
 | One generic password in the login keychain, service `gemini`, account `antigravity` | The current login. A switch replaces only this item |
 
 Directories are mode `700`. Files are mode `600`.
 
-## Edit the interface text
+## Interface text
 
 The four languages live in [`Sources/AgyAccount/i18n`](Sources/AgyAccount/i18n). Edit the txt file directly. The format is in that directory's `README.md`. Then run `make install`.
 
-## Tests
+## Local development
 
-```sh
-make test
+```bash
+make test       # swift test --disable-sandbox
+make install    # rebuild and update ~/.local/bin/agy-cs
 ```
 
 `make test` runs `swift test --disable-sandbox`.
 
-History is in [documents/CHANGELOG.md](documents/CHANGELOG.md). License: [MIT](LICENSE.txt).
+## License
+
+MIT License. Full text: [LICENSE.txt](LICENSE.txt).
