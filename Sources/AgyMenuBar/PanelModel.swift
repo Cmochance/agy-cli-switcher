@@ -30,23 +30,20 @@ final class PanelModel: ObservableObject {
     @Published private(set) var prompt: PanelPrompt?
     @Published var draft = ""
 
-    // 面板所在的窗口。面板是不是开着，看它是不是显示着。
-    weak var window: NSWindow?
-
     private let board: AccountBoard
     private let executable: String
     private let open: (URL) -> Bool
     private let rereadEvery: TimeInterval
-    private let shown: (() -> Bool)?
+    private let shown: @MainActor () -> Bool
     private let work = DispatchQueue(label: "agy-cs.panel", qos: .userInitiated)
     private var watcher: Timer?
 
-    // shown 只给测试用：不接真窗口时，由它说面板是不是开着。
+    // shown 说面板现在是不是开着。
     init(
         board: AccountBoard = AccountBoard(),
         executable: String = Bundle.main.executablePath ?? CommandLine.arguments[0],
         rereadEvery: TimeInterval = 2,
-        shown: (() -> Bool)? = nil,
+        shown: @escaping @MainActor () -> Bool = { false },
         open: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
     ) {
         self.board = board
@@ -69,10 +66,15 @@ final class PanelModel: ObservableObject {
         state.text.line(key, argumentList: arguments)
     }
 
+    // 名字是给命令行选账号用的，面板上只显示邮箱。同一个邮箱存了几个名字时才带上名字，不然这几行分不出来。
+    func showsName(_ row: AccountRow) -> Bool {
+        state.rows.filter { $0.email == row.email }.count > 1
+    }
+
     // 面板打开期间每两秒重读一次记录：切换之后的额度查询在另一个进程里，查完才写进来。
     func panelOpened() {
         reload()
-        guard watcher == nil, shown != nil || window != nil else {
+        guard watcher == nil else {
             return
         }
         watcher = Timer.scheduledTimer(withTimeInterval: rereadEvery, repeats: true) { [weak self] _ in
@@ -229,12 +231,16 @@ final class PanelModel: ObservableObject {
             || fresh.language != state.language
     }
 
-    // 面板关掉之后停止重读，做成了的那句话不留到下次打开；没做成的留着。
     private func tick() {
-        if shown?() ?? (window?.isVisible == true) {
+        if shown() {
             reload()
-            return
+        } else {
+            panelClosed()
         }
+    }
+
+    // 面板关掉之后停止重读，做成了的那句话不留到下次打开；没做成的留着。
+    func panelClosed() {
         watcher?.invalidate()
         watcher = nil
         guard busy == nil else {

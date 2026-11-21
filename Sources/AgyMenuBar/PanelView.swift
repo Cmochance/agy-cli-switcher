@@ -19,27 +19,17 @@ struct PanelView: View {
             }
         }
         .frame(width: 420)
-        .background(WindowReader { window in
-            model.window = window
-            if window != nil {
-                model.panelOpened()
-            }
-        })
-        .onAppear { model.panelOpened() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            if let window = note.object as? NSWindow, window === model.window {
-                model.panelOpened()
-            }
-        }
     }
 
     @ViewBuilder private var accounts: some View {
-        let rows = VStack(spacing: 2) {
-            ForEach(model.state.rows) { row in
-                AccountRowView(row: row, model: model)
+        let rows = VStack(spacing: 0) {
+            ForEach(Array(model.state.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 {
+                    Divider()
+                }
+                AccountRowView(row: row, showsName: model.showsName(row), model: model)
             }
         }
-        .padding(6)
         if model.state.rows.isEmpty {
             Text(model.text(.panelNoAccounts))
                 .foregroundStyle(.secondary)
@@ -125,6 +115,7 @@ struct PanelView: View {
 
 private struct AccountRowView: View {
     var row: AccountRow
+    var showsName: Bool
     @ObservedObject var model: PanelModel
     @State private var hovering = false
 
@@ -142,13 +133,15 @@ private struct AccountRowView: View {
                         .foregroundStyle(row.isCurrent ? Color.accentColor : Color.secondary.opacity(0.5))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(row.name)
-                                .fontWeight(.semibold)
-                                .lineLimit(1)
                             Text(row.email)
-                                .foregroundStyle(.secondary)
+                                .fontWeight(.medium)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                            if showsName {
+                                Text(row.name)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
                             Spacer(minLength: 4)
                             if let usage = row.usage {
                                 Text(usage.plan)
@@ -192,12 +185,9 @@ private struct AccountRowView: View {
             .fixedSize()
             .disabled(model.busy != nil)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(hovering && selectable ? Color.primary.opacity(0.08) : Color.clear)
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(hovering && selectable ? Color.primary.opacity(0.08) : Color.clear)
         .onHover { hovering = $0 }
     }
 }
@@ -257,29 +247,5 @@ private struct PromptView: View {
             }
         }
         .padding(10)
-    }
-}
-
-// 面板所在的窗口。用它判断面板是不是还开着。
-private struct WindowReader: NSViewRepresentable {
-    var found: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> WindowProbe {
-        let probe = WindowProbe()
-        probe.found = found
-        return probe
-    }
-
-    func updateNSView(_ probe: WindowProbe, context: Context) {
-        probe.found = found
-    }
-}
-
-private final class WindowProbe: NSView {
-    var found: (NSWindow?) -> Void = { _ in }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        found(window)
     }
 }

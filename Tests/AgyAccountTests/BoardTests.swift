@@ -338,7 +338,9 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(active(), "work")
 
         // 同一个登录存了两个名字：两行都打勾，点另一行把它记成当前项，不改钥匙串。
+        // 面板上平时只显示邮箱，这两行邮箱一样，所以带上名字。
         XCTAssertEqual(model.state.rows.map(\.isCurrent), [true, false, true])
+        XCTAssertEqual(model.state.rows.map(model.showsName), [true, false, true])
         let writes = fixture.keychain.writes
         model.switchTo(model.state.rows[0])
         await settle(model)
@@ -394,10 +396,6 @@ final class BoardTests: XCTestCase {
         await wait { model.state.rows.map(\.name) == ["alice", "bobby"] }
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bobby"])
 
-        // 不知道面板在哪个窗口里时不计时：只在打开的那一下读一次。
-        let detached = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0.05, open: { _ in true })
-        detached.panelOpened()
-
         model.switchTo(model.state.rows[0])
         await settle(model)
         XCTAssertFalse(model.messages.isEmpty)
@@ -416,7 +414,6 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.run(["rename", "bobby", "bob"]).code, 0)
         try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bobby"])
-        XCTAssertEqual(detached.state.rows.map(\.name), ["alice", "bobby"])
 
         // 没做成的那句话留到下次打开。
         model.ask(.save)
@@ -428,6 +425,67 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(model.showsFailure)
         XCTAssertFalse(model.messages.isEmpty)
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob"])
+    }
+
+    // 面板的大小跟着内容走：多出几行提示时变高，提示没了、面板关着的时候也要变回去，
+    // 不然再打开时内容上下各空出一条。
+    @MainActor
+    func testPopoverFollowsTheContentAndTellsThePanelWhenItOpensAndCloses() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        _ = NSApplication.shared
+        var asked = 0
+        let controller = MenuBarController { shown in
+            PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0.05, shown: {
+                asked += 1
+                return shown()
+            }, open: { _ in true })
+        }
+        let model = controller.model
+        let host = try XCTUnwrap(controller.popover.contentViewController)
+        XCTAssertNil(controller.item)
+        XCTAssertFalse(controller.popover.isShown)
+
+        // 面板还没点开过：内容放进一个不显示的窗口里量。
+        let window = NSWindow(contentViewController: host)
+        defer { window.close() }
+        func height() async -> CGFloat {
+            for _ in 0 ..< 20 {
+                host.view.layoutSubtreeIfNeeded()
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            return host.preferredContentSize.height
+        }
+        let plain = await height()
+        XCTAssertEqual(host.preferredContentSize.width, 420)
+        XCTAssertGreaterThan(plain, 80)
+
+        model.switchTo(model.state.rows[0])
+        await settle(model)
+        XCTAssertEqual(model.lines.count, 2)
+        let taller = await height()
+        XCTAssertGreaterThan(taller, plain + 20)
+
+        model.ask(.rename(model.state.rows[0]))
+        let tallest = await height()
+        XCTAssertGreaterThan(tallest, taller + 20)
+
+        controller.popoverWillShow(Notification(name: NSPopover.willShowNotification))
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertGreaterThan(asked, 0)
+        XCTAssertNil(model.prompt)
+        XCTAssertEqual(model.lines, [])
+        let back = await height()
+        XCTAssertEqual(back, plain)
+
+        model.ask(.save)
+        controller.popoverDidClose(Notification(name: NSPopover.didCloseNotification))
+        XCTAssertNil(model.prompt)
+        let closed = await height()
+        XCTAssertEqual(closed, plain)
     }
 
     // 把面板画成图片，用来在改界面之后看一眼：
@@ -485,6 +543,11 @@ final class BoardTests: XCTestCase {
         model.setLanguage("en")
         await settle(model)
         try picture(PanelView(model: model), to: output.appendingPathComponent("7-english.png"))
+        XCTAssertEqual(fixture.run(["save", "second-name"]).code, 0)
+        try picture(
+            PanelView(model: PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })),
+            to: output.appendingPathComponent("9-same-login-twice.png")
+        )
 
         let empty = try Fixture(blob: makeBlob(email: "nobody@example.com"))
         defer { empty.cleanup() }

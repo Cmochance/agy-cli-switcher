@@ -95,7 +95,7 @@ Both downloads can be checked against `SHA256SUMS.txt` from the same page: `shas
 
 Click the icon in the menu bar to open the panel.
 
-- Each row is one saved account: name, email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked
+- Each row is one saved account: email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
 - Click a row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
