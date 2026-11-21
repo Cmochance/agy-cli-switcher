@@ -11,10 +11,12 @@ struct ToolLocations {
     var usageStatusFile: URL
     var usageLockFile: URL
     var addCommandFile: URL
+    var orderFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
         addCommandFile = root.appendingPathComponent("add-account.command")
+        orderFile = root.appendingPathComponent("order")
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
         usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
         clientFile = root.appendingPathComponent("agy-client.json")
@@ -71,7 +73,21 @@ struct ToolProfile {
             }
             found.append(name)
         }
-        return found.sorted()
+        // 记过顺序的名字按记下的顺序在前，没记过的按字母顺序接在后面。
+        let placed = order().filter(found.contains)
+        return placed + found.sorted().filter { !placed.contains($0) }
+    }
+
+    func setOrder(_ names: [String]) throws {
+        try AtomicFile.write(locations.orderFile, names.map { $0 + "\n" }.joined())
+    }
+
+    private func order() -> [String] {
+        guard let text = try? readText(locations.orderFile) else {
+            return []
+        }
+        var seen = Set<String>()
+        return text.split(whereSeparator: \.isNewline).map(String.init).filter { seen.insert($0).inserted }
     }
 
     func read(_ name: String) throws -> LoginMeta {
@@ -83,7 +99,11 @@ struct ToolProfile {
         return LoginMeta(email: record.email, authMethod: record.authMethod, expiry: record.expiry)
     }
 
-    func write(name: String, meta: LoginMeta, savedAt: String? = nil) throws {
+    // 已经记过顺序时，新名字接在最后，先存的在前。还没记过顺序时不记，照旧按字母顺序。
+    // 改名自己安排位置，不走这一步（placing 为 false）。
+    func write(name: String, meta: LoginMeta, savedAt: String? = nil, placing: Bool = true) throws {
+        let isNew = !manager.fileExists(atPath: locations.profileURL(name).path)
+        let earlier = placing && isNew && manager.fileExists(atPath: locations.orderFile.path) ? names() : nil
         let sidecar = encodeSidecar(
             name: name,
             email: meta.email,
@@ -92,6 +112,9 @@ struct ToolProfile {
             savedAt: savedAt ?? now()
         )
         try AtomicFile.write(locations.profileURL(name), sidecar)
+        if let earlier {
+            try? setOrder(earlier + [name])
+        }
     }
 
     func setActive(_ name: String) throws {
@@ -190,6 +213,11 @@ struct ToolProfile {
             }
         }
         try? manager.removeItem(at: locations.usageURL(name))
+        // 删掉的名字不留在顺序里：以后再存一个同名的账号，不该占着原来的位置。
+        let listed = order()
+        if listed.contains(name) {
+            try? setOrder(listed.filter { $0 != name })
+        }
         if activeName() == name, manager.fileExists(atPath: locations.activeFile.path) {
             do {
                 try manager.removeItem(at: locations.activeFile)

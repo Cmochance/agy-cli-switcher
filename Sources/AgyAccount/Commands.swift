@@ -11,6 +11,7 @@ enum AccountCommandKind {
     case refreshQuota
     case refreshQuotaDetached
     case rename(from: String?, to: String)
+    case move(String, to: String)
     case remove(String, force: Bool, expecting: String?)
     case help
     case languageShow
@@ -86,6 +87,8 @@ struct AccountCommands {
             refresher.spawnWorker()
         case .rename(let from, let to):
             try rename(from: from, to: to)
+        case .move(let name, let position):
+            try move(name, to: position)
         case .remove(let name, let force, let expecting):
             try remove(name, force: force, expecting: expecting)
         case .help:
@@ -313,7 +316,9 @@ struct AccountCommands {
         let savedAt = profile.savedAt(source)
         let profileWasActive = profile.activeName() == source
         let filesWereActive = files.activeName() == source
-        try profile.write(name: target, meta: meta, savedAt: savedAt)
+        // 改名之后这个账号留在原来的位置。没记过顺序时它原来按字母排，新名字会排到别处，所以这里把顺序记下来。
+        let sequence = profile.names().map { $0 == source ? target : $0 }
+        try profile.write(name: target, meta: meta, savedAt: savedAt, placing: false)
         do {
             try files.renameSaved(from: source, to: target, meta: meta, savedAt: savedAt)
         } catch {
@@ -322,6 +327,7 @@ struct AccountCommands {
         }
         try profile.deleteRecord(source)
         profile.moveUsage(from: source, to: target)
+        try? profile.setOrder(sequence)
         if profileWasActive {
             try profile.setActive(target)
         }
@@ -329,6 +335,22 @@ struct AccountCommands {
             try files.setActive(target)
         }
         stdout(text.line(.renamed, source, target, meta.email))
+    }
+
+    // 把一个账号移到列表的第几位。list、不带名字的 switch 和 next 都按这个顺序。只改 ~/.agy-cs/order。
+    private func move(_ name: String, to position: String) throws {
+        let checked = try checkName(name)
+        var names = profile.names()
+        guard let from = names.firstIndex(of: checked) else {
+            throw missingAccount(checked)
+        }
+        guard let place = Int(position), (1 ... names.count).contains(place) else {
+            throw AccountFailure(.moveBadPosition, String(names.count))
+        }
+        names.remove(at: from)
+        names.insert(checked, at: place - 1)
+        try profile.setOrder(names)
+        stdout(text.line(.moved, checked, String(place)))
     }
 
     private func current() throws {

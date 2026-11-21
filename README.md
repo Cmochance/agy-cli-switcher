@@ -95,8 +95,9 @@ export PATH="$HOME/.local/bin:$PATH"
 
 点菜单栏上的图标打开面板。
 
-- 每行是一个已保存的账号：名字、邮箱、套餐，以及 5h、7d、Argon 额度。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾
+- 每行是一个已保存的账号：邮箱、套餐，以及 5h、7d、Argon 额度。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾，并在邮箱后面带上名字
 - 点一行就切换过去，和 `agy-cs switch <名字>` 一样，只切换，不启动 `agy`
+- 按住一行上下拖可以调整顺序，和 `agy-cs move <名字> <位置>` 一样
 - 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
 - “新增账号…”打开终端执行 `agy-cs switch add`，在那里登录。登录完再点开面板就能看到新账号
@@ -119,6 +120,7 @@ export PATH="$HOME/.local/bin:$PATH"
 | `refresh quota` | 重新查询所有已保存账号的套餐和额度，然后列出来 |
 | `rename <新名字>` | 把当前账号改名 |
 | `rename <旧名字> <新名字>` | 把指定账号改名 |
+| `move <名字> <位置>` | 把账号移到列表的第几位，1 是最前面。`ls`、`switch` 的选择、`next` 和菜单栏面板都按这个顺序 |
 | `rm <名字>` | 删除一个已保存的副本，不改当前登录 |
 | `language` | 显示或切换界面语言。`lg` 相同 |
 | `help` | 显示全部指令 |
@@ -143,7 +145,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 位置 | 内容 |
 |---|---|
-| `~/.agy-cs/` | 名字、邮箱、当前项、语言，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里，里面只有一行启动 `agy-cs switch add` 的指令 |
+| `~/.agy-cs/` | 名字、邮箱、当前项、顺序、语言，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里，里面只有一行启动 `agy-cs switch add` 的指令 |
 | `~/.gemini/antigravity-cli/accounts/` | `agy` 自己的登录副本 |
 | 登录钥匙串里的一条 generic password，service 是 `gemini`，account 是 `antigravity` | 当前登录。切换时只替换这一条 |
 

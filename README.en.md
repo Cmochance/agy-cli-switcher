@@ -95,8 +95,9 @@ Both downloads can be checked against `SHA256SUMS.txt` from the same page: `shas
 
 Click the icon in the menu bar to open the panel.
 
-- Each row is one saved account: name, email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked
+- Each row is one saved account: email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
 - Click a row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
+- Press a row and drag it up or down to change the order. This is the same as `agy-cs move <name> <position>`
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
@@ -119,6 +120,7 @@ Click the icon in the menu bar to open the panel.
 | `refresh quota` | Look up the plan and quota of every saved account again, then list them |
 | `rename <new>` | Rename the current account |
 | `rename <old> <new>` | Rename one saved account |
+| `move <name> <position>` | Move an account to that position in the list. 1 is the top. `ls`, the `switch` menu, `next` and the menu bar panel all follow this order |
 | `rm <name>` | Delete a saved copy. The current login stays |
 | `language` | Show or change the interface language. `lg` is the same |
 | `help` | Show every command |
@@ -143,7 +145,7 @@ Click the icon in the menu bar to open the panel.
 
 | Location | Contents |
 |---|---|
-| `~/.agy-cs/` | Names, emails, the active record, the language, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", is here too; it holds one line that starts `agy-cs switch add` |
+| `~/.agy-cs/` | Names, emails, the active record, the order, the language, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", is here too; it holds one line that starts `agy-cs switch add` |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
 | One generic password in the login keychain, service `gemini`, account `antigravity` | The current login. A switch replaces only this item |
 

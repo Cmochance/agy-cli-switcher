@@ -17,6 +17,7 @@
   refresh quota                重新查询所有已保存账号的套餐和额度，然后列出来
   rename <新名字>              把当前账号改名为新名字，不打开钥匙串
   rename <旧名字> <新名字>     把账号旧名字改名为新名字，不打开钥匙串
+  move <名字> <位置>           把账号移到列表的第几位，1 是最前面
   rm <名字>                    删除一个已保存的副本，不改当前钥匙串登录
   rm <名字> --force            当前记录只剩这一份副本时，确认后删除
   language, lg                 显示当前语言
@@ -26,7 +27,7 @@
 help、-h、--help 都显示这份说明。
 没指定语言时跟随系统。代码: zh-Hans 简体中文、zh-Hant 繁體中文、en English、ja 日本語。
 首次安装且还没有账号记录时，会读取一次钥匙串，用邮箱 @ 前面的字符保存当前登录。
-之后 current、list、rm、rename、language、help 只读 ~/.agy-cs/ 里的非密钥记录。
+之后 current、list、rm、rename、move、language、help 只读 ~/.agy-cs/ 里的非密钥记录。
 save、switch、next，以及上面这次初始化，才会读取钥匙串。密钥副本仍在 ~/.gemini/antigravity-cli/accounts/。
 switch、next 和新增账号成功之后，会另起一个后台进程联网查询每个账号的套餐和额度，记在 ~/.agy-cs/usage/。切换不等它，也不受它影响。
 list 只显示这些记录，不联网；过了重置时间的额度按 100% 显示。refresh quota 立刻查一次，不读钥匙串。
@@ -337,3 +338,12 @@ rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
 
 [saveWouldReplace]
 名字 %1 下面已经存着 %2，所以没有保存。确认用当前登录替换它，再用 agy-cs save %1 --force。
+
+[moveNeedsNameAndPosition]
+move 需要一个名字和一个位置。例如 agy-cs move work 1 把 work 移到最前面。
+
+[moveBadPosition]
+位置要写 1 到 %1 之间的数字。
+
+[moved]
+已把 %1 移到第 %2 位

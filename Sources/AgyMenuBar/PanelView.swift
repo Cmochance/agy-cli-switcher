@@ -1,13 +1,31 @@
 import AgyAccount
 import SwiftUI
 
+private struct RowFrames: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
 struct PanelView: View {
     @ObservedObject var model: PanelModel
+    @State private var frames: [String: CGRect] = [:]
+    @State private var drag: RowDrag?
+
+    private let list = "rows"
+
+    // dragging 只给画图的测试用：把面板画成正拖着一行的样子。
+    init(model: PanelModel, dragging: RowDrag? = nil) {
+        self.model = model
+        _drag = State(initialValue: dragging)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             accounts
-            if model.busy != nil || !model.lines.isEmpty {
+            if model.isWorking || !model.lines.isEmpty {
                 Divider()
                 status
             }
@@ -19,27 +37,40 @@ struct PanelView: View {
             }
         }
         .frame(width: 420)
-        .background(WindowReader { window in
-            model.window = window
-            if window != nil {
-                model.panelOpened()
-            }
-        })
-        .onAppear { model.panelOpened() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            if let window = note.object as? NSWindow, window === model.window {
-                model.panelOpened()
-            }
-        }
     }
 
     @ViewBuilder private var accounts: some View {
-        let rows = VStack(spacing: 2) {
-            ForEach(model.state.rows) { row in
-                AccountRowView(row: row, model: model)
+        // 分隔线画在每一行自己的上沿，这样行和行是挨着的，拖动时好算位置。
+        let rows = VStack(spacing: 0) {
+            ForEach(Array(model.state.rows.enumerated()), id: \.element.id) { index, row in
+                let lifted = drag?.index == index
+                AccountRowView(
+                    row: row,
+                    showsName: model.showsName(row),
+                    lifted: lifted,
+                    model: model,
+                    pressed: { pressed(at: index, moved: $0) },
+                    released: { released(row, at: index, moved: $0) }
+                )
+                    .overlay(alignment: .top) {
+                        if index > 0, !lifted {
+                            Divider()
+                        }
+                    }
+                    .offset(y: drag.map { lifted ? $0.offset : $0.shift(of: index) } ?? 0)
+                    // 量位置放在 offset 之后：量到的是这一行排版上的位置，不带拖动时挪开的那一段。
+                    // 带着那一段量的话，把一行拖到列表尽头松手时，让开后的位置和重排后的位置一模一样，
+                    // 收不到“位置变了”，下一次拖动就按旧位置算（测试里撞到过）。
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: RowFrames.self, value: [row.id: proxy.frame(in: .named(list))])
+                    })
+                    .zIndex(lifted ? 1 : 0)
+                    // 松手的那一下不带动画：顺序已经换好，让开的行直接落在新位置上。
+                    .animation(lifted || drag == nil ? nil : .easeOut(duration: 0.15), value: drag?.target)
             }
         }
-        .padding(6)
+        .coordinateSpace(name: list)
+        .onPreferenceChange(RowFrames.self) { frames = $0 }
         if model.state.rows.isEmpty {
             Text(model.text(.panelNoAccounts))
                 .foregroundStyle(.secondary)
@@ -53,9 +84,42 @@ struct PanelView: View {
         }
     }
 
+    // 按住一行上下拖：这一行跟着鼠标走，别的行让开，松手后按新的顺序记下来。
+    // 点击和拖动是同一个手势，松手时看鼠标走了多远：上下走出 6 个点算拖动，几乎没动算点击。
+    private let slack: CGFloat = 6
+
+    private func pressed(at index: Int, moved: CGSize) {
+        if drag == nil {
+            let ordered = model.state.rows.compactMap { frames[$0.id] }
+            guard abs(moved.height) >= slack, model.busy == nil, ordered.count > 1,
+                  ordered.count == model.state.rows.count
+            else {
+                return
+            }
+            drag = RowDrag(index: index, frames: ordered)
+        }
+        if drag?.index == index {
+            drag?.translation = moved.height
+        }
+    }
+
+    private func released(_ row: AccountRow, at index: Int, moved: CGSize) {
+        if var finished = drag {
+            guard finished.index == index else {
+                return
+            }
+            // 松手的位置可能比最后一次拖动又走了一段。
+            finished.translation = moved.height
+            drag = nil
+            model.move(row, to: finished.target)
+        } else if abs(moved.height) < slack, abs(moved.width) < slack {
+            model.switchTo(row)
+        }
+    }
+
     private var status: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let busy = model.busy {
+            if let busy = model.busyLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -119,36 +183,44 @@ struct PanelView: View {
             .fixedSize()
         }
         .padding(10)
-        .disabled(model.busy != nil)
+        .disabled(model.isWorking)
     }
 }
 
 private struct AccountRowView: View {
     var row: AccountRow
+    var showsName: Bool
+    // 正被按住拖着走。
+    var lifted: Bool
     @ObservedObject var model: PanelModel
+    // 鼠标按着移动时、松开时各调用一次，参数是从按下的地方走了多远。
+    var pressed: (CGSize) -> Void
+    var released: (CGSize) -> Void
     @State private var hovering = false
 
     private var selectable: Bool {
-        model.busy == nil
+        !model.isWorking
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
-            Button {
-                model.switchTo(row)
-            } label: {
+            // 点一下切换，按住上下拖是排序。这里不用按钮：按钮会把按下的鼠标吃掉，这一行就拖不动了。
+            // 走了多远按屏幕上的位置算，不能按这一行自己的位置算，它正跟着鼠标动。
+            Group {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: row.isCurrent ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(row.isCurrent ? Color.accentColor : Color.secondary.opacity(0.5))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(row.name)
-                                .fontWeight(.semibold)
-                                .lineLimit(1)
                             Text(row.email)
-                                .foregroundStyle(.secondary)
+                                .fontWeight(.medium)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                            if showsName {
+                                Text(row.name)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
                             Spacer(minLength: 4)
                             if let usage = row.usage {
                                 Text(usage.plan)
@@ -175,8 +247,28 @@ private struct AccountRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .allowsHitTesting(selectable)
+            .background {
+                // 鼠标走下面的手势。这个看不见的按钮只给键盘用：系统打开“键盘导航”时，Tab 能停在这一行，空格切换。
+                Button {
+                    model.switchTo(row)
+                } label: {
+                    Color.clear
+                }
+                .buttonStyle(.plain)
+                .allowsHitTesting(false)
+                .disabled(!selectable)
+                .accessibilityHidden(true)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { pressed($0.translation) }
+                    .onEnded { released($0.translation) }
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                model.switchTo(row)
+            }
             Menu {
                 Button(model.text(.panelRename)) {
                     model.ask(.rename(row))
@@ -190,14 +282,19 @@ private struct AccountRowView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .disabled(model.busy != nil)
+            .disabled(model.isWorking)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(hovering && selectable ? Color.primary.opacity(0.08) : Color.clear)
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background {
+            if lifted {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+            } else if hovering, selectable {
+                Color.primary.opacity(0.08)
+            }
+        }
         .onHover { hovering = $0 }
     }
 }
@@ -257,29 +354,5 @@ private struct PromptView: View {
             }
         }
         .padding(10)
-    }
-}
-
-// 面板所在的窗口。用它判断面板是不是还开着。
-private struct WindowReader: NSViewRepresentable {
-    var found: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> WindowProbe {
-        let probe = WindowProbe()
-        probe.found = found
-        return probe
-    }
-
-    func updateNSView(_ probe: WindowProbe, context: Context) {
-        probe.found = found
-    }
-}
-
-private final class WindowProbe: NSView {
-    var found: (NSWindow?) -> Void = { _ in }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        found(window)
     }
 }

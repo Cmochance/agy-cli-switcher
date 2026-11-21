@@ -172,6 +172,11 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         throw UsageFailure(.useRenamed)
     case "rename":
         return try parseRename(arguments)
+    case "move":
+        guard arguments.count == 3 else {
+            throw UsageFailure(.moveNeedsNameAndPosition)
+        }
+        return .move(arguments[1], to: arguments[2])
     case "next":
         try rejectExtra(arguments, command: "next")
         return .next

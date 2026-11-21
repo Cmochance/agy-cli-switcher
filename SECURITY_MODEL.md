@@ -42,7 +42,7 @@ Trust boundaries:
 ## Assets and data sensitivity
 - **Critical**: OAuth refresh and access tokens for each Antigravity/Google account (inferred), stored in the keychain blob (`go-keyring-base64:` + base64 JSON) and as plaintext copies in `accounts/*.token`.
 - **High (inferred)**: the integrity of the current login. A failed rollback in `addAccount`/`writeBlob` can lose it.
-- **Low**: emails, account names, auth method, expiry (in `.meta.json` and `~/.agy-cs/accounts/*.json`); plan and quota records, which include the account's Cloud Code project id (`~/.agy-cs/usage/*.json`); the path, size, modification time and version of `agy` and the offset of the working client secret (`~/.agy-cs/agy-client.json`); `~/.agy-cs/add-account.command`, which holds only the path of this executable.
+- **Low**: emails, account names, auth method, expiry (in `.meta.json` and `~/.agy-cs/accounts/*.json`); plan and quota records, which include the account's Cloud Code project id (`~/.agy-cs/usage/*.json`); the path, size, modification time and version of `agy` and the offset of the working client secret (`~/.agy-cs/agy-client.json`); `~/.agy-cs/add-account.command`, which holds only the path of this executable; `~/.agy-cs/order`, the account names in the order chosen with `move`. A line in `order` is used only when it equals the name of an existing record, so nothing in that file becomes a path.
 - `~/.gemini/antigravity-cli/conversations` must never be moved or deleted.
 
 ## Attacker profiles
