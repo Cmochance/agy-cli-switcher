@@ -75,14 +75,92 @@ final class CatalogTests: XCTestCase {
                 XCTAssertTrue(document.contains(token), token)
             }
         }
+        for document in [readme, english] {
+            for token in [
+                "Agy Switcher", "Agy-Switcher.zip", "agy-cs-macos-universal.tar.gz", "SHA256SUMS.txt",
+                "make app", "make dist", "com.apple.quarantine", "Contents/MacOS/agy-cs"
+            ] {
+                XCTAssertTrue(document.contains(token), token)
+            }
+        }
         XCTAssertTrue(makefile.contains("swift test --disable-sandbox"))
         XCTAssertTrue(makefile.contains("ln -sfn"))
-        XCTAssertTrue(makefile.contains("agy-cs_AgyAccount.bundle"))
+        XCTAssertFalse(makefile.contains(".bundle"))
         XCTAssertTrue(makefile.contains("rm -f build/agy-cs"))
         XCTAssertTrue(makefile.contains("codesign --force --sign - build/agy-cs"))
+        for token in [
+            "rm -rf \"$(2)\"", "Packaging/Info.plist", "Packaging/AppIcon.icns", "Contents/MacOS/agy-cs",
+            "for arch in arm64 x86_64", "--arch $$arch", "lipo -create",
+            "agy-cs-macos-universal.tar.gz", "Agy-Switcher.zip", "SHA256SUMS.txt"
+        ] {
+            XCTAssertTrue(makefile.contains(token), token)
+        }
+        // 一次传两个 --arch 在 Xcode 26.6 上编译不过（CI 实测），见 Makefile 里的说明。
+        XCTAssertFalse(makefile.contains("--arch arm64 --arch x86_64"))
         XCTAssertTrue(guide.contains("[saved]"))
         XCTAssertTrue(guide.contains("zh-Hans.txt"))
         XCTAssertTrue(guide.contains("%1"))
+    }
+
+    // 语言文件编在二进制里。按位置找资源包的写法在符号链接和 app 包里都会找不到。
+    func testLanguageFilesAreCompiledIntoTheBinary() throws {
+        let package = try String(contentsOf: repoRoot.appendingPathComponent("Package.swift"), encoding: .utf8)
+        for language in AppLanguage.allCases {
+            XCTAssertTrue(package.contains(".embedInCode(\"i18n/\(language.rawValue).txt\")"), language.rawValue)
+        }
+        XCTAssertFalse(package.contains(".copy("))
+        XCTAssertFalse(package.contains(".process("))
+        let walker = FileManager.default.enumerator(at: repoRoot.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)
+        var checked = 0
+        while let url = walker?.nextObject() as? URL {
+            guard url.pathExtension == "swift" else {
+                continue
+            }
+            checked += 1
+            let source = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertFalse(source.contains("Bundle.module"), url.lastPathComponent)
+        }
+        XCTAssertGreaterThan(checked, 10)
+    }
+
+    func testAppBundleDescriptionMatchesTheCodeAndTheDocuments() throws {
+        let data = try Data(contentsOf: repoRoot.appendingPathComponent("Packaging/Info.plist"))
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        XCTAssertEqual(plist["CFBundleExecutable"] as? String, "agy-cs")
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.cmochance.agy-cs")
+        XCTAssertEqual(plist["CFBundleName"] as? String, "Agy Switcher")
+        XCTAssertEqual(plist["CFBundlePackageType"] as? String, "APPL")
+        XCTAssertEqual(plist["CFBundleIconFile"] as? String, "AppIcon")
+        XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
+        XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "13.0")
+        XCTAssertEqual(plist["LSEnvironment"] as? [String: String], [menuBarMarker: "1"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Packaging/AppIcon.icns").path))
+
+        let version = try XCTUnwrap(plist["CFBundleShortVersionString"] as? String)
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, version)
+        XCTAssertNotNil(version.range(of: #"^\d+\.\d+\.\d+$"#, options: .regularExpression))
+        for name in ["README.md", "README.en.md"] {
+            let document = try String(contentsOf: repoRoot.appendingPathComponent(name), encoding: .utf8)
+            XCTAssertTrue(document.contains("**v\(version)**"), name)
+        }
+        let changelog = try String(contentsOf: repoRoot.appendingPathComponent("documents/CHANGELOG.md"), encoding: .utf8)
+        XCTAssertEqual(changelog.components(separatedBy: "\n").first { $0.hasPrefix("## ") }, "## \(version)")
+    }
+
+    func testReleaseWorkflowStopsAtADraft() throws {
+        let workflows = repoRoot.appendingPathComponent(".github/workflows")
+        let release = try String(contentsOf: workflows.appendingPathComponent("release.yml"), encoding: .utf8)
+        for token in [
+            "tags:", "swift test --disable-sandbox", "make dist", "gh release create", "--draft",
+            "dist/agy-cs-macos-universal.tar.gz", "dist/Agy-Switcher.zip", "dist/SHA256SUMS.txt"
+        ] {
+            XCTAssertTrue(release.contains(token), token)
+        }
+        XCTAssertFalse(release.contains("--latest"))
+        XCTAssertFalse(release.contains("draft=false"))
+        let checks = try String(contentsOf: workflows.appendingPathComponent("ci.yml"), encoding: .utf8)
+        XCTAssertTrue(checks.contains("make dist"))
+        XCTAssertTrue(checks.contains("contents: read"))
     }
 
     func testKeychainContentOnlyGoesThroughTheSecurityTool() throws {

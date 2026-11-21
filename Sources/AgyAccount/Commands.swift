@@ -3,7 +3,7 @@ import Foundation
 enum AccountCommandKind {
     case current
     case list
-    case save(String)
+    case save(String, force: Bool, expecting: String?)
     case choose
     case add
     case change(String)
@@ -11,7 +11,7 @@ enum AccountCommandKind {
     case refreshQuota
     case refreshQuotaDetached
     case rename(from: String?, to: String)
-    case remove(String, force: Bool)
+    case remove(String, force: Bool, expecting: String?)
     case help
     case languageShow
     case languageSet(String)
@@ -70,8 +70,8 @@ struct AccountCommands {
         case .list:
             try list()
             reportFailedRefresh()
-        case .save(let name):
-            try save(name)
+        case .save(let name, let force, let expecting):
+            try save(name, force: force, expecting: expecting)
         case .choose:
             try choose()
         case .add:
@@ -86,8 +86,8 @@ struct AccountCommands {
             refresher.spawnWorker()
         case .rename(let from, let to):
             try rename(from: from, to: to)
-        case .remove(let name, let force):
-            try remove(name, force: force)
+        case .remove(let name, let force, let expecting):
+            try remove(name, force: force, expecting: expecting)
         case .help:
             stdout(text.line(.help))
         case .languageShow:
@@ -244,10 +244,14 @@ struct AccountCommands {
 
     // 后台那次查询没有终端可以报错，所以把结果记下来，在 list 里提示。
     private func reportFailedRefresh() {
-        let failed = failedRefresh()
-        if !failed.isEmpty {
-            stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
+        if let notice = failedRefreshNotice() {
+            stderr(notice)
         }
+    }
+
+    func failedRefreshNotice() -> String? {
+        let failed = failedRefresh()
+        return failed.isEmpty ? nil : text.line(.usageFailed, failed.joined(separator: ", "))
     }
 
     private func failedRefresh() -> [String] {
@@ -335,30 +339,57 @@ struct AccountCommands {
         stdout(try profile.read(name).email)
     }
 
+    // 只读 ~/.agy-cs/ 里的记录，不联网，不读钥匙串。list 和菜单栏面板都从这里取。
+    func listing() throws -> [AccountRow] {
+        let activeEmail = profileEmail(profile.activeName())
+        let moment = parseTimestamp(profile.now()) ?? Date()
+        return try profile.names().compactMap { name in
+            // 面板每两秒读一次，别的进程可能正在改名或删除：列出名字之后、读它之前，这条记录没了就跳过。
+            let meta: LoginMeta
+            do {
+                meta = try profile.read(name)
+            } catch let error as AccountFailure
+                where error.key == .accountMissing || error.key == .accountMissingNone || !profile.names().contains(name)
+            {
+                return nil
+            }
+            return AccountRow(
+                name: name,
+                email: meta.email,
+                isCurrent: !activeEmail.isEmpty && meta.email == activeEmail,
+                usage: profile.readUsage(name, email: meta.email).map { snapshot in
+                    usageText(snapshot, now: moment, timeZone: .current) { text.line(.planUnpaid, $0) }
+                }
+            )
+        }
+    }
+
     private func list() throws {
-        let names = profile.names()
-        if names.isEmpty {
+        let accounts = try listing()
+        if accounts.isEmpty {
             stdout(text.line(.noSavedAccounts))
             return
         }
-        let activeEmail = profileEmail(profile.activeName())
-        let moment = parseTimestamp(profile.now()) ?? Date()
-        var rows: [[String]] = []
-        for name in names {
-            let meta = try profile.read(name)
-            let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            let recorded = profile.readUsage(name, email: meta.email).map { snapshot in
-                usageCells(snapshot, now: moment, timeZone: .current) { text.line(.planUnpaid, $0) }
-            } ?? []
-            rows.append(["\(mark) \(name)", meta.email] + recorded)
+        let rows = accounts.map { account in
+            ["\(account.isCurrent ? "*" : " ") \(account.name)", account.email] + (account.usage?.cells ?? [])
         }
         alignedRows(rows).forEach(stdout)
     }
 
-    private func save(_ name: String) throws {
+    // 名字下面已经存着另一个登录时不替换，那一份保存的登录换掉就找不回来。带 --force 才替换。
+    // expecting 是面板上这个名字下面显示的邮箱：带着它时，--force 只替换这个邮箱存的那一份。
+    private func save(_ name: String, force: Bool, expecting: String?) throws {
         let checked = try checkNewName(name)
         let blob = try readKeychain()
         let meta = try decodeLogin(blob, source: .keychain)
+        if !force || expecting != nil {
+            let replaceable = force ? [expecting].compactMap { $0 } : []
+            do {
+                try checkHolder(of: checked, allowed: [meta.email] + replaceable)
+            } catch let error as AccountFailure where error.key == .nameTaken {
+                throw AccountFailure(.saveWouldReplace, checked, error.arguments.last ?? "")
+            }
+        }
         try files.writeSaved(name: checked, blob: blob, meta: meta)
         try profile.write(name: checked, meta: meta)
         try files.setActive(checked)
@@ -436,7 +467,7 @@ struct AccountCommands {
         try switchTo(upcoming)
     }
 
-    private func remove(_ name: String, force: Bool) throws {
+    private func remove(_ name: String, force: Bool, expecting: String?) throws {
         let checked = try checkName(name)
         let tokenExists = FileManager.default.fileExists(atPath: files.locations.tokenURL(checked).path)
         let recorded = profile.names().contains(checked)
@@ -451,6 +482,10 @@ struct AccountCommands {
             throw AccountFailure(.accountMissing, checked, existing.joined(separator: ", "))
         }
         let meta = try profile.read(checked)
+        // 面板上的确认可能是对着旧的一行点的。这个名字后来存成了别的登录时不删，带着 --force 也一样。
+        if let expecting, meta.email != expecting {
+            throw AccountFailure(.accountChanged, checked, meta.email)
+        }
         let currentEmail = profileEmail(profile.activeName())
         if meta.email == currentEmail, !force {
             let others = profile.slots(forEmail: meta.email).filter { $0 != checked }
@@ -534,17 +569,24 @@ struct AccountCommands {
 
     private func availableDefaultName(_ email: String) throws -> String {
         let name = try defaultAccountName(email: email)
+        try checkHolder(of: name, allowed: [email])
+        return name
+    }
+
+    // 名字下面已经有记录或副本时，它的邮箱要在 allowed 里。副本读不出邮箱也算被别人占着。
+    private func checkHolder(of name: String, allowed: [String]) throws {
         if profile.names().contains(name) {
             let existing = try profile.read(name).email
-            if existing != email {
+            if !allowed.contains(existing) {
                 throw AccountFailure(.nameTaken, name, existing)
             }
         }
-        if files.secretExists(name), (try? files.readSaved(name).meta.email) != email {
-            let occupant = (try? files.readSaved(name).meta.email) ?? ""
-            throw AccountFailure(.nameTaken, name, occupant)
+        if files.secretExists(name) {
+            let saved = try? files.readSaved(name).meta.email
+            if saved.map(allowed.contains) != true {
+                throw AccountFailure(.nameTaken, name, saved ?? "")
+            }
         }
-        return name
     }
 
     private func storeLogin(name: String, blob: String, meta: LoginMeta) throws {

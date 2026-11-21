@@ -8,6 +8,13 @@
 - 不要改成 Rust、Python、shell、Tauri 或网页。
 - 界面是 macOS 菜单栏工具：SwiftUI + AppKit，部署目标 macOS 13。点开列出已保存邮箱，再点一项完成切换。不要做独立大窗口，也不要做浏览器页面。
 - 工程形态用 Swift Package 的单个可执行文件，对齐本机 `mouse-switch` 的 `Package.swift`。
+- 这一个可执行文件两用。`Sources/agy-cs/main.swift` 用 `launchMode` 判断：没有参数、父进程是 launchd（`getppid() == 1`）、环境里有 `AGY_CS_MENU_BAR=1`，三样都对上才进菜单栏，其余情况都是命令行。这个标记只写在 `Packaging/Info.plist` 的 `LSEnvironment` 里，被系统打开（Finder、Dock、`open`）时才有（实测）。进菜单栏之后立刻 `unsetenv`，不传给之后启动的进程。不要另加一个 app 专用的可执行文件：切换后查额度的进程是重新执行自己，新增账号也是让终端执行包里的这同一个文件。
+- 目标分三个。`AgyAccount` 是全部逻辑。`AgyMenuBar` 只有 SwiftUI 界面，用 `MenuBarExtra` 的窗口样式面板。`agy-cs` 只剩 `main.swift`。面板不自己实现任何账号操作，每个动作都经 `AccountBoard.perform` 在本进程里执行一条 `agy-cs` 指令，说的话收集起来显示。面板要的新能力先做成指令，再接到面板上。
+- 面板里的操作：点一行等于 `switch -- <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
+- `switch -- <名字>` 和 `switch <名字>` 一样，只是名字正好是 `add` 的旧记录也能切过去，不会被当成新增账号。打勾的行也能点：同一个登录存了几个名字时，每一行都打勾，点另一个名字把它记成当前项，不改钥匙串。
+- `save <名字>` 在名字下面已经存着另一个登录时不替换，因为那一份保存的登录换掉就找不回来；带 `--force` 才替换。同一个登录重新存一次不算替换。命令行和面板都是这条规则。
+- 面板上看到的一行可能已经过时，所以它确认之后发出的指令带 `--expect <邮箱>`，指令在动手之前核对这个名字下面实际存的是谁。`rm <名字> --expect <邮箱>`：存的不是这个邮箱就不删，带 `--force` 也一样。`save <名字> --force --expect <邮箱>`：只替换这个邮箱存的那一份。面板先不带 `--force` 存一次，被拒绝了就把占着名字的邮箱拿来问“替换？”，确认之后才带着 `--force` 和那个邮箱再存。`--expect` 和 `switch --` 只给面板用，不写进 help。
+- 四个语言文件用 `Package.swift` 的 `.embedInCode` 编进二进制，`StringCatalog` 读 `PackageResources`。不要改回 `.copy` 加 `Bundle.module`：经符号链接运行时 `Bundle.main` 指向链接所在的目录（实测），按位置找资源包会找不到，放进 app 包之后也一样。
 - 钥匙串那一项的读、写、删都通过 `/usr/bin/security`，和 `agy` 自己的做法一致。路径写绝对路径，不从 `PATH` 里找。读用 `find-generic-password -w`，删用 `delete-generic-password`。写用 `security -i`，把 `add-generic-password -U … -w <内容>` 从标准输入送进去，token 不出现在任何进程的参数里。
 - 不要用 Security.framework 的 `SecItem*` 或 Python 读写这一项的内容。这一项只信任 `/usr/bin/security`，分区名单里只有 `apple-tool:`。在本进程里读，每读一次弹两个钥匙串密码窗口。在本进程里写，分区名单会被换成本程序的 `cdhash:`，之后 `agy` 自己读取也会弹窗。只数这一项有几条、不取内容时，可以用 `SecItemCopyMatching`。
 - `security -i` 的一行连换行超过 4096 个字节时，前 4095 个字节会被当成一条指令执行，剩下的被当成下一条指令。写入前检查内容只有 `go-keyring-base64:` 加 base64 字符，并且整行不超过 4095 个字节。新增账号在移开钥匙串那一项之前先做同样的检查，写不回去的登录不动它。
@@ -24,9 +31,12 @@
 
 - 切换只替换上面那一条钥匙串项。换到另一个邮箱时删除 `~/.gemini/antigravity-cli/.quota_cache.json`。
 - 不移动、不删除 `~/.gemini/antigravity-cli/conversations`。
-- 命令名是 `agy-cs`。本机 `~/.local/bin/agy-cs` 指向仓库 `build/agy-cs`。改完后执行 `make install`。它会把 release 二进制和旁边的 `agy-cs_AgyAccount.bundle` 一起放到 `build/`。只复制二进制的话，运行时找不到语言包，会在 `resource_bundle_accessor.swift` 里崩溃。安装时先删掉旧的 `build/agy-cs` 再复制，然后执行 `codesign --force --sign - build/agy-cs`。直接 `cp -f` 覆盖旧文件时，内核会沿用旧的代码签名缓存，打开第一页就发 SIGKILL，zsh 显示 `killed`。
-- 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。
-- 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。
+- 命令名是 `agy-cs`。本机 `~/.local/bin/agy-cs` 指向仓库 `build/agy-cs`。改完后执行 `make install`。`build/agy-cs` 是单个文件，旁边不需要别的东西。安装时先删掉旧的 `build/agy-cs` 再复制，然后执行 `codesign --force --sign - build/agy-cs`。直接 `cp -f` 覆盖旧文件时，内核会沿用旧的代码签名缓存，打开第一页就发 SIGKILL，zsh 显示 `killed`。
+- `make app` 生成 `build/Agy Switcher.app`。`Contents/MacOS/agy-cs` 就是上面那个二进制，另有 `Packaging/Info.plist` 和 `Packaging/AppIcon.icns`，整个包 ad-hoc 签名。同样先 `rm -rf` 旧的包再拷。图标由 `Packaging/AppIcon.swift` 画出来，换图标时改它，再重新生成 icns。
+- `make dist` 编译 arm64 加 x86_64 的通用二进制，生成 `dist/agy-cs-macos-universal.tar.gz`、`dist/Agy-Switcher.zip` 和 `dist/SHA256SUMS.txt`。两个架构分开编译，再用 `lipo -create` 合并。不要改成一次传两个 `--arch`：Xcode 26.6 的 SwiftPM 这时换用另一套构建系统，不生成 `.embedInCode` 的 `PackageResources`，编译不过（CI 实测）。每个架构编完就把二进制拷走，因为本机这版 SwiftPM 两次编译用同一个输出目录。zip 用 `ditto --norsrc --noextattr` 打，里面不带 `._` 开头的文件，否则用别的工具解开后签名对不上。包名里不带版本号，这样 README 里的 `releases/latest/download/…` 链接不用每版改。版本号只写在 `Packaging/Info.plist`，README 和 CHANGELOG 跟它一致，测试会核对。
+- 发布：推 `v` 加版本号的 tag，`release.yml` 跑测试、执行 `make dist`，然后建 draft release。它只建 draft，不要在 workflow 里加发正式版的步骤。签名是 ad-hoc，没有公证，因为没有 Developer ID 证书；浏览器下载的 app 第一次打开要到“系统设置 → 隐私与安全性”里放行。以后有证书时用 `make dist SIGN_IDENTITY=…`，公证另加。
+- 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。菜单栏工具启动时走的是同一步。
+- 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。面板打开时和打开期间每两秒的重读，读的是 `list` 那一份记录，同样不读钥匙串、不联网。重读可能正好撞上别的进程在改名或删除：列出名字之后、读它之前就没了的那条记录跳过，不当成整份名单读不出来（CI 上实测撞到过）。
 - 联网只发生在 `agy-cs refresh quota` 里：用每个保存副本里的 refresh token 向 `oauth2.googleapis.com` 换一个临时 access token，再请求 `daily-cloudcode-pa.googleapis.com` 的 `loadCodeAssist`（套餐）、`retrieveUserQuotaSummary`（额度）和 `fetchAvailableModels`（模型列表），结果写到 `~/.agy-cs/usage/<名字>.json`。临时 token 只留在内存里，不回写任何文件，也不读钥匙串。从开始到最后一个回答合计最多等 10 秒。`list` 不联网，只读这些记录。记录里带着邮箱；同一个名字后来存成了另一个登录时，旧记录不再显示。
 - 额度查询和切换互不干涉。`switch`、`next` 和新增账号成功之后不在本进程里查，而是另起进程执行 `agy-cs refresh quota`，不等它结束，它失败也不影响切换；切换失败时不会启动它。启动分两步：先启动 `agy-cs refresh quota --detach` 并等它退出，它再启动真正查询的进程（自成会话，标准输入输出接 `/dev/null`）然后立刻退出。这样查询进程没有父进程，菜单里随后换成 `agy` 的那个进程下面不会留下僵尸进程。`--detach` 只给这一步用，不写进 help。
 - 后台那次查询没有终端可以报错，所以每次查询都把没查到的账号写进 `~/.agy-cs/usage-status.json`，`list` 发现有就在 stderr 提示。`~/.agy-cs/usage.lock` 上的 `flock` 保证同一时间只有一个进程在查询和写记录。锁被占着时最多等 10 秒：等到了说明另一个进程刚查完，它查过的账号直接用它记下的结果，只补查它没见过的账号，等锁和补查合计仍不超过 10 秒；等不到就报忙，不写任何记录。保存的副本读不出来的账号也算没查到。本次查询的退出码用本次内存里的结果，`usage-status.json` 写不下来时直接报错。写记录前再核对一次这个名字现在的邮箱，查询期间被删掉或改存成别的登录的名字不写。
@@ -35,7 +45,9 @@
 - 一次查询要尽量短。所有账号同时换 token；`agy` 没变时直接读 `agy-client.json` 里记着的那个位置上的 secret，不扫描整个文件，它被拒绝了才重新找。换 token 的同时先把到 Cloud Code 的连接建好。套餐、额度、模型列表三个请求同时发：额度请求要带的 project 记在额度记录里，和这次套餐回答里的一致就直接用提前发出的回答，不一致再按新的问一次。免费账号的额度请求不带 project 会返回 403（实测），所以不能省掉它。
 - 这几个接口是 `agy` 自己用的，没有公开文档。请求的 User-Agent 必须是 `antigravity/cli/<版本号>`，版本号取自 `agy --version`。标识不对时接口返回 403，版本太旧时回答里的组不全（实测 1.3.0 起是完整的三组，1.2.0 只有两组，1.1.0 只剩 Claude/GPT 一组）。
 - `agy --version` 只在 `~/.agy-cs/agy-client.json` 里记的大小或修改时间和现在的 `agy` 对不上时才执行，执行前先核对代码签名是 Google 的 Developer ID（团队 `EQHXZ8M8AV`）。`PATH` 上签名对不上的 `agy` 不会被执行。`switch <名字>` 和 `next` 原本不启动 `agy`，不能因为查额度而去执行一个来路不明的文件。
-- 换 token 用的 OAuth client secret 不写进仓库。运行时从 `PATH` 上的 `agy` 二进制里找 `GOCSPX-` 加 28 个字符，二进制里有几个候选，逐个试。`~/.agy-cs/agy-client.json` 只记 `agy` 的大小、修改时间、版本号和可用那个候选的位置，不记 secret 本身。
+- 换 token 用的 OAuth client secret 不写进仓库。运行时从 `agy` 二进制里找 `GOCSPX-` 加 28 个字符，二进制里有几个候选，逐个试。`~/.agy-cs/agy-client.json` 只记 `agy` 的位置、大小、修改时间、版本号和可用那个候选的位置，不记 secret 本身。
+- 读 secret 和版本号用的 `agy` 这样找：先 `PATH`，再 `agy-client.json` 里记着的位置，最后 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`。被系统打开的菜单栏进程，`PATH` 只有 `/usr/bin:/bin:/usr/sbin:/sbin`（实测），只靠 `PATH` 找不到。启动 `agy` 让用户登录的那一步（`agyExecutable`）仍然只认 `PATH`，不走这个回退。
+- 面板的“新增账号…”不在面板里登录，`agy` 的登录界面要一个终端。它把 `~/.agy-cs/add-account.command`（权限 `700`）写成两行：`#!/bin/sh` 和 `exec '<本程序的路径>' switch add`，再用 `NSWorkspace` 打开，由系统默认的终端程序执行。实测默认是 Terminal.app，脚本里 stdin 是终端、进程在前台、`PATH` 里有 `agy`。路径用单引号括起来，路径里的单引号写成 `'\''`。这是仓库里唯一一处 shell，只负责把终端打开；登录和回滚仍是 `switch add` 那一套，不要往这个文件里加别的指令。面板自己没有终端，`switch` 和 `switch add` 在面板进程里按“需要终端”报错，不动钥匙串。
 - `agy-cs switch` 不带名字时在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。选已有账号完成切换后，在当前终端启动 `agy`。`agy-cs switch add` 跳过选择，直接新增账号。新增账号会先保存当前登录，临时移开钥匙串那一项，再启动 `agy` 让用户登录；登录写入新邮箱后按 `@` 前的字符保存，然后重新启动 `agy`。登录没有完成就退出时，把原来的钥匙串登录写回去。`agy-cs switch <名字>` 只切换，不启动 `agy`。`add` 不是账号名：`save`、`rename` 的新名字和按邮箱自动取名都拒绝它；以前留下的 `add` 记录仍能在菜单里选，也能 `rename`、`rm`。
 - 把终端交给 `agy` 之前，要求本进程是终端的前台进程组（`tcgetpgrp` 等于 `getpgrp`）。`agy-cs switch &` 这样放到后台时直接报错，不删除也不改写钥匙串那一项。首次运行的那一次读取照常发生，和其他指令一样。交出前台那一步不忽略 `SIGTTOU`，只在交出之后、收回终端期间忽略 `SIGTTOU` / `SIGTTIN`。
 - `rename <新名字>` 改当前账号的名字。`rename <旧名字> <新名字>` 改指定账号的名字。只改保存的副本和 `~/.agy-cs/` 记录，不读钥匙串。
@@ -48,6 +60,8 @@
 - 输出里不打印 token。
 - 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 swift test --disable-sandbox --filter testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
 - 改了套餐和额度的抓取之后，跑一遍真实请求：`AGY_USAGE_LIVE=1 swift test --disable-sandbox --filter testLiveUsageFetchWhenEnabled`。它用本机保存的每个账号各查一次，只打印套餐和额度项的 id。
+- 改了面板之后，把它画成图片看一眼：`AGY_PANEL_SNAPSHOT=/tmp/agy-panel swift test --disable-sandbox --filter testPanelPicturesWhenEnabled`。图片写在那个目录里，用的是临时目录里的假账号。
+- 改了打包或启动方式之后执行 `make app`，核对三件事：`codesign --verify --strict "build/Agy Switcher.app"` 通过；在终端里运行 `"build/Agy Switcher.app/Contents/MacOS/agy-cs" ls` 仍然是命令行；`open "build/Agy Switcher.app"` 之后进程留着、菜单栏出现图标。
 
 ## 合并之后
 

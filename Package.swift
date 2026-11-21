@@ -13,25 +13,36 @@ let package = Package(
         .target(
             name: "AgyAccount",
             path: "Sources/AgyAccount",
+            exclude: [
+                "i18n/README.md"
+            ],
             resources: [
-                .copy("i18n")
+                .embedInCode("i18n/zh-Hans.txt"),
+                .embedInCode("i18n/zh-Hant.txt"),
+                .embedInCode("i18n/en.txt"),
+                .embedInCode("i18n/ja.txt")
             ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]
         ),
-        .executableTarget(
-            name: "agy-cs",
+        .target(
+            name: "AgyMenuBar",
             dependencies: ["AgyAccount"],
-            path: "Sources/agy-cs",
+            path: "Sources/AgyMenuBar",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI")
             ]
         ),
+        .executableTarget(
+            name: "agy-cs",
+            dependencies: ["AgyAccount", "AgyMenuBar"],
+            path: "Sources/agy-cs"
+        ),
         .testTarget(
             name: "AgyAccountTests",
-            dependencies: ["AgyAccount"],
+            dependencies: ["AgyAccount", "AgyMenuBar"],
             path: "Tests/AgyAccountTests"
         )
     ]

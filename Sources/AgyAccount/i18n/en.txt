@@ -9,6 +9,7 @@ Commands
   current                      Show the recorded email. This does not open the keychain
   list, ls                     List saved accounts with the plan and quota recorded at the last switch. This is the default command
   save <name>                  Save the current keychain login under a name
+  save <name> --force          Replace another login that is already saved under that name
   switch                       Choose in the terminal. Item 1 is the current account and cannot be selected; item 2 adds an account; later items are saved accounts. agy then starts
   switch add                   Add an account directly, without the menu. The current login is kept, then agy opens
   switch <name>                Switch to a saved account
@@ -264,3 +265,75 @@ The characters before @ in %1 cannot be an account name. Run agy-cs save <name>.
 
 [agyLaunchFailed]
 Couldn't start agy in this terminal (%1).
+
+[panelNoAccounts]
+No accounts are saved yet. Choose "Add account" to sign in to one.
+
+[panelWorking]
+Working…
+
+[panelRefresh]
+Refresh quota
+
+[panelRefreshing]
+Looking up plans and quota…
+
+[panelRefreshed]
+Plans and quota are up to date.
+
+[panelAdd]
+Add account…
+
+[panelAddOpened]
+Sign-in opened in the terminal. When it finishes, open this panel again to see the new account.
+
+[panelAddFailed]
+Couldn't open the terminal. Run this in a terminal yourself: %1
+
+[panelSave]
+Save current login…
+
+[panelSavePrompt]
+Name for the current keychain login
+
+[panelRename]
+Rename…
+
+[panelRenamePrompt]
+New name for %1
+
+[panelRemove]
+Delete…
+
+[panelRemoveConfirm]
+Delete the saved copy %1  %2? The current keychain login stays.
+
+[panelRemoveLastCopy]
+%1 is the only saved copy of the recorded login %2. Delete it anyway?
+
+[panelRemoveNow]
+Delete
+
+[panelLanguage]
+Language
+
+[panelQuit]
+Quit
+
+[panelCancel]
+Cancel
+
+[panelConfirm]
+OK
+
+[panelReplaceConfirm]
+The name %1 now holds %2. Replace it with the current keychain login? After that, the saved login for %2 is gone.
+
+[panelReplaceNow]
+Replace
+
+[accountChanged]
+%1 now holds %2, which is not what was shown a moment ago, so nothing was deleted.
+
+[saveWouldReplace]
+The name %1 already holds %2, so nothing was saved. Run agy-cs save %1 --force to replace it with the current login.

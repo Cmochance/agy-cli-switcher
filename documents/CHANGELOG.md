@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.0
+
+### 简体中文
+
+- 新增菜单栏工具 Agy Switcher。点开列出已保存的账号、套餐和额度，点一项完成切换；还可以刷新额度、新增账号、保存当前登录、改名、删除、换语言。
+- Agy Switcher 和 `agy-cs` 是同一个程序：在终端里运行是命令，被系统打开时是菜单栏工具。两种形式用同一份数据。
+- 发布页提供两个包：`Agy-Switcher.zip` 和单个文件的 `agy-cs-macos-universal.tar.gz`，都同时支持 Apple 芯片和 Intel。
+- 语言文件编进了二进制。`agy-cs` 现在是单个文件，旁边不再需要资源包。
+- `agy-cs switch add` 直接新增账号。
+- `agy-cs save <名字>` 在名字下面已经存着另一个登录时不再直接覆盖，带 `--force` 才替换。
+- `agy-cs ls` 显示每个账号的套餐，以及 Gemini 5 小时、7 天和 Argon 额度的剩余量与重置时间；套餐是 Pro 但不算付费订阅的账号标“非付费”。
+- `agy-cs refresh quota` 重新查询所有账号的套餐和额度。切换之后另起后台进程去查，不耽误切换。
+- 钥匙串读写改走 `/usr/bin/security`，不再弹密码窗口。
+
+### English
+
+- New menu bar tool, Agy Switcher. It lists the saved accounts with their plan and quota, and a click switches. It can also refresh the quota, add an account, save the current login, rename, delete, and change the language.
+- Agy Switcher and `agy-cs` are the same program: a command when run in a terminal, a menu bar tool when opened by the system. Both forms use the same data.
+- The release page has two packages: `Agy-Switcher.zip` and the single-file `agy-cs-macos-universal.tar.gz`. Both run on Apple silicon and Intel.
+- The language files are compiled into the binary. `agy-cs` is now a single file and needs no resource bundle next to it.
+- `agy-cs switch add` adds an account directly.
+- `agy-cs save <name>` no longer overwrites another login that is already saved under that name. `--force` replaces it.
+- `agy-cs ls` shows each account's plan, and how much of the Gemini 5-hour, 7-day and Argon quota is left and when it resets. An account whose plan is Pro but does not count as a paid subscription is marked "non-paid".
+- `agy-cs refresh quota` looks up the plan and quota of every account again. After a switch, a separate background process does the lookup, so the switch does not wait.
+- The keychain item is read and written through `/usr/bin/security`, so no password window appears.
+
 ## 0.1.0
 
 ### 简体中文

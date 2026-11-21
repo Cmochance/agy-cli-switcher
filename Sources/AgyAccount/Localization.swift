@@ -63,7 +63,7 @@ enum AppLanguage: String, CaseIterable {
 }
 
 /// 界面句子的键。正文在 `i18n/*.txt`，键名与 case 名相同。
-enum TextKey: String, CaseIterable {
+public enum TextKey: String, CaseIterable {
     case help
     case operationFailed
     case helpNoExtra
@@ -143,6 +143,30 @@ enum TextKey: String, CaseIterable {
     case initializedNoLogin
     case initializedNameRejected
     case agyLaunchFailed
+    case panelNoAccounts
+    case panelWorking
+    case panelRefresh
+    case panelRefreshing
+    case panelRefreshed
+    case panelAdd
+    case panelAddOpened
+    case panelAddFailed
+    case panelSave
+    case panelSavePrompt
+    case panelRename
+    case panelRenamePrompt
+    case panelRemove
+    case panelRemoveConfirm
+    case panelRemoveLastCopy
+    case panelRemoveNow
+    case panelLanguage
+    case panelQuit
+    case panelCancel
+    case panelConfirm
+    case panelReplaceConfirm
+    case panelReplaceNow
+    case accountChanged
+    case saveWouldReplace
 }
 
 struct AccountFailure: Error, Equatable {
@@ -165,10 +189,10 @@ struct UsageFailure: Error {
     }
 }
 
-struct Localizer {
+public struct Localizer {
     var language: AppLanguage
 
-    func line(_ key: TextKey, _ arguments: String...) -> String {
+    public func line(_ key: TextKey, _ arguments: String...) -> String {
         fill(StringCatalog.text(key, language), arguments)
     }
 }

@@ -271,18 +271,21 @@ struct AgyIdentity {
     var modified: Double
     // 候选只有记录里记着的那一个，没有扫描整个文件。
     var remembered = false
+    var path = ""
 }
 
 // 换 token 要用 agy 的 OAuth client secret。它不写进仓库，运行时从本机的 agy 二进制里读。
-// 二进制里有几个候选，逐个试；记录文件只记 agy 的大小、修改时间、版本号和可用那个的位置。
+// 二进制里有几个候选，逐个试；记录文件只记 agy 的位置、大小、修改时间、版本号和可用那个 secret 的位置。
 struct AgyClient {
     var cacheURL: URL
-    var locate: () -> String? = { try? agyExecutable() }
+    // 参数是记录里记着的 agy 位置。PATH 里找不到 agy 时用它。
+    var locate: (String?) -> String? = { agyBinary(recorded: $0) }
     var trusted: (String) -> Bool = isGoogleSigned
     var versionOf: (String) -> String? = agyVersion
 
     func resolve(scan: Bool = true) -> AgyIdentity? {
-        guard let found = locate() else {
+        let cached = (try? Data(contentsOf: cacheURL)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        guard let found = locate(cached?["path"] as? String) else {
             return nil
         }
         let path = (found as NSString).resolvingSymlinksInPath
@@ -292,7 +295,6 @@ struct AgyClient {
         else {
             return nil
         }
-        let cached = (try? Data(contentsOf: cacheURL)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
         let current = (cached?["size"] as? NSNumber)?.intValue == size
             && (cached?["modified"] as? NSNumber)?.doubleValue == modified
         let known = current ? cached?["version"] as? String : nil
@@ -301,9 +303,14 @@ struct AgyClient {
            let offset = (cached?["secret_offset"] as? NSNumber)?.intValue,
            let secret = readSecret(path, at: offset)
         {
-            return AgyIdentity(
-                version: version, secrets: [(offset, secret)], size: size, modified: modified, remembered: true
+            let identity = AgyIdentity(
+                version: version, secrets: [(offset, secret)], size: size, modified: modified, remembered: true, path: path
             )
+            // 以前的记录里没有位置。菜单栏进程的 PATH 里没有 agy，靠这个位置找它，所以在这里补上。
+            if cached?["path"] as? String != path {
+                remember(identity, secretOffset: offset)
+            }
+            return identity
         }
         guard let binary = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else {
             return nil
@@ -319,11 +326,12 @@ struct AgyClient {
         {
             secrets.insert(secrets.remove(at: index), at: 0)
         }
-        return AgyIdentity(version: version, secrets: secrets, size: size, modified: modified)
+        return AgyIdentity(version: version, secrets: secrets, size: size, modified: modified, path: path)
     }
 
     func remember(_ identity: AgyIdentity, secretOffset: Int) {
         let object: [String: Any] = [
+            "path": identity.path,
             "size": identity.size,
             "modified": identity.modified,
             "version": identity.version,

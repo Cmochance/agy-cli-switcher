@@ -1,25 +1,68 @@
 import Darwin
 import Foundation
 
-public enum AgyAccountCLI {
-    public static func run(_ arguments: [String]) -> Int32 {
+// 一条指令要用到的外部东西。命令行和菜单栏面板各自配一份，指令本身是同一套。
+struct CommandServices {
+    var home: URL
+    var keychain: any KeychainStoring
+    var processes: any ProcessListing
+    var now: () -> String
+    var preferredLanguages: [String]
+    var terminal: any LineReading
+    var launcher: any AgyLaunching
+    var usage: any UsageFetching
+    var refresher: any QuotaRefreshStarting
+
+    static func system(terminal: any LineReading) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return run(
-            arguments,
+        return CommandServices(
             home: home,
             keychain: LoginKeychainStore(),
             processes: SystemProcessList(),
             now: AccountClock.utcTimestamp,
             preferredLanguages: Locale.preferredLanguages,
-            terminal: StandardTerminal(),
+            terminal: terminal,
             launcher: InteractiveAgy(),
             usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
-            refresher: SelfSpawner(),
+            refresher: SelfSpawner()
+        )
+    }
+
+    var profile: ToolProfile {
+        ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages)
+    }
+
+    func commands(
+        text: Localizer,
+        stdout: @escaping (String) -> Void,
+        stderr: @escaping (String) -> Void
+    ) -> AccountCommands {
+        AccountCommands(
+            files: AccountFiles(locations: AccountLocations(home: home), now: now),
+            profile: profile,
+            keychain: keychain,
+            processes: processes,
+            terminal: terminal,
+            launcher: launcher,
+            usage: usage,
+            refresher: refresher,
+            text: text,
+            stdout: stdout,
+            stderr: stderr
+        )
+    }
+}
+
+public enum AgyAccountCLI {
+    public static func run(_ arguments: [String]) -> Int32 {
+        execute(
+            arguments,
+            services: .system(terminal: StandardTerminal()),
             stdout: { print($0) },
             stderr: { message in
                 fputs(message + "\n", stderr)
             }
-        )
+        ).code
     }
 
     static func run(
@@ -36,36 +79,50 @@ public enum AgyAccountCLI {
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
-        let profile = ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages)
-        let text = Localizer(language: profile.resolvedLanguage())
-        let commands = AccountCommands(
-            files: AccountFiles(locations: AccountLocations(home: home), now: now),
-            profile: profile,
-            keychain: keychain,
-            processes: processes,
-            terminal: terminal,
-            launcher: launcher,
-            usage: usage,
-            refresher: refresher,
-            text: text,
+        execute(
+            arguments,
+            services: CommandServices(
+                home: home,
+                keychain: keychain,
+                processes: processes,
+                now: now,
+                preferredLanguages: preferredLanguages,
+                terminal: terminal,
+                launcher: launcher,
+                usage: usage,
+                refresher: refresher
+            ),
             stdout: stdout,
             stderr: stderr
-        )
+        ).code
+    }
+
+    // failure 是没做成时的那句话的键，details 是填进那句话里的名字和邮箱。
+    // 面板靠它们分辨“这是唯一的副本”“名字被别人占着”这样要再问一次的情况。
+    static func execute(
+        _ arguments: [String],
+        services: CommandServices,
+        stdout: @escaping (String) -> Void,
+        stderr: @escaping (String) -> Void
+    ) -> (code: Int32, failure: TextKey?, details: [String]) {
+        let profile = services.profile
+        let text = Localizer(language: profile.resolvedLanguage())
+        let commands = services.commands(text: text, stdout: stdout, stderr: stderr)
         do {
             try profile.prepare()
             try commands.initializeIfNeeded()
             try commands.run(try parse(arguments))
-            return 0
+            return (0, nil, [])
         } catch let error as AccountFailure {
             stderr(text.line(error.key, argumentList: error.arguments))
-            return 1
+            return (1, error.key, error.arguments)
         } catch let error as UsageFailure {
             let spoken = usageLanguage(commandArguments: arguments, profile: profile, fallback: text)
             stderr(spoken.line(error.key, argumentList: error.arguments))
-            return 2
+            return (2, error.key, error.arguments)
         } catch {
             stderr(text.line(.operationFailed))
-            return 1
+            return (1, .operationFailed, [])
         }
     }
 }
@@ -87,7 +144,7 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         try rejectExtra(arguments, command: first)
         return .list
     case "save":
-        return .save(try singleName(arguments, command: "save"))
+        return try parseSave(arguments)
     case "switch":
         switch arguments.count {
         case 1:
@@ -96,6 +153,9 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
             return .add
         case 2:
             return .change(arguments[1])
+        // 面板点一行用这种写法。以前留下的、名字正好是 add 的记录也能切过去，不会被当成新增账号。
+        case 3 where arguments[1] == "--":
+            return .change(arguments[2])
         default:
             throw UsageFailure(.commandNoExtra, "switch")
         }
@@ -130,11 +190,39 @@ private func rejectExtra(_ arguments: [String], command: String) throws {
     }
 }
 
-private func singleName(_ arguments: [String], command: String) throws -> String {
-    guard arguments.count == 2 else {
-        throw UsageFailure(.needsName, command)
+private enum FlagProblem: Error {
+    case unknown(String)
+    case secondName
+}
+
+// save 和 rm 都是一个名字加 --force。--expect 只给面板用，不写进 help，后面跟着面板上这个名字下面显示的邮箱。
+// 面板上看到的可能已经过时：指令动手之前核对一次，对不上就不替换、不删除。
+private func nameAndFlags(_ arguments: [String]) throws -> (name: String?, force: Bool, expecting: String?) {
+    var name: String?
+    var force = false
+    var expecting: String?
+    var rest = arguments.dropFirst()
+    while let argument = rest.popFirst() {
+        if argument == "--force" {
+            force = true
+        } else if argument == "--expect", let email = rest.popFirst() {
+            expecting = email
+        } else if argument.hasPrefix("-") {
+            throw FlagProblem.unknown(argument)
+        } else if name == nil {
+            name = argument
+        } else {
+            throw FlagProblem.secondName
+        }
     }
-    return arguments[1]
+    return (name, force, expecting)
+}
+
+private func parseSave(_ arguments: [String]) throws -> AccountCommandKind {
+    guard let parsed = try? nameAndFlags(arguments), let name = parsed.name else {
+        throw UsageFailure(.needsName, "save")
+    }
+    return .save(name, force: parsed.force, expecting: parsed.expecting)
 }
 
 private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
@@ -152,23 +240,17 @@ private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
 }
 
 private func parseRemove(_ arguments: [String]) throws -> AccountCommandKind {
-    var name: String?
-    var force = false
-    for argument in arguments.dropFirst() {
-        if argument == "--force" {
-            force = true
-        } else if argument.hasPrefix("-") {
-            throw UsageFailure(.rmUnknownArgument, argument)
-        } else if name == nil {
-            name = argument
-        } else {
-            throw UsageFailure(.rmOnlyOneName)
+    do {
+        let parsed = try nameAndFlags(arguments)
+        guard let name = parsed.name else {
+            throw UsageFailure(.rmNeedsName)
         }
+        return .remove(name, force: parsed.force, expecting: parsed.expecting)
+    } catch FlagProblem.unknown(let argument) {
+        throw UsageFailure(.rmUnknownArgument, argument)
+    } catch FlagProblem.secondName {
+        throw UsageFailure(.rmOnlyOneName)
     }
-    guard let name else {
-        throw UsageFailure(.rmNeedsName)
-    }
-    return .remove(name, force: force)
 }
 
 private func parseLanguage(_ arguments: [String]) throws -> AccountCommandKind {
@@ -193,7 +275,7 @@ private func usageLanguage(commandArguments: [String], profile: ToolProfile, fal
 }
 
 extension Localizer {
-    func line(_ key: TextKey, argumentList: [String]) -> String {
+    public func line(_ key: TextKey, argumentList: [String]) -> String {
         var copy = line(key)
         for index in stride(from: argumentList.count, through: 1, by: -1) {
             copy = copy.replacingOccurrences(of: "%\(index)", with: argumentList[index - 1])

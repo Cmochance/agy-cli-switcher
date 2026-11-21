@@ -13,13 +13,14 @@
   <a href="https://developer.apple.com/macos/"><img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white"></a>
 </p>
 
-**agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. The command is `agy-cs`.
+**agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
 
-Current version **v0.1.0** (see [Changelog](documents/CHANGELOG.md)).
+Current version **v0.2.0** (see [Changelog](documents/CHANGELOG.md)).
 
 ## What it does
 
 - Switch between `agy` logins, and keep the name, email, and active record
+- Agy Switcher lists the saved accounts and their quota in the menu bar. Click one to switch
 - `agy-cs ls` shows each account's plan, and how much of the Gemini 5-hour, 7-day and Argon quota is left and when it resets
 - `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal
 - `agy-cs switch add` adds an account directly, without the menu. The current login is kept, then `agy` opens
@@ -28,9 +29,45 @@ Current version **v0.1.0** (see [Changelog](documents/CHANGELOG.md)).
 - Switching to another email deletes `~/.gemini/antigravity-cli/.quota_cache.json`. `~/.gemini/antigravity-cli/conversations` stays in place
 - With no language chosen, the interface follows the system language. Codes: `zh-Hans`, `zh-Hant`, `en`, `ja`
 
-## Quick start
+## Install
 
-Requires macOS 13 and Swift from Xcode or the Command Line Tools.
+Requires macOS 13 or later, on Apple silicon or Intel. Pick either form below.
+
+### The menu bar tool, Agy Switcher
+
+1. Download `Agy-Switcher.zip` from [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest), unpack it, and drag `Agy Switcher.app` into Applications
+2. The first time you open it, macOS blocks it, because it is not notarized by Apple. Go to System Settings → Privacy & Security and click Open Anyway
+
+You can also download it in the terminal. A file downloaded this way has no `com.apple.quarantine` mark, so there is nothing to allow in System Settings:
+
+```bash
+tmp="$(mktemp -d)" && \
+  curl -fL -o "$tmp/Agy-Switcher.zip" https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip && \
+  ditto -x -k "$tmp/Agy-Switcher.zip" /Applications && \
+  open "/Applications/Agy Switcher.app"
+```
+
+The directory made by `mktemp -d` can only be entered by you, and each step runs only if the one before it succeeded.
+
+To update, quit Agy Switcher and delete the old `Agy Switcher.app` first, then install the new one.
+
+### The `agy-cs` command
+
+The prebuilt command is a single file:
+
+```bash
+mkdir -p ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
+```
+
+If Agy Switcher is already installed, there is nothing more to download. The app contains the same program:
+
+```bash
+mkdir -p ~/.local/bin
+ln -s "/Applications/Agy Switcher.app/Contents/MacOS/agy-cs" ~/.local/bin/agy-cs
+```
+
+Or build it from source, which needs Swift from Xcode or the Command Line Tools:
 
 ```bash
 git clone https://github.com/Cmochance/agy-cli-switcher.git
@@ -38,15 +75,33 @@ cd agy-cli-switcher
 make install
 ```
 
-`make install` builds the release binary and points `~/.local/bin/agy-cs` at `build/agy-cs` in this checkout. The terminal needs that directory on `PATH`:
+`make install` builds the release binary and points `~/.local/bin/agy-cs` at `build/agy-cs` in this checkout.
+
+The terminal needs `~/.local/bin` on `PATH`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+Both downloads can be checked against `SHA256SUMS.txt` from the same page: `shasum -a 256 -c SHA256SUMS.txt`.
+
+## Quick start
+
 1. Run `agy-cs` to see saved accounts
 2. Run `agy-cs switch` to choose an account, or to sign in to a new one
 3. Run `agy-cs help` to see every command
+
+## The menu bar tool
+
+Click the icon in the menu bar to open the panel.
+
+- Each row is one saved account: name, email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked
+- Click a row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
+- When you save the current login under a name that already holds another account, the panel asks before replacing it
+- "Refresh quota" is the same as `agy-cs refresh quota`
+- "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
+- The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
+- Opening the panel only reads the recorded results. It makes no request and does not read the keychain
 
 ## Commands
 
@@ -55,7 +110,8 @@ export PATH="$HOME/.local/bin:$PATH"
 | `agy-cs` | List saved accounts |
 | `current` | Show the recorded email |
 | `list` | List saved accounts with the most recently recorded plan and quota. `ls` is the same |
-| `save <name>` | Save the current login under a name |
+| `save <name>` | Save the current login under a name. A name that already holds another login is not replaced |
+| `save <name> --force` | Replace another login that is already saved under that name |
 | `switch` | Choose in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal |
 | `switch add` | Add an account directly, without the menu. The current login is kept, then `agy` opens |
 | `switch <name>` | Switch to a saved account without starting `agy` |
@@ -87,7 +143,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | Location | Contents |
 |---|---|
-| `~/.agy-cs/` | Names, emails, the active record, the language, and the plan and quota records. No login secrets |
+| `~/.agy-cs/` | Names, emails, the active record, the language, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", is here too; it holds one line that starts `agy-cs switch add` |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
 | One generic password in the login keychain, service `gemini`, account `antigravity` | The current login. A switch replaces only this item |
 
@@ -102,9 +158,13 @@ The four languages live in [`Sources/AgyAccount/i18n`](Sources/AgyAccount/i18n).
 ```bash
 make test       # swift test --disable-sandbox
 make install    # rebuild and update ~/.local/bin/agy-cs
+make app        # build "build/Agy Switcher.app"; open it with: open "build/Agy Switcher.app"
+make dist       # build the two release packages and SHA256SUMS.txt in dist/
 ```
 
 `make test` runs `swift test --disable-sandbox`.
+
+Pushing a tag that starts with `v` runs the release workflow: the tests, `make dist`, then a draft release. The tag has to match the version in `Packaging/Info.plist`.
 
 ## License
 

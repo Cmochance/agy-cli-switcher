@@ -51,21 +51,27 @@ enum StringCatalog {
         return ParsedCatalog(order: order, values: values)
     }
 
+    // 四个语言文件编在二进制里（Package.swift 的 embedInCode），运行时不找资源包。
+    // 经符号链接运行时 Bundle.main 指向链接所在的目录（实测），按位置找资源包会找不到。
     private static func loadBundled() -> [AppLanguage: [String: String]] {
         var loaded: [AppLanguage: [String: String]] = [:]
         for language in AppLanguage.allCases {
-            let url = Bundle.module.url(
-                forResource: language.rawValue,
-                withExtension: "txt",
-                subdirectory: "i18n"
-            ) ?? Bundle.module.url(forResource: language.rawValue, withExtension: "txt")
-            guard let url, let source = try? String(contentsOf: url, encoding: .utf8) else {
-                loaded[language] = [:]
-                continue
-            }
-            loaded[language] = parse(source).values
+            loaded[language] = parse(String(decoding: embedded(language), as: UTF8.self)).values
         }
         return loaded
+    }
+
+    private static func embedded(_ language: AppLanguage) -> [UInt8] {
+        switch language {
+        case .simplifiedChinese:
+            return PackageResources.zh_Hans_txt
+        case .traditionalChinese:
+            return PackageResources.zh_Hant_txt
+        case .english:
+            return PackageResources.en_txt
+        case .japanese:
+            return PackageResources.ja_txt
+        }
     }
 
     private static func keyName(_ line: String) -> String? {

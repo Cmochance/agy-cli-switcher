@@ -9,6 +9,7 @@
   current                      显示已记录的当前邮箱，不打开钥匙串
   list, ls                     列出已保存的账号，以及上次切换时记下的套餐和额度。不写指令时也是这条
   save <名字>                  把当前钥匙串登录存成一个名字
+  save <名字> --force          名字下面已经存着另一个登录时，确认后替换它
   switch                       在终端里选择。第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。完成后启动 agy
   switch add                   直接新增账号，不进入选择。先保住当前登录，再打开 agy
   switch <名字>                切换到已保存的账号
@@ -264,3 +265,75 @@ rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
 
 [agyLaunchFailed]
 没能在当前终端启动 agy（%1）。
+
+[panelNoAccounts]
+还没有保存的账号。点“新增账号”登录一个。
+
+[panelWorking]
+正在处理…
+
+[panelRefresh]
+刷新额度
+
+[panelRefreshing]
+正在查询套餐和额度…
+
+[panelRefreshed]
+套餐和额度已更新。
+
+[panelAdd]
+新增账号…
+
+[panelAddOpened]
+已在终端里打开登录。登录完成后，再点开这里就能看到新账号。
+
+[panelAddFailed]
+没能打开终端。可以自己在终端里执行: %1
+
+[panelSave]
+保存当前登录…
+
+[panelSavePrompt]
+给钥匙串里的当前登录起个名字
+
+[panelRename]
+改名…
+
+[panelRenamePrompt]
+%1 的新名字
+
+[panelRemove]
+删除…
+
+[panelRemoveConfirm]
+删除保存的副本 %1  %2？钥匙串里的当前登录不会改。
+
+[panelRemoveLastCopy]
+%1 是当前记录 %2 唯一的副本。仍然删除？
+
+[panelRemoveNow]
+删除
+
+[panelLanguage]
+语言
+
+[panelQuit]
+退出
+
+[panelCancel]
+取消
+
+[panelConfirm]
+确定
+
+[panelReplaceConfirm]
+名字 %1 现在存着 %2。用钥匙串里的当前登录替换它？替换之后，%2 保存的这份登录就没有了。
+
+[panelReplaceNow]
+替换
+
+[accountChanged]
+%1 现在保存的是 %2，和刚才看到的不一样，所以没有删除。
+
+[saveWouldReplace]
+名字 %1 下面已经存着 %2，所以没有保存。确认用当前登录替换它，再用 agy-cs save %1 --force。
