@@ -173,13 +173,26 @@ struct AccountCommands {
 
     private func keepSnapshot(_ snapshot: ObservedLogin) throws {
         let recorded = profile.slots(forEmail: snapshot.meta.email)
-        if recorded.isEmpty {
-            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
-            return
+        var backedUp = false
+        for name in recorded {
+            let tokenPath = files.locations.tokenURL(name).path
+            if !FileManager.default.fileExists(atPath: tokenPath) {
+                try files.writeSaved(name: name, blob: snapshot.blob, meta: snapshot.meta)
+                try profile.write(name: name, meta: snapshot.meta)
+                backedUp = true
+                continue
+            }
+            guard let saved = try? files.readSaved(name), saved.meta.email == snapshot.meta.email else {
+                continue
+            }
+            if saved.blob != snapshot.blob {
+                try files.writeSaved(name: name, blob: snapshot.blob, meta: snapshot.meta)
+                try profile.write(name: name, meta: snapshot.meta)
+            }
+            backedUp = true
         }
-        for name in recorded where (try? files.readSaved(name).blob) != snapshot.blob {
-            try files.writeSaved(name: name, blob: snapshot.blob, meta: snapshot.meta)
-            try profile.write(name: name, meta: snapshot.meta)
+        if !backedUp {
+            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
         }
     }
 
