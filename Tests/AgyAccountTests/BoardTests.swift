@@ -100,7 +100,8 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.writes, [])
     }
 
-    // 面板上看到的一行可能已经过时。带着 --expect 的指令在动手之前核对这个名字下面存的是谁。
+    // save 不替换另一个登录存的那一份，带 --force 才替换。面板上看到的一行可能已经过时，
+    // 带着 --expect 的指令在动手之前核对这个名字下面存的是谁。
     func testExpectedHolderIsCheckedBeforeReplacingOrDeleting() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let bob = makeBlob(email: "bob@example.com", refresh: "b")
@@ -111,26 +112,31 @@ final class BoardTests: XCTestCase {
             try AccountFiles(locations: fixture.locations, now: { "" }).readSaved(name).meta.email
         }
 
-        XCTAssertTrue(board.perform(["save", "work", "--expect", ""]).succeeded)
-        XCTAssertTrue(board.perform(["save", "work", "--expect", ""]).succeeded)
-        fixture.keychain.blob = bob
-        let taken = board.perform(["save", "work", "--expect", ""])
-        XCTAssertEqual(taken.code, 1)
-        XCTAssertEqual(taken.failure, .nameTaken)
-        XCTAssertEqual(taken.details, ["work", "alice@example.com"])
-        XCTAssertEqual(try saved("work"), "alice@example.com")
-        XCTAssertEqual(board.perform(["save", "work", "--expect", "carol@example.com"]).failure, .nameTaken)
-        XCTAssertEqual(try saved("work"), "alice@example.com")
-        XCTAssertTrue(board.perform(["save", "work", "--expect", "alice@example.com"]).succeeded)
-        XCTAssertEqual(try saved("work"), "bob@example.com")
-        // 命令行的写法不变：不带 --expect 直接存。
-        fixture.keychain.blob = alice
         XCTAssertTrue(board.perform(["save", "work"]).succeeded)
+        XCTAssertTrue(board.perform(["save", "work"]).succeeded)
+        fixture.keychain.blob = bob
+        let taken = board.perform(["save", "work"])
+        XCTAssertEqual(taken.code, 1)
+        XCTAssertEqual(taken.failure, .saveWouldReplace)
+        XCTAssertEqual(taken.details, ["work", "alice@example.com"])
+        XCTAssertTrue(taken.errors.joined().contains("agy-cs save work --force"))
         XCTAssertEqual(try saved("work"), "alice@example.com")
+        XCTAssertEqual(board.perform(["save", "work", "--expect", "alice@example.com"]).failure, .saveWouldReplace)
+        XCTAssertEqual(board.perform(["save", "work", "--force", "--expect", "carol@example.com"]).failure, .saveWouldReplace)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        XCTAssertTrue(board.perform(["save", "work", "--force", "--expect", "alice@example.com"]).succeeded)
+        XCTAssertEqual(try saved("work"), "bob@example.com")
+        fixture.keychain.blob = alice
+        XCTAssertTrue(board.perform(["save", "work", "--force"]).succeeded)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        XCTAssertTrue(board.perform(["save", "--force", "fresh"]).succeeded)
+        XCTAssertEqual(try saved("fresh"), "alice@example.com")
         // 副本读不出邮箱时，也算被别人占着。
         try Data("broken\n".utf8).write(to: fixture.locations.tokenURL("work"))
-        XCTAssertEqual(board.perform(["save", "work", "--expect", "alice@example.com"]).details, ["work", ""])
-        XCTAssertTrue(board.perform(["save", "work"]).succeeded)
+        XCTAssertEqual(board.perform(["save", "work"]).details, ["work", ""])
+        XCTAssertEqual(board.perform(["save", "work", "--force", "--expect", "alice@example.com"]).details, ["work", ""])
+        XCTAssertTrue(board.perform(["save", "work", "--force"]).succeeded)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
 
         fixture.keychain.blob = bob
         XCTAssertTrue(board.perform(["save", "spare"]).succeeded)
@@ -143,7 +149,10 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(board.perform(["rm", "spare", "--expect", "bob@example.com", "--force"]).succeeded)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("spare").path))
 
-        for wrong in [["rm", "work", "--expect"], ["save", "work", "--expect"], ["save", "work", "--other", "x"], ["save"]] {
+        for wrong in [
+            ["rm", "work", "--expect"], ["save", "work", "--expect"], ["save", "work", "--other"], ["save", "work", "more"],
+            ["save"], ["save", "--force"],
+        ] {
             XCTAssertEqual(board.perform(wrong).code, 2, wrong.joined(separator: " "))
         }
 
@@ -331,7 +340,7 @@ final class BoardTests: XCTestCase {
         // 确认删除的那一下，这个名字已经存成了别的登录：不删。
         model.ask(.remove(model.state.rows[1]))
         fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
-        XCTAssertEqual(fixture.run(["save", "travel"]).code, 0)
+        XCTAssertEqual(fixture.run(["save", "travel", "--force"]).code, 0)
         model.confirm()
         await settle(model)
         XCTAssertNil(model.prompt)

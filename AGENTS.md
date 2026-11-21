@@ -12,7 +12,8 @@
 - 目标分三个。`AgyAccount` 是全部逻辑。`AgyMenuBar` 只有 SwiftUI 界面，用 `MenuBarExtra` 的窗口样式面板。`agy-cs` 只剩 `main.swift`。面板不自己实现任何账号操作，每个动作都经 `AccountBoard.perform` 在本进程里执行一条 `agy-cs` 指令，说的话收集起来显示。面板要的新能力先做成指令，再接到面板上。
 - 面板里的操作：点一行等于 `switch -- <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
 - `switch -- <名字>` 和 `switch <名字>` 一样，只是名字正好是 `add` 的旧记录也能切过去，不会被当成新增账号。打勾的行也能点：同一个登录存了几个名字时，每一行都打勾，点另一个名字把它记成当前项，不改钥匙串。
-- 面板上看到的一行可能已经过时，所以它发出的 `save` 和 `rm` 都带 `--expect <邮箱>`，指令在动手之前核对这个名字下面实际存的是谁。`rm <名字> --expect <邮箱>`：存的不是这个邮箱就不删，带 `--force` 也一样。`save <名字> --expect <邮箱>`：名字下面存着的只能是当前登录自己或这个邮箱，否则按“名字被占用”拒绝；邮箱写空字符串表示名字应当空着。面板先用空字符串存一次，被拒绝了就把占着名字的邮箱拿来问“替换？”，确认之后才带着那个邮箱再存。`--expect` 和 `switch --` 只给面板用，不写进 help。命令行里不带 `--expect` 的 `save <名字>` 照旧直接存。
+- `save <名字>` 在名字下面已经存着另一个登录时不替换，因为那一份保存的登录换掉就找不回来；带 `--force` 才替换。同一个登录重新存一次不算替换。命令行和面板都是这条规则。
+- 面板上看到的一行可能已经过时，所以它确认之后发出的指令带 `--expect <邮箱>`，指令在动手之前核对这个名字下面实际存的是谁。`rm <名字> --expect <邮箱>`：存的不是这个邮箱就不删，带 `--force` 也一样。`save <名字> --force --expect <邮箱>`：只替换这个邮箱存的那一份。面板先不带 `--force` 存一次，被拒绝了就把占着名字的邮箱拿来问“替换？”，确认之后才带着 `--force` 和那个邮箱再存。`--expect` 和 `switch --` 只给面板用，不写进 help。
 - 四个语言文件用 `Package.swift` 的 `.embedInCode` 编进二进制，`StringCatalog` 读 `PackageResources`。不要改回 `.copy` 加 `Bundle.module`：经符号链接运行时 `Bundle.main` 指向链接所在的目录（实测），按位置找资源包会找不到，放进 app 包之后也一样。
 - 钥匙串那一项的读、写、删都通过 `/usr/bin/security`，和 `agy` 自己的做法一致。路径写绝对路径，不从 `PATH` 里找。读用 `find-generic-password -w`，删用 `delete-generic-password`。写用 `security -i`，把 `add-generic-password -U … -w <内容>` 从标准输入送进去，token 不出现在任何进程的参数里。
 - 不要用 Security.framework 的 `SecItem*` 或 Python 读写这一项的内容。这一项只信任 `/usr/bin/security`，分区名单里只有 `apple-tool:`。在本进程里读，每读一次弹两个钥匙串密码窗口。在本进程里写，分区名单会被换成本程序的 `cdhash:`，之后 `agy` 自己读取也会弹窗。只数这一项有几条、不取内容时，可以用 `SecItemCopyMatching`。

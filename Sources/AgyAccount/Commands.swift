@@ -3,7 +3,7 @@ import Foundation
 enum AccountCommandKind {
     case current
     case list
-    case save(String, expecting: String?)
+    case save(String, force: Bool, expecting: String?)
     case choose
     case add
     case change(String)
@@ -70,8 +70,8 @@ struct AccountCommands {
         case .list:
             try list()
             reportFailedRefresh()
-        case .save(let name, let expecting):
-            try save(name, expecting: expecting)
+        case .save(let name, let force, let expecting):
+            try save(name, force: force, expecting: expecting)
         case .choose:
             try choose()
         case .add:
@@ -368,14 +368,19 @@ struct AccountCommands {
         alignedRows(rows).forEach(stdout)
     }
 
-    // expecting 是面板上这个名字下面显示的邮箱，名字空着时是空字符串。带着它时，名字下面实际存着的
-    // 只能是当前登录自己或者这个邮箱，否则不覆盖。不带它是命令行的写法，照旧直接存。
-    private func save(_ name: String, expecting: String?) throws {
+    // 名字下面已经存着另一个登录时不替换，那一份保存的登录换掉就找不回来。带 --force 才替换。
+    // expecting 是面板上这个名字下面显示的邮箱：带着它时，--force 只替换这个邮箱存的那一份。
+    private func save(_ name: String, force: Bool, expecting: String?) throws {
         let checked = try checkNewName(name)
         let blob = try readKeychain()
         let meta = try decodeLogin(blob, source: .keychain)
-        if let expecting {
-            try checkHolder(of: checked, allowed: expecting.isEmpty ? [meta.email] : [meta.email, expecting])
+        if !force || expecting != nil {
+            let replaceable = force ? [expecting].compactMap { $0 } : []
+            do {
+                try checkHolder(of: checked, allowed: [meta.email] + replaceable)
+            } catch let error as AccountFailure where error.key == .nameTaken {
+                throw AccountFailure(.saveWouldReplace, checked, error.arguments.last ?? "")
+            }
         }
         try files.writeSaved(name: checked, blob: blob, meta: meta)
         try profile.write(name: checked, meta: meta)

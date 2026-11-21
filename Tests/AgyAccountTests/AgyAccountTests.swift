@@ -569,7 +569,11 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
         XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
         fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
-        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        let kept = fixture.run(["save", "bob"])
+        XCTAssertEqual(kept.code, 1)
+        XCTAssertEqual(kept.errors, ["名字 bob 下面已经存着 bob@example.com，所以没有保存。确认用当前登录替换它，再用 agy-cs save bob --force。"])
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        XCTAssertEqual(fixture.run(["save", "bob", "--force"]).code, 0)
         XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com"])
         fixture.usage.snapshots = nil
         let healed = fixture.run(["refresh", "quota"])

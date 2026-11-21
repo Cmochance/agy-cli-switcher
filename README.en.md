@@ -110,7 +110,8 @@ Click the icon in the menu bar to open the panel.
 | `agy-cs` | List saved accounts |
 | `current` | Show the recorded email |
 | `list` | List saved accounts with the most recently recorded plan and quota. `ls` is the same |
-| `save <name>` | Save the current login under a name |
+| `save <name>` | Save the current login under a name. A name that already holds another login is not replaced |
+| `save <name> --force` | Replace another login that is already saved under that name |
 | `switch` | Choose in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal |
 | `switch add` | Add an account directly, without the menu. The current login is kept, then `agy` opens |
 | `switch <name>` | Switch to a saved account without starting `agy` |

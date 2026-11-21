@@ -143,9 +143,10 @@ final class PanelModel: ObservableObject {
         let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         switch question {
         case .save:
-            save(name, over: "")
+            save(["save", name])
         case .replace(let name, let holder):
-            save(name, over: holder)
+            // --expect 带着刚才问的那个邮箱：名字下面这时又换成了别的登录的话，指令不替换，这里再问一次。
+            save(["save", name, "--force", "--expect", holder])
         case .rename(let row):
             run(["rename", row.name, name], saying: text(.panelWorking)) { $0.output + $0.errors }
         case .remove(let row):
@@ -161,11 +162,11 @@ final class PanelModel: ObservableObject {
         }
     }
 
-    // holder 是用户已经同意替换掉的那个邮箱，还没问过时是空字符串。名字下面存着别的邮箱时指令会拒绝，
-    // 这时把它存着的邮箱拿来问一次。读不出邮箱的副本没法这样确认，直接显示指令说的话。
-    private func save(_ name: String, over holder: String) {
-        run(["save", name, "--expect", holder], saying: text(.panelWorking), retry: { outcome in
-            guard outcome.failure == .nameTaken, outcome.details.count == 2, !outcome.details[1].isEmpty else {
+    // 名字下面存着另一个登录时指令会拒绝。这时把它存着的邮箱拿来问一次，确认了才替换。
+    // 读不出邮箱的副本没法这样确认，直接显示指令说的话。
+    private func save(_ arguments: [String]) {
+        run(arguments, saying: text(.panelWorking), retry: { outcome in
+            guard outcome.failure == .saveWouldReplace, outcome.details.count == 2, !outcome.details[1].isEmpty else {
                 return nil
             }
             return .replace(name: outcome.details[0], holder: outcome.details[1])

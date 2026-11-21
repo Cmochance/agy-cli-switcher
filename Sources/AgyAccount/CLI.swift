@@ -190,17 +190,39 @@ private func rejectExtra(_ arguments: [String], command: String) throws {
     }
 }
 
-// --expect 只给面板用，不写进 help。后面跟着面板上这个名字下面显示的邮箱，名字空着时是空字符串。
-// 面板上看到的可能已经过时：指令动手之前核对一次，对不上就不覆盖、不删除。
+private enum FlagProblem: Error {
+    case unknown(String)
+    case secondName
+}
+
+// save 和 rm 都是一个名字加 --force。--expect 只给面板用，不写进 help，后面跟着面板上这个名字下面显示的邮箱。
+// 面板上看到的可能已经过时：指令动手之前核对一次，对不上就不替换、不删除。
+private func nameAndFlags(_ arguments: [String]) throws -> (name: String?, force: Bool, expecting: String?) {
+    var name: String?
+    var force = false
+    var expecting: String?
+    var rest = arguments.dropFirst()
+    while let argument = rest.popFirst() {
+        if argument == "--force" {
+            force = true
+        } else if argument == "--expect", let email = rest.popFirst() {
+            expecting = email
+        } else if argument.hasPrefix("-") {
+            throw FlagProblem.unknown(argument)
+        } else if name == nil {
+            name = argument
+        } else {
+            throw FlagProblem.secondName
+        }
+    }
+    return (name, force, expecting)
+}
+
 private func parseSave(_ arguments: [String]) throws -> AccountCommandKind {
-    switch arguments.count {
-    case 2:
-        return .save(arguments[1], expecting: nil)
-    case 4 where arguments[2] == "--expect":
-        return .save(arguments[1], expecting: arguments[3])
-    default:
+    guard let parsed = try? nameAndFlags(arguments), let name = parsed.name else {
         throw UsageFailure(.needsName, "save")
     }
+    return .save(name, force: parsed.force, expecting: parsed.expecting)
 }
 
 private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
@@ -218,27 +240,17 @@ private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
 }
 
 private func parseRemove(_ arguments: [String]) throws -> AccountCommandKind {
-    var name: String?
-    var force = false
-    var expecting: String?
-    var rest = arguments.dropFirst()
-    while let argument = rest.popFirst() {
-        if argument == "--force" {
-            force = true
-        } else if argument == "--expect", let email = rest.popFirst() {
-            expecting = email
-        } else if argument.hasPrefix("-") {
-            throw UsageFailure(.rmUnknownArgument, argument)
-        } else if name == nil {
-            name = argument
-        } else {
-            throw UsageFailure(.rmOnlyOneName)
+    do {
+        let parsed = try nameAndFlags(arguments)
+        guard let name = parsed.name else {
+            throw UsageFailure(.rmNeedsName)
         }
+        return .remove(name, force: parsed.force, expecting: parsed.expecting)
+    } catch FlagProblem.unknown(let argument) {
+        throw UsageFailure(.rmUnknownArgument, argument)
+    } catch FlagProblem.secondName {
+        throw UsageFailure(.rmOnlyOneName)
     }
-    guard let name else {
-        throw UsageFailure(.rmNeedsName)
-    }
-    return .remove(name, force: force, expecting: expecting)
 }
 
 private func parseLanguage(_ arguments: [String]) throws -> AccountCommandKind {
