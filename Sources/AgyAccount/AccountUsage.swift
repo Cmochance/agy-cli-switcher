@@ -10,6 +10,8 @@ struct UsageSnapshot: Equatable {
     var planID: String
     var planName: String
     var buckets: [UsageBucket]
+    // Gemini 4 Argon 对这个账号是不是锁着的。nil 表示没取到模型列表。
+    var argonLocked: Bool? = nil
 }
 
 struct UsagePlan {
@@ -66,15 +68,32 @@ func parseBuckets(_ data: Data) -> [UsageBucket]? {
     return buckets
 }
 
+// fetchAvailableModels 的回答。套餐同样是 Pro，Google 只给付费订阅开放 Gemini 4 的几个模型；
+// 没开放的账号，列表里对应的是带 disabled 的占位项（实测）。loadCodeAssist 分不出这两种账号。
+func parseArgonLocked(_ data: Data) -> Bool? {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let models = object["models"] as? [String: Any]
+    else {
+        return nil
+    }
+    let argon = models.filter { $0.key.lowercased().contains("argon") }.values.map { entry in
+        (entry as? [String: Any])?["disabled"] as? Bool == true
+    }
+    return argon.isEmpty ? nil : !argon.contains(false)
+}
+
 // 记录带着邮箱。同一个名字后来存成了另一个登录时，旧记录不再显示。
 func encodeUsage(_ snapshot: UsageSnapshot, email: String, fetchedAt: String) -> String {
-    let object: [String: Any] = [
+    var object: [String: Any] = [
         "email": email,
         "fetched_at": fetchedAt,
         "plan_id": snapshot.planID,
         "plan_name": snapshot.planName,
         "buckets": snapshot.buckets.map { ["id": $0.id, "remaining": $0.remaining, "reset_time": $0.resetTime] },
     ]
+    if let locked = snapshot.argonLocked {
+        object["argon_locked"] = locked
+    }
     let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     return String(decoding: data, as: UTF8.self) + "\n"
 }
@@ -94,7 +113,8 @@ func decodeUsage(_ data: Data, email: String) -> UsageSnapshot? {
     return UsageSnapshot(
         planID: plain(object["plan_id"] as? String ?? ""),
         planName: plain(object["plan_name"] as? String ?? ""),
-        buckets: buckets
+        buckets: buckets,
+        argonLocked: object["argon_locked"] as? Bool
     )
 }
 
@@ -142,12 +162,19 @@ func bucketText(_ bucket: UsageBucket?, now: Date, timeZone: TimeZone) -> String
     return "\(percent)% \(formatter.string(from: reset))"
 }
 
-func usageCells(_ snapshot: UsageSnapshot, now: Date, timeZone: TimeZone) -> [String] {
+// unpaid 给套餐名加上“非付费”的标记：套餐不是免费档，但付费订阅才有的 Argon 锁着。
+func usageCells(
+    _ snapshot: UsageSnapshot,
+    now: Date,
+    timeZone: TimeZone,
+    unpaid: (String) -> String = { $0 }
+) -> [String] {
+    let label = planLabel(id: snapshot.planID, name: snapshot.planName)
     func text(_ match: (String) -> Bool) -> String {
         bucketText(snapshot.buckets.first { match($0.id) }, now: now, timeZone: timeZone)
     }
     return [
-        planLabel(id: snapshot.planID, name: snapshot.planName),
+        snapshot.argonLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,
         "5h " + text { $0 == "gemini-5h" },
         "7d " + text { $0 == "gemini-weekly" },
         "Argon " + text { $0.contains("argon") },
@@ -161,13 +188,26 @@ func alignedRows(_ rows: [[String]]) -> [String] {
         return rows.map { $0.joined(separator: "  ") }
     }
     let widths = (0 ..< columns).map { column in
-        rows.compactMap { $0.count > column ? $0[column].count : nil }.max() ?? 0
+        rows.compactMap { $0.count > column ? displayWidth($0[column]) : nil }.max() ?? 0
     }
     return rows.map { row in
         let padded = row.enumerated().map { column, cell in
-            column == row.count - 1 ? cell : cell.padding(toLength: widths[column], withPad: " ", startingAt: 0)
+            column == row.count - 1 ? cell : cell + String(repeating: " ", count: widths[column] - displayWidth(cell))
         }
         return padded.joined(separator: "  ")
+    }
+}
+
+// 中日韩文字和全角标点在终端里占两列。
+func displayWidth(_ text: String) -> Int {
+    text.unicodeScalars.reduce(0) { width, scalar in
+        switch scalar.value {
+        case 0x1100 ... 0x115F, 0x2E80 ... 0xA4CF, 0xAC00 ... 0xD7A3, 0xF900 ... 0xFAFF, 0xFE30 ... 0xFE4F,
+             0xFF00 ... 0xFF60, 0xFFE0 ... 0xFFE6:
+            return width + 2
+        default:
+            return width + 1
+        }
     }
 }
 

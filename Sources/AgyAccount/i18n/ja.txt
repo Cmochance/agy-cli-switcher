@@ -121,6 +121,9 @@ refresh の後ろに書けるのは quota だけです。agy-cs refresh quota �
 [usageBusy]
 別の利用枠の問い合わせがまだ終わっていません。少し待ってから agy-cs ls で結果を確認してください。
 
+[planUnpaid]
+%1（無償）
+
 [noSavedAccounts]
 保存したアカウントはまだありません。agy でログインしてから agy-cs save <名前> を実行してください。
 

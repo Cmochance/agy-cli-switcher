@@ -121,6 +121,9 @@ refresh 后面只接受 quota。执行 agy-cs refresh quota 重新查询所有�
 [usageBusy]
 另一个额度查询还没结束。稍后执行 agy-cs ls 查看结果。
 
+[planUnpaid]
+%1（非付费）
+
 [noSavedAccounts]
 还没有保存的账号。先在 agy 里登录，再执行 agy-cs save <名字>。
 

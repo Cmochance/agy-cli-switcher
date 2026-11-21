@@ -121,6 +121,9 @@ refresh 後面只接受 quota。執行 agy-cs refresh quota 重新查詢所有�
 [usageBusy]
 另一個額度查詢還沒結束。稍後執行 agy-cs ls 查看結果。
 
+[planUnpaid]
+%1（非付費）
+
 [noSavedAccounts]
 還沒有保存的帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。
 

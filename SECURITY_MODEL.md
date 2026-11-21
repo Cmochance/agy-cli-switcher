@@ -10,7 +10,7 @@ Trust boundaries:
 2. **agy-cs ↔ login keychain**: one generic password, service `gemini`, account `antigravity`, read, written and deleted by running `/usr/bin/security`, the same tool `agy` uses.
 3. **agy-cs ↔ files it reads from disk**: saved token copies, `.meta.json` sidecars, the `active` file, the language file, and bundled i18n resources.
 4. **agy-cs ↔ processes it starts**: `agy`, found on `$PATH` and spawned with posix_spawn; `$SHELL -ic agy` started with execv; `/usr/bin/pgrep`; `/usr/bin/security`, started by absolute path, which receives the login on stdin and returns it on stdout; `agy --version`, run on the same `$PATH` binary only after its code signature is checked against Google's Developer ID team `EQHXZ8M8AV`, and only when the recorded size or modification time no longer match.
-5. **agy-cs ↔ Google**: in `agy-cs refresh quota` (run by the user, or started detached after a successful `switch`, `next` or new account), HTTPS POSTs to `oauth2.googleapis.com/token` (a saved refresh token and the OAuth client secret go out, a short-lived access token comes back) and to `daily-cloudcode-pa.googleapis.com` (`loadCodeAssist`, `retrieveUserQuotaSummary`). These are the endpoints `agy` itself uses; Google does not document them.
+5. **agy-cs ↔ Google**: in `agy-cs refresh quota` (run by the user, or started detached after a successful `switch`, `next` or new account), HTTPS POSTs to `oauth2.googleapis.com/token` (a saved refresh token and the OAuth client secret go out, a short-lived access token comes back) and to `daily-cloudcode-pa.googleapis.com` (`loadCodeAssist`, `retrieveUserQuotaSummary`, `fetchAvailableModels`). These are the endpoints `agy` itself uses; Google does not document them.
 
 ## Components
 | Name | Code | Notes |

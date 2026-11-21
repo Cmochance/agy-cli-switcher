@@ -23,6 +23,18 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(parseBuckets(Data("nope".utf8)))
     }
 
+    func testArgonLockIsReadFromTheModelList() {
+        func locked(_ json: String) -> Bool? {
+            parseArgonLocked(Data(json.utf8))
+        }
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-disabled":{"disabled":true},"gemini-3.8-flash-high":{}}}"#), true)
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{"recommended":true},"gemini-4-carbon-disabled":{"disabled":true}}}"#), false)
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{},"gemini-4-argon-disabled":{"disabled":true}}}"#), false)
+        XCTAssertNil(locked(#"{"models":{"gemini-3.8-flash-high":{}}}"#))
+        XCTAssertNil(locked("{}"))
+        XCTAssertNil(locked("nope"))
+    }
+
     func testPlanLabelIsShortAndPlain() {
         XCTAssertEqual(planLabel(id: "g1-pro-tier", name: "Google AI Pro"), "Pro")
         XCTAssertEqual(planLabel(id: "g1-ultra-lite-tier", name: ""), "Ultra Lite")
@@ -74,6 +86,19 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(usageCells(pro, now: now, timeZone: utc), ["Pro", "5h 62% 11-21 15:35", "7d 99% 11-28 10:23", "Argon 100%"])
         XCTAssertEqual(usageCells(free, now: now, timeZone: utc), ["Free", "5h —", "7d 100%", "Argon —"])
+        var marked = pro
+        marked.argonLocked = true
+        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro（非付费）")
+        marked.argonLocked = false
+        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro")
+        var starter = free
+        starter.argonLocked = true
+        XCTAssertEqual(usageCells(starter, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Free")
+        XCTAssertEqual(displayWidth("Pro（非付费）"), 13)
+        XCTAssertEqual(alignedRows([["* a", "a@b.c", "Pro（非付费）", "5h 100%"], ["  b", "b@b.c", "Free", "5h —"]]), [
+            "* a  a@b.c  Pro（非付费）  5h 100%",
+            "  b  b@b.c  Free           5h —",
+        ])
 
         XCTAssertEqual(alignedRows([["* alice", "alice@example.com"], ["  bo", "bo@example.com"]]), [
             "* alice  alice@example.com",
@@ -100,6 +125,11 @@ final class UsageTests: XCTestCase {
         let text = encodeUsage(snapshot, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
         XCTAssertTrue(text.contains("\"fetched_at\""))
         XCTAssertEqual(decodeUsage(Data(text.utf8), email: "alice@example.com"), snapshot)
+        XCTAssertFalse(text.contains("argon_locked"))
+        var locked = snapshot
+        locked.argonLocked = true
+        let lockedText = encodeUsage(locked, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
+        XCTAssertEqual(decodeUsage(Data(lockedText.utf8), email: "alice@example.com"), locked)
         XCTAssertNil(decodeUsage(Data(text.utf8), email: "bob@example.com"))
         XCTAssertNil(decodeUsage(Data("[]".utf8), email: "alice@example.com"))
     }
@@ -156,7 +186,9 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fetched["alice"]?.buckets.count, 4)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
         let asked = http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }
-        XCTAssertEqual(asked.count, 4)
+        XCTAssertEqual(asked.count, 6)
+        XCTAssertEqual(asked.filter { $0.url.absoluteString.hasSuffix(":fetchAvailableModels") }.count, 2)
+        XCTAssertEqual(fetched["alice"]?.argonLocked, true)
         for request in asked {
             XCTAssertTrue(request.headers["User-Agent"]?.hasPrefix("antigravity/cli/9.9.9 (aidev_client; os_type=darwin; arch=") == true)
             XCTAssertTrue(request.headers["Authorization"]?.hasPrefix("Bearer access-1//") == true)
@@ -180,7 +212,11 @@ final class UsageTests: XCTestCase {
 
         XCTAssertEqual(usage.fetch([(name: "gone", blob: blob(refresh: "revoked")), logins[0]]).keys.sorted(), ["alice"])
         http.summaryStatus = 403
-        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: []))
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true))
+        http.modelsStatus = 500
+        http.summaryStatus = 200
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"]?.buckets.count, 4)
+        XCTAssertNil(usage.fetch([logins[0]])["alice"]?.argonLocked)
         http.summaryStatus = 500
         XCTAssertTrue(usage.fetch([logins[0]]).isEmpty)
         http.offline = true
@@ -242,7 +278,7 @@ final class UsageTests: XCTestCase {
         for (index, login) in logins.enumerated() {
             let snapshot = try XCTUnwrap(fetched[login.name])
             XCTAssertFalse(snapshot.planID.isEmpty)
-            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) buckets=\(snapshot.buckets.map(\.id))")
+            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) argonLocked=\(String(describing: snapshot.argonLocked)) buckets=\(snapshot.buckets.map(\.id))")
         }
         print("LIVE usage: \(logins.count) accounts in \(seconds)s, cold cache")
     }
@@ -292,6 +328,7 @@ private final class ScriptedHTTP: HTTPPosting {
     var tokenSecrets: [String] = []
     var offline = false
     var summaryStatus = 200
+    var modelsStatus = 200
     private let rightSecret: String
     private let plan: String
     private let summary: String
@@ -329,6 +366,8 @@ private final class ScriptedHTTP: HTTPPosting {
             return HTTPResponse(status: 200, body: Data(plan.utf8))
         case "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary":
             return HTTPResponse(status: summaryStatus, body: Data(summary.utf8))
+        case "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels":
+            return HTTPResponse(status: modelsStatus, body: Data(#"{"models":{"gemini-4-argon-disabled":{"disabled":true}}}"#.utf8))
         default:
             return HTTPResponse(status: 404, body: Data())
         }

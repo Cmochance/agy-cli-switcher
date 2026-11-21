@@ -56,6 +56,7 @@ struct CloudCodeUsage: UsageFetching {
     private static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
     private static let planURL = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
     private static let summaryURL = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")!
+    private static let modelsURL = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels")!
     private static let clientID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
     private static let planBody = Data(
         #"{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}"#.utf8
@@ -163,19 +164,30 @@ struct CloudCodeUsage: UsageFetching {
             return nil
         }
         let project: [String: Any] = plan.project.isEmpty ? [:] : ["project": plan.project]
-        guard let body = try? JSONSerialization.data(withJSONObject: project),
-              let summary = send(Self.summaryURL, headers, body, deadline: deadline)
-        else {
+        guard let body = try? JSONSerialization.data(withJSONObject: project) else {
+            return nil
+        }
+        // 模型列表和额度同时请求。它只用来判断 Argon 能不能用，取不到不算这个账号失败。
+        let locked = Shared<Bool?>(nil)
+        let models = DispatchGroup()
+        DispatchQueue.global().async(group: models) {
+            if let answer = send(Self.modelsURL, headers, body, deadline: deadline), answer.status == 200 {
+                locked.set(parseArgonLocked(answer.body))
+            }
+        }
+        let summary = send(Self.summaryURL, headers, body, deadline: deadline)
+        models.wait()
+        guard let summary else {
             return nil
         }
         // 403 表示这个账号不提供额度数据，套餐仍然记下来。
         if summary.status == 403 {
-            return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [])
+            return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [], argonLocked: locked.value)
         }
         guard summary.status == 200, let buckets = parseBuckets(summary.body) else {
             return nil
         }
-        return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: buckets)
+        return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: buckets, argonLocked: locked.value)
     }
 }
 
