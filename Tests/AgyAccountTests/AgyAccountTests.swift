@@ -282,7 +282,8 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertFalse(added.output.contains("选择序号"))
         XCTAssertFalse(added.output.contains("已切换到 add"))
         XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
-        XCTAssertEqual(fixture.usage.calls, [["add", "alice", "carol"]])
+        XCTAssertEqual(fixture.refresher.started, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
         XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
         XCTAssertEqual(
             stripNewlines(try String(contentsOf: fixture.locations.tokenURL("add"), encoding: .utf8)),
@@ -377,7 +378,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(cancelled.keychain.blob, alice)
         XCTAssertFalse(cancelled.keychain.missing)
         XCTAssertEqual(cancelled.keychain.writes, [alice])
-        XCTAssertTrue(cancelled.usage.calls.isEmpty)
+        XCTAssertEqual(cancelled.refresher.started, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cancelled.quota.path))
 
         let failed = try Fixture(blob: alice)
@@ -507,40 +508,62 @@ final class AgyAccountTests: XCTestCase {
         let switched = fixture.run(["switch", "alice"])
         XCTAssertEqual(switched.code, 0)
         XCTAssertEqual(switched.errors, [])
+        XCTAssertEqual(fixture.refresher.started, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("alice").path))
+        XCTAssertEqual(fixture.run(["refresh", "quota", "--detach"]).code, 0)
+        XCTAssertEqual(fixture.refresher.workers, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        for wrong in [["refresh"], ["refresh", "nope"], ["refresh", "quota", "now"]] {
+            XCTAssertEqual(fixture.run(wrong).code, 2)
+        }
+
+        let reads = fixture.keychain.reads
+        let expected = [
+            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
+            ["bob", "bob@example.com", "Free", "5h —", "7d 99% \(localTime("2026-01-07T10:23:00Z"))", "Argon —"],
+        ]
+        let refreshed = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(refreshed.code, 0)
+        XCTAssertEqual(refreshed.errors, [])
+        XCTAssertEqual(refreshed.output.map(cells), expected)
         XCTAssertEqual(fixture.usage.calls, [["alice", "bob"]])
+        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
         XCTAssertEqual(try mode(fixture.tool.usageDirectory), 0o700)
         XCTAssertEqual(try mode(fixture.tool.usageURL("alice")), 0o600)
         let record = try String(contentsOf: fixture.tool.usageURL("alice"), encoding: .utf8)
         XCTAssertFalse(record.contains("go-keyring"))
         XCTAssertFalse(record.contains("refresh"))
 
-        let reads = fixture.keychain.reads
-        let listed = fixture.run(["list"]).output
-        XCTAssertEqual(listed.map(cells), [
-            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
-            ["bob", "bob@example.com", "Free", "5h —", "7d 99% \(localTime("2026-01-07T10:23:00Z"))", "Argon —"],
-        ])
+        let listed = fixture.run(["list"])
+        XCTAssertEqual(listed.output, refreshed.output)
+        XCTAssertEqual(listed.errors, [])
         XCTAssertEqual(fixture.usage.calls.count, 1)
         XCTAssertEqual(fixture.keychain.reads, reads)
 
         fixture.usage.snapshots = ["alice": pro]
-        let partial = fixture.run(["switch", "bob"])
-        XCTAssertEqual(partial.code, 0)
-        XCTAssertTrue(partial.errors.contains { $0.contains("bob") && $0.contains("额度") })
-        XCTAssertFalse(partial.errors.contains { $0.contains("alice") })
-        XCTAssertEqual(cells(fixture.run(["list"]).output[1])[2], "Free")
+        let partial = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(partial.code, 1)
+        XCTAssertEqual(partial.errors.count, 1)
+        XCTAssertTrue(partial.errors[0].contains("bob") && partial.errors[0].contains("refresh quota"))
+        XCTAssertFalse(partial.errors[0].contains("alice"))
+        XCTAssertEqual(partial.output.map(cells), expected)
+        XCTAssertEqual(fixture.run(["list"]).errors, partial.errors)
+
+        let back = fixture.run(["switch", "bob"])
+        XCTAssertEqual(back.code, 0)
+        XCTAssertEqual(back.errors, [])
+        XCTAssertEqual(fixture.refresher.started, 2)
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        XCTAssertEqual(fixture.refresher.started, 2)
+        XCTAssertEqual(fixture.usage.calls.count, 2)
 
         XCTAssertEqual(fixture.run(["rename", "alice", "anna"]).code, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("alice").path))
-        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), [
-            "anna", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%",
-        ])
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), ["anna"] + expected[0].dropFirst())
         XCTAssertEqual(fixture.run(["rm", "anna"]).code, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("anna").path))
-
-        let same = fixture.run(["switch", "bob"])
-        XCTAssertEqual(same.code, 0)
-        XCTAssertEqual(fixture.usage.calls.last, ["bob"])
 
         XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
         XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
@@ -548,6 +571,10 @@ final class AgyAccountTests: XCTestCase {
         fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
         XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
         XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com"])
+        fixture.usage.snapshots = nil
+        let healed = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(healed.code, 0)
+        XCTAssertEqual(fixture.run(["list"]).errors, [])
     }
 
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
@@ -998,6 +1025,19 @@ private final class ScriptedUsage: UsageFetching {
     }
 }
 
+private final class ScriptedRefresher: QuotaRefreshStarting {
+    var started = 0
+    var workers = 0
+
+    func startDetached() {
+        started += 1
+    }
+
+    func spawnWorker() {
+        workers += 1
+    }
+}
+
 private func cells(_ line: String) -> [String] {
     line.components(separatedBy: "  ")
         .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -1018,6 +1058,7 @@ private final class Fixture {
     let terminal = ScriptedTerminal()
     let launcher = ScriptedLauncher()
     let usage = ScriptedUsage()
+    let refresher = ScriptedRefresher()
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -1072,6 +1113,7 @@ private final class Fixture {
             terminal: terminal,
             launcher: launcher,
             usage: usage,
+            refresher: refresher,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }
         )
@@ -1122,6 +1164,7 @@ private func runCommand(
         terminal: ScriptedTerminal(),
         launcher: ScriptedLauncher(),
         usage: ScriptedUsage(),
+        refresher: ScriptedRefresher(),
         stdout: { capture.output.append($0) },
         stderr: { capture.errors.append($0) }
     )

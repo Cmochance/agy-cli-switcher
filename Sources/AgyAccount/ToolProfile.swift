@@ -8,12 +8,16 @@ struct ToolLocations {
     var initializedFile: URL
     var usageDirectory: URL
     var clientFile: URL
+    var usageStatusFile: URL
+    var usageLockFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
         usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
         clientFile = root.appendingPathComponent("agy-client.json")
+        usageStatusFile = root.appendingPathComponent("usage-status.json")
+        usageLockFile = root.appendingPathComponent("usage.lock")
         languageFile = root.appendingPathComponent("language")
         activeFile = root.appendingPathComponent("active")
         initializedFile = root.appendingPathComponent("initialized")
@@ -130,6 +134,27 @@ struct ToolProfile {
 
     func writeUsage(_ name: String, _ snapshot: UsageSnapshot, email: String) throws {
         try AtomicFile.write(locations.usageURL(name), encodeUsage(snapshot, email: email, fetchedAt: now()))
+    }
+
+    // 同一时间只让一个进程写额度记录。进程结束时锁自动释放。
+    func lockUsage() -> Int32 {
+        let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        if descriptor >= 0 {
+            while flock(descriptor, LOCK_EX) == -1 && errno == EINTR {}
+        }
+        return descriptor
+    }
+
+    func writeUsageStatus(failed: [String]) throws {
+        let object: [String: Any] = ["finished_at": now(), "failed": failed]
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        try AtomicFile.write(locations.usageStatusFile, String(decoding: data, as: UTF8.self) + "\n")
+    }
+
+    func failedUsage() -> [String] {
+        let object = (try? Data(contentsOf: locations.usageStatusFile))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        return object?["failed"] as? [String] ?? []
     }
 
     func moveUsage(from source: String, to target: String) {

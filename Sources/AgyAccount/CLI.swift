@@ -14,6 +14,7 @@ public enum AgyAccountCLI {
             terminal: StandardTerminal(),
             launcher: InteractiveAgy(),
             usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
+            refresher: SelfSpawner(),
             stdout: { print($0) },
             stderr: { message in
                 fputs(message + "\n", stderr)
@@ -31,6 +32,7 @@ public enum AgyAccountCLI {
         terminal: any LineReading,
         launcher: any AgyLaunching,
         usage: any UsageFetching,
+        refresher: any QuotaRefreshStarting,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
@@ -44,6 +46,7 @@ public enum AgyAccountCLI {
             terminal: terminal,
             launcher: launcher,
             usage: usage,
+            refresher: refresher,
             text: text,
             stdout: stdout,
             stderr: stderr
@@ -95,6 +98,15 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
             return .change(arguments[1])
         default:
             throw UsageFailure(.commandNoExtra, "switch")
+        }
+    case "refresh":
+        switch Array(arguments.dropFirst()) {
+        case ["quota"]:
+            return .refreshQuota
+        case ["quota", "--detach"]:
+            return .refreshQuotaDetached
+        default:
+            throw UsageFailure(.refreshNeedsQuota)
         }
     case "use":
         throw UsageFailure(.useRenamed)

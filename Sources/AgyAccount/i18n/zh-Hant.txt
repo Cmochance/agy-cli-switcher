@@ -13,6 +13,7 @@
   switch add                   直接新增帳號，不進入選擇。先保住目前登入，再開啟 agy
   switch <名字>                切換到已保存的帳號
   next                         切換到下一個已保存的帳號
+  refresh quota                重新查詢所有已保存帳號的方案和額度，然後列出來
   rename <新名字>              把目前帳號改名為新名字，不開啟鑰匙圈
   rename <舊名字> <新名字>     把帳號舊名字改名為新名字，不開啟鑰匙圈
   rm <名字>                    刪除一個已保存的副本，不改目前鑰匙圈登入
@@ -26,7 +27,8 @@ help、-h、--help 都顯示這份說明。
 首次安裝且還沒有帳號記錄時，會讀取一次鑰匙圈，用電子郵件 @ 前面的字元保存目前登入。
 之後 current、list、rm、rename、language、help 只讀 ~/.agy-cs/ 裡的非密鑰記錄。
 save、switch、next，以及上面這次初始化，才會讀取鑰匙圈。密鑰副本仍在 ~/.gemini/antigravity-cli/accounts/。
-switch、next 和新增帳號成功之後，會連網查詢每個帳號的方案和額度，記在 ~/.agy-cs/usage/。list 只顯示這些記錄，不連網；過了重置時間的額度按 100% 顯示。
+switch、next 和新增帳號成功之後，會另起一個背景行程連網查詢每個帳號的方案和額度，記在 ~/.agy-cs/usage/。切換不等它，也不受它影響。
+list 只顯示這些記錄，不連網；過了重置時間的額度按 100% 顯示。refresh quota 立刻查一次，不讀鑰匙圈。
 不帶名字的 switch 和 switch add 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
 
 [operationFailed]
@@ -55,6 +57,9 @@ rm 需要一個名字。執行 agy-cs help 查看全部指令。
 
 [useRenamed]
 use 已改為 switch。執行 agy-cs switch <名字>。
+
+[refreshNeedsQuota]
+refresh 後面只接受 quota。執行 agy-cs refresh quota 重新查詢所有帳號的方案和額度。
 
 [invalidName]
 名字只能用字母、數字、點、底線和連字號，且不能超過 64 個字元。
@@ -111,7 +116,7 @@ use 已改為 switch。執行 agy-cs switch <名字>。
 沒能刪除額度快取 %1: %2
 
 [usageFailed]
-沒能更新這些帳號的方案和額度記錄: %1
+沒能更新這些帳號的方案和額度記錄: %1。執行 agy-cs refresh quota 可以再試一次。
 
 [noSavedAccounts]
 還沒有保存的帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。

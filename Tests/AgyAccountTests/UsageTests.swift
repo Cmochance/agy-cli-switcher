@@ -191,6 +191,37 @@ final class UsageTests: XCTestCase {
         )
     }
 
+    func testSpawnerHandsOffWithoutWaitingForTheWorker() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let calls = directory.appendingPathComponent("calls")
+        let script = directory.appendingPathComponent("fake-agy-cs")
+        let lines = [
+            "#!/bin/sh",
+            "case \"$*\" in *detach*) ;; *) sleep 1 ;; esac",
+            "echo \"$* tty=$(test -t 0 && echo yes || echo no) leader=$(test \"$(ps -o pgid= -p $$ | tr -d ' ')\" = $$ && echo yes || echo no)\" >> '\(calls.path)'",
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let spawner = SelfSpawner(executable: script.path)
+
+        spawner.startDetached()
+        let handed = try String(contentsOf: calls, encoding: .utf8)
+        XCTAssertEqual(handed, "refresh quota --detach tty=no leader=no\n")
+
+        let started = Date()
+        spawner.spawnWorker()
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.5)
+        var seen = handed
+        for _ in 0 ..< 60 where !seen.contains("refresh quota tty=no") {
+            usleep(100_000)
+            seen = (try? String(contentsOf: calls, encoding: .utf8)) ?? ""
+        }
+        XCTAssertEqual(seen, handed + "refresh quota tty=no leader=yes\n")
+        SelfSpawner(executable: directory.appendingPathComponent("missing").path).startDetached()
+    }
+
     func testLiveUsageFetchWhenEnabled() throws {
         guard ProcessInfo.processInfo.environment["AGY_USAGE_LIVE"] == "1" else {
             return

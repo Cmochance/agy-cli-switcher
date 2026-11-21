@@ -8,6 +8,8 @@ enum AccountCommandKind {
     case add
     case change(String)
     case next
+    case refreshQuota
+    case refreshQuotaDetached
     case rename(from: String?, to: String)
     case remove(String, force: Bool)
     case help
@@ -23,6 +25,7 @@ struct AccountCommands {
     var terminal: any LineReading
     var launcher: any AgyLaunching
     var usage: any UsageFetching
+    var refresher: any QuotaRefreshStarting
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -66,6 +69,7 @@ struct AccountCommands {
             try current()
         case .list:
             try list()
+            reportFailedRefresh()
         case .save(let name):
             try save(name)
         case .choose:
@@ -76,6 +80,10 @@ struct AccountCommands {
             try switchTo(name)
         case .next:
             try next()
+        case .refreshQuota:
+            try refreshQuota()
+        case .refreshQuotaDetached:
+            refresher.spawnWorker()
         case .rename(let from, let to):
             try rename(from: from, to: to)
         case .remove(let name, let force):
@@ -180,25 +188,37 @@ struct AccountCommands {
         }
         stdout(text.line(.saved, name, observed.meta.email))
         reportOtherAgy()
-        recordUsage()
+        refresher.startDetached()
         try launchAgy()
     }
 
-    // 只在切换和新增账号成功之后联网。list 只读这里写下的记录。失败不影响切换。
-    private func recordUsage() {
+    // 联网查询所有已保存账号的套餐和额度。只用保存的副本，不读钥匙串。
+    // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
+    private func refreshQuota() throws {
+        let lock = profile.lockUsage()
+        defer { close(lock) }
         let saved = profile.names().compactMap { name in
             (try? files.readSaved(name)).map { (name: name, blob: $0.blob, email: $0.meta.email) }
         }
-        guard !saved.isEmpty else {
-            return
-        }
-        let fetched = usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
+        let fetched = saved.isEmpty ? [:] : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
         let failed = saved.filter { login in
-            guard let snapshot = fetched[login.name] else {
+            // 查询期间这个名字可能已经被删掉或改存成别的登录。
+            guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
                 return true
             }
             return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
         }.map(\.name)
+        try? profile.writeUsageStatus(failed: failed)
+        try list()
+        if !failed.isEmpty {
+            throw AccountFailure(.usageFailed, failed.joined(separator: ", "))
+        }
+    }
+
+    // 后台那次查询没有终端可以报错，所以把结果记下来，在 list 里提示。
+    private func reportFailedRefresh() {
+        let names = profile.names()
+        let failed = profile.failedUsage().filter(names.contains)
         if !failed.isEmpty {
             stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
         }
@@ -326,7 +346,6 @@ struct AccountCommands {
             if !updated.isEmpty {
                 stdout(text.line(.refreshedTokens, updated.joined(separator: ", ")))
             }
-            recordUsage()
             return
         }
         if profile.slots(forEmail: current.email).isEmpty {
@@ -345,7 +364,7 @@ struct AccountCommands {
         }
         reportOtherAgy()
         stdout(text.line(.reopenAgy))
-        recordUsage()
+        refresher.startDetached()
     }
 
     private func next() throws {

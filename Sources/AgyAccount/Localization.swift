@@ -74,6 +74,7 @@ enum TextKey: String, CaseIterable {
     case rmOnlyOneName
     case rmNeedsName
     case useRenamed
+    case refreshNeedsQuota
     case invalidName
     case keychainFormat
     case savedPrefix

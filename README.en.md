@@ -54,12 +54,13 @@ export PATH="$HOME/.local/bin:$PATH"
 |---|---|
 | `agy-cs` | List saved accounts |
 | `current` | Show the recorded email |
-| `list` | List saved accounts with the plan and quota recorded at the last switch. `ls` is the same |
+| `list` | List saved accounts with the most recently recorded plan and quota. `ls` is the same |
 | `save <name>` | Save the current login under a name |
 | `switch` | Choose in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal |
 | `switch add` | Add an account directly, without the menu. The current login is kept, then `agy` opens |
 | `switch <name>` | Switch to a saved account without starting `agy` |
 | `next` | Switch to the next saved account |
+| `refresh quota` | Look up the plan and quota of every saved account again, then list them |
 | `rename <new>` | Rename the current account |
 | `rename <old> <new>` | Rename one saved account |
 | `rm <name>` | Delete a saved copy. The current login stays |
@@ -76,7 +77,9 @@ export PATH="$HOME/.local/bin:$PATH"
 - Each entry is the percentage left, followed by the reset time in the local time zone. At 100% the reset time is not shown
 - An entry whose reset time has passed is shown as 100%
 - `—` means the account has no such quota. Free accounts have no 5-hour quota, and only some accounts have Argon
-- After a `switch`, `next`, or a new account, `agy-cs` asks Google for each account's plan and quota and records them. `ls` only reads those records and makes no request, so the numbers for the current account stay as they were at the last switch. Run `agy-cs switch <name of the current account>` to ask again
+- `ls` only reads the recorded results and makes no request
+- `agy-cs refresh quota` asks for every account right away and lists the result
+- After a `switch`, `next`, or a new account, a separate background process does the lookup. The switch does not wait for it and is not affected by it; `ls` is usually up to date a few seconds later. If that background lookup missed an account, the next `ls` says so
 - The requests go to the endpoints `agy` itself uses. Google does not document them, and they may stop working after an `agy` update
 
 ## Where data lives
