@@ -177,6 +177,157 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(board.perform(["switch", "--", "work", "extra"]).code, 2)
     }
 
+    // move 把一个账号移到列表的第几位。顺序记在 ~/.agy-cs/order，list、next 和面板都按它。
+    func testMoveSetsTheOrderEveryListFollows() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        for name in ["alice", "bob", "carol"] {
+            fixture.keychain.blob = makeBlob(email: "\(name)@example.com", refresh: name)
+            XCTAssertEqual(fixture.run(["save", name]).code, 0)
+        }
+        let board = fixture.board
+        let reads = fixture.keychain.reads
+        func names() -> [String] {
+            board.load().rows.map(\.name)
+        }
+        XCTAssertEqual(names(), ["alice", "bob", "carol"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.orderFile.path))
+
+        XCTAssertEqual(board.perform(["move", "carol", "1"]).output, ["已把 carol 移到第 1 位"])
+        XCTAssertEqual(names(), ["carol", "alice", "bob"])
+        XCTAssertTrue(board.perform(["move", "alice", "3"]).succeeded)
+        XCTAssertEqual(names(), ["carol", "bob", "alice"])
+        XCTAssertTrue(board.perform(["move", "bob", "2"]).succeeded)
+        XCTAssertEqual(names(), ["carol", "bob", "alice"])
+        XCTAssertEqual(try String(contentsOf: fixture.tool.orderFile, encoding: .utf8), "carol\nbob\nalice\n")
+        XCTAssertEqual(try mode(fixture.tool.orderFile), 0o600)
+        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.run(["list"]).output.map { cells($0)[0] }, ["* carol", "bob", "alice"])
+
+        // next 按这个顺序往下走，到头回到第一个。
+        XCTAssertEqual(fixture.run(["next"]).output.first, "已切换到 bob  bob@example.com")
+        XCTAssertEqual(fixture.run(["next"]).output.first, "已切换到 alice  alice@example.com")
+        XCTAssertEqual(fixture.run(["next"]).output.first, "已切换到 carol  carol@example.com")
+
+        // 新存的账号排在最后。改名留在原位。删掉的名字以后再存，不占原来的位置。
+        fixture.keychain.blob = makeBlob(email: "dave@example.com", refresh: "d")
+        XCTAssertEqual(fixture.run(["save", "aaron"]).code, 0)
+        XCTAssertEqual(names(), ["carol", "bob", "alice", "aaron"])
+        XCTAssertEqual(fixture.run(["rename", "bob", "zed"]).code, 0)
+        XCTAssertEqual(names(), ["carol", "zed", "alice", "aaron"])
+        XCTAssertEqual(fixture.run(["rm", "zed"]).code, 0)
+        XCTAssertEqual(names(), ["carol", "alice", "aaron"])
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "zed"]).code, 0)
+        XCTAssertEqual(names(), ["carol", "alice", "aaron", "zed"])
+
+        let before = names()
+        XCTAssertEqual(board.perform(["move", "nobody", "1"]).failure, .accountMissing)
+        for wrong in ["0", "5", "-1", "two", ""] {
+            let refused = board.perform(["move", "alice", wrong])
+            XCTAssertEqual(refused.code, 1, wrong)
+            XCTAssertEqual(refused.failure, .moveBadPosition, wrong)
+            XCTAssertEqual(refused.details, ["4"], wrong)
+        }
+        for wrong in [["move"], ["move", "alice"], ["move", "alice", "1", "2"]] {
+            let refused = board.perform(wrong)
+            XCTAssertEqual(refused.code, 2)
+            XCTAssertEqual(refused.failure, .moveNeedsNameAndPosition)
+        }
+        XCTAssertEqual(names(), before)
+
+        // order 里写着不存在的名字、重复的名字都不碍事。
+        try "ghost\nalice\nalice\n../x\ncarol\n".write(to: fixture.tool.orderFile, atomically: true, encoding: .utf8)
+        XCTAssertEqual(names(), ["alice", "carol", "aaron", "zed"])
+    }
+
+    // 拖动一行时的位置计算。三行高 50、30、50，挨着排。
+    func testDraggedRowFollowsThePointerAndTheOthersMakeRoom() {
+        let frames = [
+            CGRect(x: 0, y: 0, width: 420, height: 50),
+            CGRect(x: 0, y: 50, width: 420, height: 30),
+            CGRect(x: 0, y: 80, width: 420, height: 50),
+        ]
+        func drag(_ index: Int, _ translation: CGFloat) -> RowDrag {
+            RowDrag(index: index, frames: frames, translation: translation)
+        }
+        func shifts(_ drag: RowDrag) -> [CGFloat] {
+            frames.indices.map(drag.shift)
+        }
+
+        XCTAssertEqual(drag(0, 0).target, 0)
+        XCTAssertEqual(shifts(drag(0, 0)), [0, 0, 0])
+        // 往下拖：下沿越过下一行的中线才换位。
+        XCTAssertEqual(drag(0, 14).target, 0)
+        XCTAssertEqual(drag(0, 20).target, 1)
+        XCTAssertEqual(drag(0, 20).offset, 20)
+        XCTAssertEqual(shifts(drag(0, 20)), [0, -50, 0])
+        XCTAssertEqual(drag(1, 30).target, 2)
+        XCTAssertEqual(shifts(drag(1, 30)), [0, 0, -30])
+        // 拖过头：停在列表的边上，排到最后或最前。
+        XCTAssertEqual(drag(0, 1000).offset, 80)
+        XCTAssertEqual(drag(0, 1000).target, 2)
+        XCTAssertEqual(shifts(drag(0, 1000)), [0, -50, -50])
+        XCTAssertEqual(drag(2, -1000).offset, -80)
+        XCTAssertEqual(drag(2, -1000).target, 0)
+        XCTAssertEqual(shifts(drag(2, -1000)), [50, 50, 0])
+        // 往上拖：上沿越过上一行的中线才换位。
+        XCTAssertEqual(drag(2, -10).target, 2)
+        XCTAssertEqual(drag(2, -20).target, 1)
+        XCTAssertEqual(shifts(drag(2, -20)), [0, 50, 0])
+        // 对不上的行号什么都不做。
+        XCTAssertEqual(drag(7, 40).target, 7)
+        XCTAssertEqual(drag(7, 40).offset, 0)
+        XCTAssertEqual(shifts(drag(7, 40)), [0, 0, 0])
+        XCTAssertEqual(RowDrag(index: 0, frames: [], translation: 40).offset, 0)
+    }
+
+    @MainActor
+    func testPanelMovesARowAtOnceAndRecordsTheOrder() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        for name in ["alice", "bob", "carol"] {
+            fixture.keychain.blob = makeBlob(email: "\(name)@example.com", refresh: name)
+            XCTAssertEqual(fixture.run(["save", name]).code, 0)
+        }
+        let model = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        let reads = fixture.keychain.reads
+        XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
+
+        // 松手的那一下面板上就换好了，不等指令执行完，也不显示“正在处理”。
+        model.move(model.state.rows[2], to: 0)
+        XCTAssertEqual(model.state.rows.map(\.name), ["carol", "alice", "bob"])
+        XCTAssertNil(model.busyLabel)
+        XCTAssertFalse(model.isWorking)
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["carol", "alice", "bob"])
+        XCTAssertEqual(model.lines, [])
+        XCTAssertFalse(model.showsFailure)
+        XCTAssertEqual(fixture.run(["list"]).output.map { cells($0)[0] }, ["* carol", "alice", "bob"])
+        XCTAssertEqual(fixture.keychain.reads, reads)
+
+        model.move(model.state.rows[0], to: 2)
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
+
+        // 放回原位、位置对不上、这一行已经不在了：什么都不做。
+        let order = try String(contentsOf: fixture.tool.orderFile, encoding: .utf8)
+        model.move(model.state.rows[1], to: 1)
+        model.move(model.state.rows[1], to: 3)
+        model.move(model.state.rows[1], to: -1)
+        model.move(AccountRow(name: "gone", email: "gone@example.com", isCurrent: false, usage: nil), to: 0)
+        XCTAssertNil(model.busy)
+        XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
+        XCTAssertEqual(try String(contentsOf: fixture.tool.orderFile, encoding: .utf8), order)
+
+        // 面板上的顺序已经过时：指令按名字移，结果以记下来的为准。
+        XCTAssertEqual(fixture.run(["rm", "alice"]).code, 0)
+        model.move(model.state.rows[2], to: 0)
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["carol", "bob"])
+        XCTAssertFalse(model.showsFailure)
+    }
+
     func testAddAccountCommandOnlyNamesThisProgram() throws {
         let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"))
         defer { fixture.cleanup() }
@@ -488,6 +639,89 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(closed, plain)
     }
 
+    // 把真的鼠标事件送进面板：点一行是切换，按住往下拖是排序。改了行上的手势之后跑一遍：
+    //   AGY_PANEL_GESTURES=1 swift test --disable-sandbox --filter testPanelGesturesWhenEnabled
+    @MainActor
+    func testPanelGesturesWhenEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["AGY_PANEL_GESTURES"] == "1" else {
+            return
+        }
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        for name in ["alice", "bob", "carol"] {
+            fixture.keychain.blob = makeBlob(email: "\(name)@example.com", refresh: name)
+            XCTAssertEqual(fixture.run(["save", name]).code, 0)
+        }
+        _ = NSApplication.shared
+        let model = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        let host = NSHostingView(rootView: PanelView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 200), styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        window.setContentSize(host.fittingSize)
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        func pause(_ seconds: Double = 0.15) async {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        }
+        await pause(0.4)
+        // 三行一样高，从面板顶上往下排。面板的高度会随提示变，所以每次送事件之前重新量。
+        let rowHeight = (host.fittingSize.height - 45) / 3
+        var number = 0
+        func send(_ kind: NSEvent.EventType, row: Int, down: CGFloat = 0) {
+            host.layoutSubtreeIfNeeded()
+            if window.contentLayoutRect.height != host.fittingSize.height {
+                window.setContentSize(host.fittingSize)
+                host.layoutSubtreeIfNeeded()
+            }
+            number += 1
+            let point = NSPoint(x: 150, y: host.bounds.height - (CGFloat(row) + 0.5) * rowHeight - down)
+            let event = NSEvent.mouseEvent(
+                with: kind, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1, pressure: kind == .leftMouseUp ? 0 : 1
+            )
+            window.sendEvent(try! XCTUnwrap(event))
+        }
+
+        // 点第一行：切换过去。
+        send(.leftMouseDown, row: 0)
+        await pause()
+        send(.leftMouseUp, row: 0)
+        await pause()
+        await settle(model)
+        XCTAssertEqual(model.messages.first, "已切换到 alice  alice@example.com")
+        XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
+
+        // 按住第一行往下拖过第二行：排到第二位，不切换。
+        let writes = fixture.keychain.writes
+        send(.leftMouseDown, row: 0)
+        await pause()
+        for step in stride(from: CGFloat(8), through: rowHeight, by: 8) {
+            send(.leftMouseDragged, row: 0, down: step)
+            await pause(0.03)
+        }
+        send(.leftMouseUp, row: 0, down: rowHeight)
+        await pause()
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["bob", "alice", "carol"])
+        XCTAssertEqual(fixture.keychain.writes, writes)
+        XCTAssertEqual(fixture.run(["list"]).output.map { cells($0)[0] }, ["bob", "* alice", "carol"])
+
+        // 把最后一行一直拖到顶上之外：排到第一位。
+        send(.leftMouseDown, row: 2)
+        await pause()
+        for step in stride(from: CGFloat(8), through: rowHeight * 4, by: 8) {
+            send(.leftMouseDragged, row: 2, down: -step)
+            await pause(0.02)
+        }
+        send(.leftMouseUp, row: 2, down: -rowHeight * 4)
+        await pause()
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["carol", "bob", "alice"])
+    }
+
     // 把面板画成图片，用来在改界面之后看一眼：
     //   AGY_PANEL_SNAPSHOT=/tmp/agy-panel swift test --disable-sandbox --filter testPanelPicturesWhenEnabled
     @MainActor
@@ -543,6 +777,12 @@ final class BoardTests: XCTestCase {
         model.setLanguage("en")
         await settle(model)
         try picture(PanelView(model: model), to: output.appendingPathComponent("7-english.png"))
+        // 按住第一行往下拖了 60 个点：它浮在上面，第二行让到它原来的位置。
+        let rowFrames = [0, 51, 102].map { CGRect(x: 0, y: CGFloat($0), width: 420, height: 51) }
+        try picture(
+            PanelView(model: model, dragging: RowDrag(index: 0, frames: rowFrames, translation: 60)),
+            to: output.appendingPathComponent("10-dragging.png")
+        )
         XCTAssertEqual(fixture.run(["save", "second-name"]).code, 0)
         try picture(
             PanelView(model: PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })),

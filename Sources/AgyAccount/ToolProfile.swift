@@ -11,10 +11,12 @@ struct ToolLocations {
     var usageStatusFile: URL
     var usageLockFile: URL
     var addCommandFile: URL
+    var orderFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
         addCommandFile = root.appendingPathComponent("add-account.command")
+        orderFile = root.appendingPathComponent("order")
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
         usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
         clientFile = root.appendingPathComponent("agy-client.json")
@@ -71,7 +73,29 @@ struct ToolProfile {
             }
             found.append(name)
         }
-        return found.sorted()
+        // 用 move 排过的名字按排好的顺序在前，没排过的按字母顺序接在后面。
+        let placed = order().filter(found.contains)
+        return placed + found.sorted().filter { !placed.contains($0) }
+    }
+
+    func setOrder(_ names: [String]) throws {
+        try AtomicFile.write(locations.orderFile, names.map { $0 + "\n" }.joined())
+    }
+
+    // 改名之后这个账号留在原来的位置。
+    func renameInOrder(from source: String, to target: String) {
+        let listed = order()
+        if listed.contains(source) {
+            try? setOrder(listed.filter { $0 != target }.map { $0 == source ? target : $0 })
+        }
+    }
+
+    private func order() -> [String] {
+        guard let text = try? readText(locations.orderFile) else {
+            return []
+        }
+        var seen = Set<String>()
+        return text.split(whereSeparator: \.isNewline).map(String.init).filter { seen.insert($0).inserted }
     }
 
     func read(_ name: String) throws -> LoginMeta {
@@ -190,6 +214,11 @@ struct ToolProfile {
             }
         }
         try? manager.removeItem(at: locations.usageURL(name))
+        // 删掉的名字不留在顺序里：以后再存一个同名的账号，不该占着原来的位置。
+        let listed = order()
+        if listed.contains(name) {
+            try? setOrder(listed.filter { $0 != name })
+        }
         if activeName() == name, manager.fileExists(atPath: locations.activeFile.path) {
             do {
                 try manager.removeItem(at: locations.activeFile)

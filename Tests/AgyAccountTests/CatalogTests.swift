@@ -46,7 +46,7 @@ final class CatalogTests: XCTestCase {
 
         for language in AppLanguage.allCases {
             let help = try XCTUnwrap(byLanguage[language]?.values["help"])
-            for token in ["current", "list", "save", "switch", "switch add", "next", "refresh quota", "rename", "rm", "language", "help"] {
+            for token in ["current", "list", "save", "switch", "switch add", "next", "refresh quota", "rename", "move", "rm", "language", "help"] {
                 XCTAssertTrue(help.contains(token), "\(language.rawValue) help missing \(token)")
             }
         }
@@ -69,7 +69,7 @@ final class CatalogTests: XCTestCase {
         let guide = try String(contentsOf: repoRoot.appendingPathComponent("Sources/AgyAccount/i18n/README.md"), encoding: .utf8)
         for document in [readme, english] {
             for token in [
-                "current", "list", "save", "switch", "next", "refresh quota", "rename", "rm", "language", "help",
+                "current", "list", "save", "switch", "next", "refresh quota", "rename", "move", "rm", "language", "help",
                 "make install", "make test", "agy-cs", "Sources/AgyAccount/i18n", "macOS 13"
             ] {
                 XCTAssertTrue(document.contains(token), token)

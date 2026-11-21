@@ -17,6 +17,7 @@ Commands
   refresh quota                Look up the plan and quota of every saved account again, then list them
   rename <new>                 Rename the current account. This does not open the keychain
   rename <old> <new>           Rename account old to new. This does not open the keychain
+  move <name> <position>       Move an account to that position in the list. 1 is the top
   rm <name>                    Delete a saved copy. The keychain login stays
   rm <name> --force            Delete the only remaining copy of the recorded login
   language, lg                 Show the current language
@@ -26,7 +27,7 @@ Commands
 help, -h, and --help show this text.
 With no language chosen, agy-cs follows the system language. Codes: zh-Hans 简体中文, zh-Hant 繁體中文, en English, ja 日本語.
 On the first run, when no account is recorded yet, agy-cs reads the keychain once and saves the current login under the characters before @.
-After that, current, list, rm, rename, language, and help read only the non-secret records in ~/.agy-cs/.
+After that, current, list, rm, rename, move, language, and help read only the non-secret records in ~/.agy-cs/.
 save, switch, next, and that first-run initialization read the keychain. Secret copies stay in ~/.gemini/antigravity-cli/accounts/.
 After a switch, next, or a new account, a separate background process asks Google for each account's plan and quota and records them in ~/.agy-cs/usage/. The switch does not wait for it and is not affected by it.
 list only shows those records and makes no request. A quota whose reset time has passed is shown as 100%. refresh quota asks right away and does not read the keychain.
@@ -337,3 +338,12 @@ Replace
 
 [saveWouldReplace]
 The name %1 already holds %2, so nothing was saved. Run agy-cs save %1 --force to replace it with the current login.
+
+[moveNeedsNameAndPosition]
+move needs a name and a position. For example, agy-cs move work 1 puts work at the top.
+
+[moveBadPosition]
+The position has to be a number from 1 to %1.
+
+[moved]
+Moved %1 to position %2

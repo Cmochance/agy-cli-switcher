@@ -62,6 +62,15 @@ final class PanelModel: ObservableObject {
         failed || state.failed
     }
 
+    // 正在做的事要显示的那句话。拖动排序这样一下就完的动作不显示，也不把按钮变灰。
+    var busyLabel: String? {
+        busy.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    var isWorking: Bool {
+        busyLabel != nil
+    }
+
     func text(_ key: TextKey, _ arguments: String...) -> String {
         state.text.line(key, argumentList: arguments)
     }
@@ -87,6 +96,16 @@ final class PanelModel: ObservableObject {
     // 当前账号那几行也能点：同一个登录存了几个名字时，点另一个名字把它记成当前项。
     func switchTo(_ row: AccountRow) {
         run(["switch", "--", row.name], saying: text(.panelWorking)) { $0.output + $0.errors }
+    }
+
+    // 拖动一行松手之后调用。先在面板上把这一行放到新位置，再执行 move 把顺序记下来；不显示“正在处理”。
+    func move(_ row: AccountRow, to index: Int) {
+        guard busy == nil, let from = state.rows.firstIndex(of: row), from != index, state.rows.indices.contains(index) else {
+            return
+        }
+        state.rows.remove(at: from)
+        state.rows.insert(row, at: index)
+        run(["move", row.name, String(index + 1)], saying: "") { $0.succeeded ? [] : $0.errors }
     }
 
     func refresh() {

@@ -167,6 +167,9 @@ public enum TextKey: String, CaseIterable {
     case panelReplaceNow
     case accountChanged
     case saveWouldReplace
+    case moveNeedsNameAndPosition
+    case moveBadPosition
+    case moved
 }
 
 struct AccountFailure: Error, Equatable {

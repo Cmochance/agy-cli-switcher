@@ -12,6 +12,8 @@
 - 目标分三个。`AgyAccount` 是全部逻辑。`AgyMenuBar` 是界面：菜单栏图标是 `NSStatusItem`，点开的面板是 `NSPopover`，里面的内容用 SwiftUI 写，由 `NSHostingController` 按内容的大小报给面板。不要改回 SwiftUI 的 `MenuBarExtra` 窗口样式：它显示过几行提示之后窗口不再变矮，内容上下各空出一条（实测窗口 358 高，内容约 281 高）。`agy-cs` 只剩 `main.swift`。面板不自己实现任何账号操作，每个动作都经 `AccountBoard.perform` 在本进程里执行一条 `agy-cs` 指令，说的话收集起来显示。面板要的新能力先做成指令，再接到面板上。
 - 面板里的操作：点一行等于 `switch -- <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
 - 面板上每行只显示邮箱，行和行之间有分隔线。名字是给命令行选账号用的，面板上不显示；只有同一个邮箱存了几个名字时，这几行才在邮箱后面带上名字，不然分不出来。改名和删除的提示里仍然写名字。
+- 账号的顺序记在 `~/.agy-cs/order`，一行一个名字。`agy-cs move <名字> <位置>` 把一个账号移到第几位，只改这个文件，不读钥匙串。`list`、不带名字的 `switch`、`next` 和面板都按这个顺序；没排过的名字按字母顺序接在后面，所以新存的账号在最后。改名留在原位，删掉的名字从顺序里去掉。文件里写着不存在的名字不碍事，读的时候只留现有的名字。
+- 面板上按住一行上下拖就是执行 `move`：这一行跟着鼠标走，别的行让开，松手的那一下面板先换好，再把顺序记下来。行上的点击和拖动是同一个手势，松手时看鼠标走了多远，上下走出 6 个点算拖动，几乎没动算点击。不要把行换回按钮：按钮会把按下的鼠标吃掉，行就拖不动了。位置怎么算在 `RowDrag` 里，不依赖界面，有单测。
 - `switch -- <名字>` 和 `switch <名字>` 一样，只是名字正好是 `add` 的旧记录也能切过去，不会被当成新增账号。打勾的行也能点：同一个登录存了几个名字时，每一行都打勾，点另一个名字把它记成当前项，不改钥匙串。
 - `save <名字>` 在名字下面已经存着另一个登录时不替换，因为那一份保存的登录换掉就找不回来；带 `--force` 才替换。同一个登录重新存一次不算替换。命令行和面板都是这条规则。
 - 面板上看到的一行可能已经过时，所以它确认之后发出的指令带 `--expect <邮箱>`，指令在动手之前核对这个名字下面实际存的是谁。`rm <名字> --expect <邮箱>`：存的不是这个邮箱就不删，带 `--force` 也一样。`save <名字> --force --expect <邮箱>`：只替换这个邮箱存的那一份。面板先不带 `--force` 存一次，被拒绝了就把占着名字的邮箱拿来问“替换？”，确认之后才带着 `--force` 和那个邮箱再存。`--expect` 和 `switch --` 只给面板用，不写进 help。
@@ -62,6 +64,7 @@
 - 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 swift test --disable-sandbox --filter testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
 - 改了套餐和额度的抓取之后，跑一遍真实请求：`AGY_USAGE_LIVE=1 swift test --disable-sandbox --filter testLiveUsageFetchWhenEnabled`。它用本机保存的每个账号各查一次，只打印套餐和额度项的 id。
 - 改了面板之后，把它画成图片看一眼：`AGY_PANEL_SNAPSHOT=/tmp/agy-panel swift test --disable-sandbox --filter testPanelPicturesWhenEnabled`。图片写在那个目录里，用的是临时目录里的假账号。
+- 改了行上的点击或拖动之后，把真的鼠标事件送进面板跑一遍：`AGY_PANEL_GESTURES=1 swift test --disable-sandbox --filter testPanelGesturesWhenEnabled`。它会在屏幕左下角开一个两秒钟的小窗口，用的是临时目录里的假账号。
 - 改了打包或启动方式之后执行 `make app`，核对三件事：`codesign --verify --strict "build/Agy Switcher.app"` 通过；在终端里运行 `"build/Agy Switcher.app/Contents/MacOS/agy-cs" ls` 仍然是命令行；`open "build/Agy Switcher.app"` 之后进程留着、菜单栏出现图标。
 
 ## 合并之后

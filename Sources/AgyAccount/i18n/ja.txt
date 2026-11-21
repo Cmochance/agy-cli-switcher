@@ -17,6 +17,7 @@ Antigravity CLI のアカウントを切り替えます。
   refresh quota                保存済みの全アカウントのプランと利用枠を問い合わせ直し、一覧を表示します
   rename <新しい名前>          現在のアカウントの名前を変えます。キーチェーンは開きません
   rename <古い名前> <新しい名前>  アカウントの古い名前を新しい名前に変えます。キーチェーンは開きません
+  move <名前> <位置>           アカウントを一覧のその位置に移します。1 が先頭です
   rm <名前>                    保存したコピーを削除します。キーチェーンのログインは変えません
   rm <名前> --force            記録中のログインがこのコピーだけのとき、確認して削除します
   language, lg                 現在の言語を表示します
@@ -26,7 +27,7 @@ Antigravity CLI のアカウントを切り替えます。
 help、-h、--help はこの説明を表示します。
 言語を指定しないときはシステムの言語に従います。コード: zh-Hans 简体中文、zh-Hant 繁體中文、en English、ja 日本語。
 初回起動でアカウント記録がまだないとき、キーチェーンを一度読み、メールアドレスの @ より前の文字で現在のログインを保存します。
-その後、current、list、rm、rename、language、help は ~/.agy-cs/ の秘密ではない記録だけを読みます。
+その後、current、list、rm、rename、move、language、help は ~/.agy-cs/ の秘密ではない記録だけを読みます。
 save、switch、next、およびこの初回初期化だけがキーチェーンを読みます。秘密のコピーは ~/.gemini/antigravity-cli/accounts/ に残します。
 switch、next、アカウントの追加が成功すると、別のバックグラウンドプロセスが各アカウントのプランと利用枠を Google に問い合わせ、~/.agy-cs/usage/ に記録します。切り替えはそれを待たず、影響も受けません。
 list はその記録だけを表示し、通信しません。リセット時刻を過ぎた利用枠は 100% と表示します。refresh quota はすぐに問い合わせ、キーチェーンは読みません。
@@ -337,3 +338,12 @@ OK
 
 [saveWouldReplace]
 名前 %1 にはすでに %2 が保存されているため、保存しませんでした。現在のログインで置き換えるなら agy-cs save %1 --force を実行してください。
+
+[moveNeedsNameAndPosition]
+move には名前と位置が必要です。たとえば agy-cs move work 1 で work を先頭に移します。
+
+[moveBadPosition]
+位置は 1 から %1 までの数字で指定してください。
+
+[moved]
+%1 を %2 番目に移しました
