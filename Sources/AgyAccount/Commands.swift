@@ -186,19 +186,19 @@ struct AccountCommands {
 
     // 只在切换和新增账号成功之后联网。list 只读这里写下的记录。失败不影响切换。
     private func recordUsage() {
-        let logins = profile.names().compactMap { name in
-            (try? files.readSaved(name)).map { (name: name, blob: $0.blob) }
+        let saved = profile.names().compactMap { name in
+            (try? files.readSaved(name)).map { (name: name, blob: $0.blob, email: $0.meta.email) }
         }
-        guard !logins.isEmpty else {
+        guard !saved.isEmpty else {
             return
         }
-        let fetched = usage.fetch(logins)
-        let failed = logins.map(\.name).filter { name in
-            guard let snapshot = fetched[name] else {
+        let fetched = usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
+        let failed = saved.filter { login in
+            guard let snapshot = fetched[login.name] else {
                 return true
             }
-            return (try? profile.writeUsage(name, snapshot)) == nil
-        }
+            return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
+        }.map(\.name)
         if !failed.isEmpty {
             stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
         }
@@ -296,7 +296,7 @@ struct AccountCommands {
         for name in names {
             let meta = try profile.read(name)
             let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            let recorded = profile.readUsage(name).map { usageCells($0, now: moment, timeZone: .current) } ?? []
+            let recorded = profile.readUsage(name, email: meta.email).map { usageCells($0, now: moment, timeZone: .current) } ?? []
             rows.append(["\(mark) \(name)", meta.email] + recorded)
         }
         alignedRows(rows).forEach(stdout)

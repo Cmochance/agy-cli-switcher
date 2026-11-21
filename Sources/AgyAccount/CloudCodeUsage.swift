@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct HTTPRequest {
     var url: URL
@@ -36,7 +37,7 @@ struct URLSessionPoster: HTTPPosting {
             done.signal()
         }
         task.resume()
-        if done.wait(timeout: .now() + timeout + 1) == .timedOut {
+        if done.wait(timeout: .now() + timeout) == .timedOut {
             task.cancel()
             return nil
         }
@@ -49,7 +50,7 @@ struct URLSessionPoster: HTTPPosting {
 struct CloudCodeUsage: UsageFetching {
     var http: any HTTPPosting = URLSessionPoster()
     var client: AgyClient
-    // 切换要等这一步结束，所以全部请求加起来有一个时间上限。
+    // 切换要等这一步结束，所以从开始到最后一个回答，合计有一个时间上限。
     var budget: TimeInterval = 10
 
     private static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
@@ -64,10 +65,10 @@ struct CloudCodeUsage: UsageFetching {
         let tokens = logins.compactMap { login in
             loginRefreshToken(login.blob).map { (name: login.name, refresh: $0) }
         }
+        let deadline = DispatchTime.now() + budget
         guard !tokens.isEmpty, let agy = client.resolve() else {
             return [:]
         }
-        let deadline = Date().addingTimeInterval(budget)
         var working: (offset: Int, value: String)?
         var granted: (index: Int, access: String)?
         // 一个登录被拒绝时，分不清是 secret 不对还是这个登录失效了，所以换下一个登录再试。
@@ -123,15 +124,15 @@ struct CloudCodeUsage: UsageFetching {
     }
 
     // 临时 access token 只留在内存里。Google 不返回新的 refresh token，所以不用回写保存的副本。
-    private func send(_ url: URL, _ headers: [String: String], _ body: Data, deadline: Date) -> HTTPResponse? {
-        let left = deadline.timeIntervalSinceNow
+    private func send(_ url: URL, _ headers: [String: String], _ body: Data, deadline: DispatchTime) -> HTTPResponse? {
+        let left = (Double(deadline.uptimeNanoseconds) - Double(DispatchTime.now().uptimeNanoseconds)) / 1_000_000_000
         guard left > 0.5 else {
             return nil
         }
         return http.post(HTTPRequest(url: url, headers: headers, body: body, timeout: min(6, left)))
     }
 
-    private func grant(_ refresh: String, secret: String, deadline: Date) -> Grant {
+    private func grant(_ refresh: String, secret: String, deadline: DispatchTime) -> Grant {
         let fields = [
             ("client_id", Self.clientID),
             ("client_secret", secret),
@@ -153,7 +154,7 @@ struct CloudCodeUsage: UsageFetching {
         return object["error"] as? String == "invalid_client" ? .wrongClient : .refused
     }
 
-    private func snapshot(access: String, agent: String, deadline: Date) -> UsageSnapshot? {
+    private func snapshot(access: String, agent: String, deadline: DispatchTime) -> UsageSnapshot? {
         let headers = ["Authorization": "Bearer \(access)", "Content-Type": "application/json", "User-Agent": agent]
         guard let planAnswer = send(Self.planURL, headers, Self.planBody, deadline: deadline),
               planAnswer.status == 200,
@@ -190,6 +191,7 @@ struct AgyIdentity {
 struct AgyClient {
     var cacheURL: URL
     var locate: () -> String? = { try? agyExecutable() }
+    var trusted: (String) -> Bool = isGoogleSigned
     var versionOf: (String) -> String? = agyVersion
 
     func resolve() -> AgyIdentity? {
@@ -209,7 +211,9 @@ struct AgyClient {
         let current = (cached?["size"] as? NSNumber)?.intValue == size
             && (cached?["modified"] as? NSNumber)?.doubleValue == modified
         let known = current ? cached?["version"] as? String : nil
-        guard !secrets.isEmpty, let version = known ?? versionOf(path), isVersion(version) else {
+        // 版本号要执行 agy 才知道。PATH 上的文件可能是别人放的，所以只执行签名对得上的，
+        // 并且只在记录里的大小或修改时间对不上时才执行。
+        guard !secrets.isEmpty, let version = known ?? (trusted(path) ? versionOf(path) : nil), isVersion(version) else {
             return nil
         }
         if current, let offset = (cached?["secret_offset"] as? NSNumber)?.intValue,
@@ -266,6 +270,20 @@ func clientSecrets(in data: Data) -> [(offset: Int, value: String)] {
         }
     }
     return found
+}
+
+// agy 由 Google 的 Developer ID（团队 EQHXZ8M8AV）签名。
+func isGoogleSigned(_ path: String) -> Bool {
+    var code: SecStaticCode?
+    var requirement: SecRequirement?
+    let rule = "anchor apple generic and certificate leaf[subject.OU] = \"EQHXZ8M8AV\"" as CFString
+    guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess,
+          SecRequirementCreateWithString(rule, [], &requirement) == errSecSuccess,
+          let code, let requirement
+    else {
+        return false
+    }
+    return SecStaticCodeCheckValidity(code, [], requirement) == errSecSuccess
 }
 
 func agyVersion(_ path: String) -> String? {

@@ -64,8 +64,10 @@ func parseBuckets(_ data: Data) -> [UsageBucket]? {
     return buckets
 }
 
-func encodeUsage(_ snapshot: UsageSnapshot, fetchedAt: String) -> String {
+// 记录带着邮箱。同一个名字后来存成了另一个登录时，旧记录不再显示。
+func encodeUsage(_ snapshot: UsageSnapshot, email: String, fetchedAt: String) -> String {
     let object: [String: Any] = [
+        "email": email,
         "fetched_at": fetchedAt,
         "plan_id": snapshot.planID,
         "plan_name": snapshot.planName,
@@ -75,8 +77,10 @@ func encodeUsage(_ snapshot: UsageSnapshot, fetchedAt: String) -> String {
     return String(decoding: data, as: UTF8.self) + "\n"
 }
 
-func decodeUsage(_ data: Data) -> UsageSnapshot? {
-    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+func decodeUsage(_ data: Data, email: String) -> UsageSnapshot? {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          object["email"] as? String == email
+    else {
         return nil
     }
     let buckets = (object["buckets"] as? [[String: Any]] ?? []).compactMap { entry -> UsageBucket? in

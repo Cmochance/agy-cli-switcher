@@ -124,12 +124,12 @@ struct ToolProfile {
         }
     }
 
-    func readUsage(_ name: String) -> UsageSnapshot? {
-        (try? Data(contentsOf: locations.usageURL(name))).flatMap(decodeUsage)
+    func readUsage(_ name: String, email: String) -> UsageSnapshot? {
+        (try? Data(contentsOf: locations.usageURL(name))).flatMap { decodeUsage($0, email: email) }
     }
 
-    func writeUsage(_ name: String, _ snapshot: UsageSnapshot) throws {
-        try AtomicFile.write(locations.usageURL(name), encodeUsage(snapshot, fetchedAt: now()))
+    func writeUsage(_ name: String, _ snapshot: UsageSnapshot, email: String) throws {
+        try AtomicFile.write(locations.usageURL(name), encodeUsage(snapshot, email: email, fetchedAt: now()))
     }
 
     func moveUsage(from source: String, to target: String) {

@@ -541,6 +541,13 @@ final class AgyAccountTests: XCTestCase {
         let same = fixture.run(["switch", "bob"])
         XCTAssertEqual(same.code, 0)
         XCTAssertEqual(fixture.usage.calls.last, ["bob"])
+
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com"])
     }
 
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {

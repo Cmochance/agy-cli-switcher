@@ -97,10 +97,11 @@ final class UsageTests: XCTestCase {
         let snapshot = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [
             UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-11-21T15:35:35Z"),
         ])
-        let text = encodeUsage(snapshot, fetchedAt: "2026-11-21T10:00:00Z")
+        let text = encodeUsage(snapshot, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
         XCTAssertTrue(text.contains("\"fetched_at\""))
-        XCTAssertEqual(decodeUsage(Data(text.utf8)), snapshot)
-        XCTAssertNil(decodeUsage(Data("[]".utf8)))
+        XCTAssertEqual(decodeUsage(Data(text.utf8), email: "alice@example.com"), snapshot)
+        XCTAssertNil(decodeUsage(Data(text.utf8), email: "bob@example.com"))
+        XCTAssertNil(decodeUsage(Data("[]".utf8), email: "alice@example.com"))
     }
 
     func testClientSecretsAreFoundInsideABinary() {
@@ -130,13 +131,24 @@ final class UsageTests: XCTestCase {
         try Data(("head" + wrong + "middle" + right + "tail").utf8).write(to: binary)
         let cache = directory.appendingPathComponent("agy-client.json")
         var versionCalls = 0
-        let client = AgyClient(cacheURL: cache, locate: { binary.path }, versionOf: { _ in
+        var signed = false
+        let client = AgyClient(cacheURL: cache, locate: { binary.path }, trusted: { _ in signed }, versionOf: { _ in
             versionCalls += 1
             return "9.9.9"
         })
         let http = ScriptedHTTP(rightSecret: right, plan: planJSON, summary: summaryJSON)
         let usage = CloudCodeUsage(http: http, client: client)
         let logins = [(name: "alice", blob: blob(refresh: "1//alice")), (name: "bob", blob: blob(refresh: "1//bob"))]
+
+        XCTAssertTrue(usage.fetch(logins).isEmpty)
+        XCTAssertEqual(versionCalls, 0)
+        XCTAssertTrue(http.requests.isEmpty)
+        signed = true
+        XCTAssertTrue(CloudCodeUsage(http: http, client: client, budget: 0).fetch(logins).isEmpty)
+        XCTAssertTrue(http.requests.isEmpty)
+        versionCalls = 0
+        XCTAssertFalse(isGoogleSigned(binary.path))
+        XCTAssertFalse(isGoogleSigned("/bin/ls"))
 
         let fetched = usage.fetch(logins)
         XCTAssertEqual(Set(fetched.keys), ["alice", "bob"])
@@ -163,6 +175,8 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(usage.fetch(logins).count, 2)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
         XCTAssertEqual(versionCalls, 1)
+        signed = false
+        XCTAssertEqual(usage.fetch(logins).count, 2)
 
         XCTAssertEqual(usage.fetch([(name: "gone", blob: blob(refresh: "revoked")), logins[0]]).keys.sorted(), ["alice"])
         http.summaryStatus = 403
@@ -173,7 +187,7 @@ final class UsageTests: XCTestCase {
         XCTAssertTrue(usage.fetch(logins).isEmpty)
         XCTAssertTrue(usage.fetch([(name: "plain", blob: "plain")]).isEmpty)
         XCTAssertTrue(
-            CloudCodeUsage(http: http, client: AgyClient(cacheURL: cache, locate: { nil }, versionOf: { _ in "1" })).fetch(logins).isEmpty
+            CloudCodeUsage(http: http, client: AgyClient(cacheURL: cache, locate: { nil }, trusted: { _ in true }, versionOf: { _ in "1" })).fetch(logins).isEmpty
         )
     }
 
@@ -190,6 +204,7 @@ final class UsageTests: XCTestCase {
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         defer { try? FileManager.default.removeItem(at: cache) }
         let started = Date()
+        XCTAssertTrue(isGoogleSigned(try agyExecutable()))
         let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins)
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         XCTAssertEqual(fetched.count, logins.count)
