@@ -77,6 +77,7 @@ export PATH="$HOME/.local/bin:$PATH"
 - Each entry is the percentage left, followed by the reset time in the local time zone. At 100% the reset time is not shown
 - An entry whose reset time has passed is shown as 100%
 - `—` means the account has no such quota. Free accounts have no 5-hour quota, and only some accounts have Argon
+- `Pro (non-paid)` means the plan is Pro but Google does not count it as a paid subscription. Such an account cannot use Gemini 4 Neon, Hydrogen or Argon, and has no Argon quota
 - `ls` only reads the recorded results and makes no request
 - `agy-cs refresh quota` asks for every account right away and lists the result
 - After a `switch`, `next`, or a new account, a separate background process does the lookup. The switch does not wait for it and is not affected by it; `ls` is usually up to date a few seconds later. If that background lookup missed an account, the next `ls` says so

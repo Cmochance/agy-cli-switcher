@@ -95,6 +95,7 @@ enum TextKey: String, CaseIterable {
     case quotaFailed
     case usageFailed
     case usageBusy
+    case planUnpaid
     case noSavedAccounts
     case saved
     case alreadyActive

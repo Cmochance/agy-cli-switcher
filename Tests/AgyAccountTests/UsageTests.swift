@@ -13,6 +13,11 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(current.id, "free-tier")
         XCTAssertEqual(current.project, "")
         XCTAssertEqual(parsePlan(Data(#"{"paidTier":"g1-ultra-tier"}"#.utf8))?.id, "g1-ultra-tier")
+        let odd = try XCTUnwrap(parsePlan(Data(#"{"cloudaicompanionProject":{"id":"pro\u001b[31mject-\#(String(repeating: "x", count: 80))"}}"#.utf8)))
+        XCTAssertFalse(odd.project.contains("\u{1b}"))
+        XCTAssertEqual(odd.project.count, 64)
+        let kept = encodeUsage(UsageSnapshot(planID: "", planName: "", buckets: [], project: odd.project), email: "a@b.c", fetchedAt: "")
+        XCTAssertFalse(kept.contains("\\u001b"))
         XCTAssertNil(parsePlan(Data("nope".utf8)))
 
         let buckets = try XCTUnwrap(parseBuckets(Data(summaryJSON.utf8)))
@@ -21,6 +26,18 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(buckets[1].remaining, 0.62)
         XCTAssertEqual(parseBuckets(Data("{}".utf8)), [])
         XCTAssertNil(parseBuckets(Data("nope".utf8)))
+    }
+
+    func testArgonLockIsReadFromTheModelList() {
+        func locked(_ json: String) -> Bool? {
+            parseArgonLocked(Data(json.utf8))
+        }
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-disabled":{"disabled":true},"gemini-3.8-flash-high":{}}}"#), true)
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{"recommended":true},"gemini-4-carbon-disabled":{"disabled":true}}}"#), false)
+        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{},"gemini-4-argon-disabled":{"disabled":true}}}"#), false)
+        XCTAssertNil(locked(#"{"models":{"gemini-3.8-flash-high":{}}}"#))
+        XCTAssertNil(locked("{}"))
+        XCTAssertNil(locked("nope"))
     }
 
     func testPlanLabelIsShortAndPlain() {
@@ -74,6 +91,19 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(usageCells(pro, now: now, timeZone: utc), ["Pro", "5h 62% 11-21 15:35", "7d 99% 11-28 10:23", "Argon 100%"])
         XCTAssertEqual(usageCells(free, now: now, timeZone: utc), ["Free", "5h —", "7d 100%", "Argon —"])
+        var marked = pro
+        marked.argonLocked = true
+        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro（非付费）")
+        marked.argonLocked = false
+        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro")
+        var starter = free
+        starter.argonLocked = true
+        XCTAssertEqual(usageCells(starter, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Free")
+        XCTAssertEqual(displayWidth("Pro（非付费）"), 13)
+        XCTAssertEqual(alignedRows([["* a", "a@b.c", "Pro（非付费）", "5h 100%"], ["  b", "b@b.c", "Free", "5h —"]]), [
+            "* a  a@b.c  Pro（非付费）  5h 100%",
+            "  b  b@b.c  Free           5h —",
+        ])
 
         XCTAssertEqual(alignedRows([["* alice", "alice@example.com"], ["  bo", "bo@example.com"]]), [
             "* alice  alice@example.com",
@@ -100,6 +130,11 @@ final class UsageTests: XCTestCase {
         let text = encodeUsage(snapshot, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
         XCTAssertTrue(text.contains("\"fetched_at\""))
         XCTAssertEqual(decodeUsage(Data(text.utf8), email: "alice@example.com"), snapshot)
+        XCTAssertFalse(text.contains("argon_locked"))
+        var locked = snapshot
+        locked.argonLocked = true
+        let lockedText = encodeUsage(locked, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
+        XCTAssertEqual(decodeUsage(Data(lockedText.utf8), email: "alice@example.com"), locked)
         XCTAssertNil(decodeUsage(Data(text.utf8), email: "bob@example.com"))
         XCTAssertNil(decodeUsage(Data("[]".utf8), email: "alice@example.com"))
     }
@@ -155,8 +190,12 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fetched["alice"]?.planID, "g1-pro-tier")
         XCTAssertEqual(fetched["alice"]?.buckets.count, 4)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
+        XCTAssertEqual(http.tokenSecrets.count, 3)
+        XCTAssertEqual(http.warmed.map(\.host), ["daily-cloudcode-pa.googleapis.com"])
         let asked = http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }
-        XCTAssertEqual(asked.count, 4)
+        XCTAssertEqual(asked.count, 6)
+        XCTAssertEqual(asked.filter { $0.url.absoluteString.hasSuffix(":fetchAvailableModels") }.count, 2)
+        XCTAssertEqual(fetched["alice"]?.argonLocked, true)
         for request in asked {
             XCTAssertTrue(request.headers["User-Agent"]?.hasPrefix("antigravity/cli/9.9.9 (aidev_client; os_type=darwin; arch=") == true)
             XCTAssertTrue(request.headers["Authorization"]?.hasPrefix("Bearer access-1//") == true)
@@ -175,12 +214,44 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(usage.fetch(logins).count, 2)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
         XCTAssertEqual(versionCalls, 1)
+        XCTAssertEqual(fetched["alice"]?.project, "project-1")
+        XCTAssertEqual(client.resolve(scan: false)?.secrets.map(\.value), [right])
+        XCTAssertEqual(client.resolve(scan: false)?.remembered, true)
+        XCTAssertEqual(client.resolve()?.secrets.count, 2)
+
+        // 记着的 project 对得上时不多发请求；对不上时按套餐回答里的再问一次额度。
+        func cloudCalls() -> Int {
+            http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }.count
+        }
+        var before = cloudCalls()
+        XCTAssertEqual(usage.fetch([logins[0]], project: "project-1")["alice"]?.buckets.count, 4)
+        XCTAssertEqual(cloudCalls() - before, 3)
+        before = cloudCalls()
+        XCTAssertEqual(usage.fetch([logins[0]], project: "stale")["alice"]?.buckets.count, 4)
+        XCTAssertEqual(cloudCalls() - before, 4)
+        let corrected = http.requests.suffix(4)
+            .filter { $0.url.absoluteString.hasSuffix(":retrieveUserQuotaSummary") }
+            .map { String(decoding: $0.body, as: UTF8.self) }
+        XCTAssertEqual(corrected.count, 2)
+        XCTAssertTrue(corrected.contains { $0.contains("stale") })
+        XCTAssertTrue(corrected.contains { $0.contains("project-1") })
+
+        // 记着的 secret 不再可用时，重新找一遍并记下新的。
+        http.rightSecret = wrong
+        XCTAssertEqual(usage.fetch(logins).count, 2)
+        XCTAssertEqual(client.resolve(scan: false)?.secrets.map(\.value), [wrong])
+        http.rightSecret = right
+        XCTAssertEqual(usage.fetch(logins).count, 2)
         signed = false
         XCTAssertEqual(usage.fetch(logins).count, 2)
 
         XCTAssertEqual(usage.fetch([(name: "gone", blob: blob(refresh: "revoked")), logins[0]]).keys.sorted(), ["alice"])
         http.summaryStatus = 403
-        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: []))
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true, project: "project-1"))
+        http.modelsStatus = 500
+        http.summaryStatus = 200
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"]?.buckets.count, 4)
+        XCTAssertNil(usage.fetch([logins[0]])["alice"]?.argonLocked)
         http.summaryStatus = 500
         XCTAssertTrue(usage.fetch([logins[0]]).isEmpty)
         http.offline = true
@@ -236,13 +307,13 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: cache) }
         let started = Date()
         XCTAssertTrue(isGoogleSigned(try agyExecutable()))
-        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins, within: 10)
+        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins.map { (name: $0.name, blob: $0.blob, project: "") }, within: 10)
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         XCTAssertEqual(fetched.count, logins.count)
         for (index, login) in logins.enumerated() {
             let snapshot = try XCTUnwrap(fetched[login.name])
             XCTAssertFalse(snapshot.planID.isEmpty)
-            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) buckets=\(snapshot.buckets.map(\.id))")
+            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) argonLocked=\(String(describing: snapshot.argonLocked)) buckets=\(snapshot.buckets.map(\.id))")
         }
         print("LIVE usage: \(logins.count) accounts in \(seconds)s, cold cache")
     }
@@ -282,8 +353,8 @@ final class UsageTests: XCTestCase {
 }
 
 private extension CloudCodeUsage {
-    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
-        fetch(logins, within: budget)
+    func fetch(_ logins: [(name: String, blob: String)], project: String = "") -> [String: UsageSnapshot] {
+        fetch(logins.map { (name: $0.name, blob: $0.blob, project: project) }, within: budget)
     }
 }
 
@@ -292,7 +363,15 @@ private final class ScriptedHTTP: HTTPPosting {
     var tokenSecrets: [String] = []
     var offline = false
     var summaryStatus = 200
-    private let rightSecret: String
+    var modelsStatus = 200
+    var warmed: [URL] = []
+
+    func warm(_ url: URL) {
+        lock.lock()
+        warmed.append(url)
+        lock.unlock()
+    }
+    var rightSecret: String
     private let plan: String
     private let summary: String
     private let lock = NSLock()
@@ -329,6 +408,8 @@ private final class ScriptedHTTP: HTTPPosting {
             return HTTPResponse(status: 200, body: Data(plan.utf8))
         case "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary":
             return HTTPResponse(status: summaryStatus, body: Data(summary.utf8))
+        case "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels":
+            return HTTPResponse(status: modelsStatus, body: Data(#"{"models":{"gemini-4-argon-disabled":{"disabled":true}}}"#.utf8))
         default:
             return HTTPResponse(status: 404, body: Data())
         }

@@ -577,6 +577,27 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.run(["list"]).errors, [])
     }
 
+    func testListMarksAPlanWhosePaidModelsAreLocked() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        func plan(_ id: String, _ locked: Bool?) throws -> String {
+            fixture.usage.snapshots = ["alice": UsageSnapshot(planID: id, planName: "", buckets: [], argonLocked: locked, project: "p-\(id)")]
+            let shown = fixture.run(["refresh", "quota"])
+            XCTAssertEqual(shown.code, 0)
+            return try XCTUnwrap(shown.output.first.map(cells))[2]
+        }
+        XCTAssertEqual(try plan("g1-pro-tier", true), "Pro（非付费）")
+        XCTAssertEqual(fixture.usage.hints.last, [""])
+        XCTAssertEqual(try plan("g1-pro-tier", nil), "Pro（非付费）")
+        XCTAssertEqual(fixture.usage.hints.last, ["p-g1-pro-tier"])
+        XCTAssertEqual(try plan("g1-pro-tier", false), "Pro")
+        XCTAssertEqual(try plan("g1-pro-tier", nil), "Pro")
+        XCTAssertEqual(try plan("free-tier", true), "Free")
+        XCTAssertEqual(fixture.run(["language", "en"]).code, 0)
+        XCTAssertEqual(try plan("g1-pro-tier", true), "Pro (non-paid)")
+    }
+
     func testRefreshQuotaReportsUnreadableCopiesAndWaitsForARunningLookup() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let fixture = try Fixture(blob: alice)
@@ -1082,8 +1103,14 @@ private final class ScriptedUsage: UsageFetching {
 
     var allowed: [TimeInterval] = []
 
-    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot] {
+    var hints: [[String]] = []
+
+    func fetch(
+        _ logins: [(name: String, blob: String, project: String)],
+        within seconds: TimeInterval
+    ) -> [String: UsageSnapshot] {
         calls.append(logins.map(\.name))
+        hints.append(logins.map(\.project))
         allowed.append(seconds)
         var answer: [String: UsageSnapshot] = [:]
         for login in logins {

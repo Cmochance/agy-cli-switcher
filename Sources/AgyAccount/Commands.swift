@@ -218,12 +218,20 @@ struct AccountCommands {
         let spent = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
         let fetched = saved.isEmpty
             ? [:]
-            : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) }, within: usage.budget - spent)
+            : usage.fetch(
+                saved.map { login in
+                    let known = profile.readUsage(login.name, email: login.email)?.project ?? ""
+                    return (name: login.name, blob: login.blob, project: known)
+                },
+                within: usage.budget - spent
+            )
         failed += saved.filter { login in
             // 查询期间这个名字可能已经被删掉或改存成别的登录。
-            guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
+            guard var snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
                 return true
             }
+            // 模型列表这次没取到时，沿用上次记下的结果。
+            snapshot.argonLocked = snapshot.argonLocked ?? profile.readUsage(login.name, email: login.email)?.argonLocked
             return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
         }.map(\.name)
         failed.sort()
@@ -339,7 +347,9 @@ struct AccountCommands {
         for name in names {
             let meta = try profile.read(name)
             let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            let recorded = profile.readUsage(name, email: meta.email).map { usageCells($0, now: moment, timeZone: .current) } ?? []
+            let recorded = profile.readUsage(name, email: meta.email).map { snapshot in
+                usageCells(snapshot, now: moment, timeZone: .current) { text.line(.planUnpaid, $0) }
+            } ?? []
             rows.append(["\(mark) \(name)", meta.email] + recorded)
         }
         alignedRows(rows).forEach(stdout)
