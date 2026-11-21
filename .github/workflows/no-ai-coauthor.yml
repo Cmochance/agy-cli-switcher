@@ -44,7 +44,12 @@ jobs:
             HEAD="$PUSH_AFTER"
           fi
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "range=$HEAD~1..$HEAD" >> "$GITHUB_OUTPUT"
+            # 新建仓库的第一次 push，before 是全 0。根提交没有父提交，HEAD~1 不存在。
+            if git rev-parse --verify "${HEAD}^" >/dev/null 2>&1; then
+              echo "range=$HEAD~1..$HEAD" >> "$GITHUB_OUTPUT"
+            else
+              echo "range=$HEAD" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "range=$BASE..$HEAD" >> "$GITHUB_OUTPUT"
           fi
