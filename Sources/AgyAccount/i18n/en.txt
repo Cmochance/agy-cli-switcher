@@ -204,6 +204,9 @@ Login did not finish, so the previous keychain login was restored.
 [loginNotFinished]
 Login did not finish.
 
+[loginRestored]
+The previous keychain login was restored.
+
 [startingAgy]
 Starting agy in this terminal.
 

@@ -318,6 +318,78 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(failed.keychain.writes, [alice])
     }
 
+    func testAddAccountRestoresOriginalLoginWhenPollingFails() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+
+        let denied = try Fixture(blob: alice)
+        defer { denied.cleanup() }
+        XCTAssertEqual(denied.run(["save", "alice"]).code, 0)
+        try FileManager.default.removeItem(at: denied.locations.tokenURL("alice"))
+        denied.terminal.isInteractive = true
+        denied.terminal.lines = ["2"]
+        denied.launcher.supply = {
+            denied.keychain.blob = carol
+            denied.keychain.missing = false
+            denied.keychain.denied = true
+        }
+        let refused = denied.run(["switch"])
+        XCTAssertEqual(refused.code, 1)
+        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("钥匙串没有允许读取"))
+        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("已恢复原来的钥匙串登录"))
+        XCTAssertEqual(denied.launcher.started, 0)
+        XCTAssertEqual(denied.keychain.blob, alice)
+        XCTAssertFalse(denied.keychain.missing)
+        XCTAssertEqual(denied.keychain.writes, [alice])
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: denied.locations.tokenURL("alice"), encoding: .utf8)),
+            alice
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: denied.locations.tokenURL("carol").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: denied.quota.path))
+
+        let unfinished = try Fixture(blob: alice)
+        defer { unfinished.cleanup() }
+        XCTAssertEqual(unfinished.run(["save", "alice"]).code, 0)
+        unfinished.terminal.isInteractive = true
+        unfinished.terminal.lines = ["2"]
+        unfinished.launcher.supply = {
+            unfinished.keychain.blob = "go-keyring-base64:" + Data("{}".utf8).base64EncodedString()
+            unfinished.keychain.missing = false
+        }
+        let partial = unfinished.run(["switch"])
+        XCTAssertEqual(partial.code, 1)
+        XCTAssertTrue(partial.errors.joined(separator: "\n").contains("已恢复"))
+        XCTAssertEqual(unfinished.keychain.blob, alice)
+        XCTAssertEqual(unfinished.keychain.writes, [alice])
+
+        let carolElsewhere = makeBlob(email: "carol@elsewhere.com", refresh: "e")
+        let taken = try Fixture(blob: carolElsewhere)
+        defer { taken.cleanup() }
+        XCTAssertEqual(taken.run(["save", "carol"]).code, 0)
+        taken.keychain.blob = alice
+        XCTAssertEqual(taken.run(["save", "alice"]).code, 0)
+        taken.terminal.isInteractive = true
+        taken.terminal.lines = ["2"]
+        taken.launcher.supply = {
+            taken.keychain.blob = carol
+            taken.keychain.missing = false
+        }
+        let clashed = taken.run(["switch"])
+        XCTAssertEqual(clashed.code, 1)
+        XCTAssertTrue(clashed.errors.joined(separator: "\n").contains("名字 carol 已经被 carol@elsewhere.com 使用"))
+        XCTAssertTrue(clashed.errors.joined(separator: "\n").contains("已恢复原来的钥匙串登录"))
+        XCTAssertEqual(taken.launcher.started, 0)
+        XCTAssertEqual(taken.keychain.blob, alice)
+        XCTAssertFalse(taken.keychain.missing)
+        XCTAssertEqual(taken.keychain.writes, [alice])
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: taken.locations.tokenURL("carol"), encoding: .utf8)),
+            carolElsewhere
+        )
+        XCTAssertEqual(taken.run(["current"]).output, ["alice@example.com"])
+    }
+
     func testRenameMovesCatalogWithoutReadingKeychain() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let bob = makeBlob(email: "bob@example.com", refresh: "b")
@@ -417,9 +489,13 @@ private final class MemoryKeychain: KeychainStoring {
     }
 
     var missing = false
+    var denied = false
 
     func readBlob() throws -> String {
         reads += 1
+        if denied {
+            throw AccountFailure(.keychainDenied)
+        }
         if missing {
             throw AccountFailure(.keychainMissing)
         }
@@ -430,6 +506,7 @@ private final class MemoryKeychain: KeychainStoring {
         writes.append(blob)
         self.blob = blob
         missing = false
+        denied = false
     }
 
     func deleteBlob() throws {

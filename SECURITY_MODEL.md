@@ -46,7 +46,7 @@ Trust boundaries:
 - `checkName`: names are `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, which blocks `/` and a leading `.`, so names cannot traverse paths.
 - `AtomicFile.write`: temp file opened 0600 with O_CREAT|O_TRUNC (no O_EXCL/O_NOFOLLOW), fsync, rename, then chmod 600; the parent directory is chmod 700.
 - Keychain access goes through Security.framework, not the `security` CLI, so tokens never appear in argv.
-- `writeBlob` verifies after writing and restores the original when they differ; `addAccount` restores the snapshot when the login is cancelled or agy fails to launch.
+- `writeBlob` verifies after writing and restores the original when they differ; `addAccount` saves the snapshot to a token file before deleting the keychain item, and restores it on any error before the new login is saved (cancelled login, agy launch failure, keychain read denied, name clash); the spawned agy is terminated if polling throws.
 - `.gitignore` excludes `*.token` and `accounts/`; AGENTS.md forbids printing tokens.
 - CI workflows use `permissions: contents: read` (no-ai-coauthor) and no secrets.
 
