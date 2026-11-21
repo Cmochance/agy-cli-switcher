@@ -46,7 +46,7 @@ final class CatalogTests: XCTestCase {
 
         for language in AppLanguage.allCases {
             let help = try XCTUnwrap(byLanguage[language]?.values["help"])
-            for token in ["current", "list", "save", "switch", "next", "rename", "rm", "language", "help"] {
+            for token in ["current", "list", "save", "switch", "switch add", "next", "rename", "rm", "language", "help"] {
                 XCTAssertTrue(help.contains(token), "\(language.rawValue) help missing \(token)")
             }
         }
@@ -77,6 +77,9 @@ final class CatalogTests: XCTestCase {
         }
         XCTAssertTrue(makefile.contains("swift test --disable-sandbox"))
         XCTAssertTrue(makefile.contains("ln -sfn"))
+        XCTAssertTrue(makefile.contains("agy-cs_AgyAccount.bundle"))
+        XCTAssertTrue(makefile.contains("rm -f build/agy-cs"))
+        XCTAssertTrue(makefile.contains("codesign --force --sign - build/agy-cs"))
         XCTAssertTrue(guide.contains("[saved]"))
         XCTAssertTrue(guide.contains("zh-Hans.txt"))
         XCTAssertTrue(guide.contains("%1"))

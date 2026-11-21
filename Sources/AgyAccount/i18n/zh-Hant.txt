@@ -10,6 +10,7 @@
   list, ls                     列出已保存的帳號。不寫指令時也是這條
   save <名字>                  把目前鑰匙圈登入存成一個名字
   switch                       在終端機裡選擇。第 1 項是目前帳號，不能選；第 2 項新增帳號；從第 3 項起是已有帳號。完成後啟動 agy
+  switch add                   直接新增帳號，不進入選擇。先保住目前登入，再開啟 agy
   switch <名字>                切換到已保存的帳號
   next                         切換到下一個已保存的帳號
   rename <新名字>              把目前帳號改名為新名字，不開啟鑰匙圈
@@ -25,7 +26,7 @@ help、-h、--help 都顯示這份說明。
 首次安裝且還沒有帳號記錄時，會讀取一次鑰匙圈，用電子郵件 @ 前面的字元保存目前登入。
 之後 current、list、rm、rename、language、help 只讀 ~/.agy-cs/ 裡的非密鑰記錄。
 save、switch、next，以及上面這次初始化，才會讀取鑰匙圈。密鑰副本仍在 ~/.gemini/antigravity-cli/accounts/。
-不帶名字的 switch 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
+不帶名字的 switch 和 switch add 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
 
 [operationFailed]
 沒能完成帳號操作。
@@ -195,6 +196,9 @@ language 只接受一個語言代碼。執行 agy-cs language 查看可選語言
 [switchNeedsTerminal]
 不帶名字的 switch 需要在終端機裡選擇。直接切換請執行 agy-cs switch <名字>。
 
+[switchAddNeedsTerminal]
+agy-cs switch add 需要在終端機裡登入新帳號。
+
 [loginOpening]
 將在目前終端機開啟 agy 登入新帳號。登入完成後會保存，並重新開啟 agy。
 
@@ -227,6 +231,9 @@ rename 最多接受兩個名字。執行 agy-cs help 查看全部指令。
 
 [nameTaken]
 名字 %1 已經被 %2 使用。
+
+[nameReserved]
+%1 是 agy-cs switch %1 用的詞，不能當作帳號名。請換一個名字。電子郵件 @ 前面正好是 %1 時，先在 agy 裡登入，再執行 agy-cs save <名字>。
 
 [initializedSaved]
 已初始化目前登入: %1  %2

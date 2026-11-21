@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import AgyAccount
 
@@ -257,9 +258,82 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(again.keychain.reads, reads)
         XCTAssertEqual(again.launcher.started, 0)
         XCTAssertEqual(again.run(["switch", "alice", "extra"]).code, 2)
+        XCTAssertEqual(again.run(["switch", "add", "extra"]).code, 2)
         again.terminal.isInteractive = false
         XCTAssertEqual(again.run(["switch"]).code, 2)
         XCTAssertEqual(again.launcher.started, 0)
+    }
+
+    func testSwitchAddSkipsTheMenuAndKeepsTheSavedNameAdd() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        try fixture.writeLegacyRecord(name: "add", blob: alice)
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = {
+            fixture.keychain.blob = carol
+            fixture.keychain.missing = false
+        }
+        let added = fixture.run(["switch", "add"])
+        XCTAssertEqual(added.code, 0)
+        XCTAssertEqual(fixture.launcher.started, 1)
+        XCTAssertFalse(added.output.contains("选择序号"))
+        XCTAssertFalse(added.output.contains("已切换到 add"))
+        XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
+        XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: fixture.locations.tokenURL("add"), encoding: .utf8)),
+            alice
+        )
+
+        fixture.terminal.isInteractive = false
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 2)
+        XCTAssertEqual(fixture.launcher.started, 1)
+    }
+
+    func testAddIsRefusedAsANewNameButOldRecordsStayUsable() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        let saved = fixture.run(["save", "add"])
+        XCTAssertEqual(saved.code, 1)
+        XCTAssertTrue(saved.errors.joined(separator: "\n").contains("agy-cs switch add"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("add").path))
+        let renamed = fixture.run(["rename", "alice", "add"])
+        XCTAssertEqual(renamed.code, 1)
+        XCTAssertTrue(renamed.errors.joined(separator: "\n").contains("agy-cs switch add"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
+
+        try fixture.writeLegacyRecord(name: "add", blob: alice)
+        XCTAssertTrue(fixture.run(["list"]).output.contains("* add  alice@example.com"))
+        XCTAssertEqual(fixture.run(["rename", "add", "older"]).code, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("older").path))
+        try fixture.writeLegacyRecord(name: "add", blob: alice)
+        XCTAssertEqual(fixture.run(["rm", "add"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("add").path))
+
+        let mailbox = makeBlob(email: "add@example.com", refresh: "d")
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = {
+            fixture.keychain.blob = mailbox
+            fixture.keychain.missing = false
+        }
+        let added = fixture.run(["switch", "add"])
+        XCTAssertEqual(added.code, 1)
+        XCTAssertTrue(added.errors.joined(separator: "\n").contains("agy-cs save"))
+        XCTAssertTrue(added.errors.joined(separator: "\n").contains("已恢复原来的钥匙串登录"))
+        XCTAssertEqual(fixture.keychain.blob, alice)
+        XCTAssertEqual(fixture.launcher.started, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("add").path))
+
+        let first = try Fixture(blob: mailbox, markInitialized: false)
+        defer { first.cleanup() }
+        let listed = first.run(["list"])
+        XCTAssertTrue(listed.errors.joined(separator: "\n").contains("save"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.tool.profileURL("add").path))
     }
 
     func testAddAccountSavesLocalPartAndRestoresWhenLoginStops() throws {
@@ -533,6 +607,43 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(second.code, 1)
         XCTAssertEqual(denied.reads, 4)
     }
+
+    func testChildWaitDistinguishesStopFromExit() {
+        XCTAssertEqual(classifyWait(waited: 0, pid: 10, status: 0, callErrno: 0), .running)
+        XCTAssertEqual(classifyWait(waited: -1, pid: 10, status: 0, callErrno: EINTR), .running)
+        XCTAssertEqual(classifyWait(waited: -1, pid: 10, status: 0, callErrno: ECHILD), .finished)
+        let stopped = (SIGTSTP << 8) | 0x7f
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: stopped, callErrno: 0), .stopped(SIGTSTP))
+        let continued = (SIGCONT << 8) | 0x7f
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: continued, callErrno: 0), .running)
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: 0, callErrno: 0), .finished)
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: SIGTERM, callErrno: 0), .finished)
+    }
+
+    func testStoppedChildIsCancelledOnlyForTerminalStop() {
+        XCTAssertEqual(nextStep(after: .running), .keepWaiting)
+        XCTAssertEqual(nextStep(after: .stopped(SIGTSTP)), .cancel)
+        XCTAssertEqual(nextStep(after: .stopped(SIGTTIN)), .resume)
+        XCTAssertEqual(nextStep(after: .stopped(SIGTTOU)), .resume)
+        XCTAssertEqual(nextStep(after: .stopped(SIGSTOP)), .resume)
+        XCTAssertEqual(nextStep(after: .finished), .finished)
+    }
+
+    func testTerminalIsOnlyUsedFromTheForeground() {
+        XCTAssertTrue(ownsForeground(foreground: 10, own: 10))
+        XCTAssertFalse(ownsForeground(foreground: 11, own: 10))
+        XCTAssertFalse(ownsForeground(foreground: -1, own: 10))
+        XCTAssertFalse(ownsForeground(foreground: -1, own: -1))
+    }
+
+    func testKeychainDeleteFallsBackToItemReferenceForOwnerEdit() {
+        XCTAssertEqual(classifyDelete(errSecSuccess), .done)
+        XCTAssertEqual(classifyDelete(errSecItemNotFound), .done)
+        XCTAssertEqual(classifyDelete(errSecInvalidOwnerEdit), .byReference)
+        XCTAssertEqual(classifyDelete(-25244), .byReference)
+        XCTAssertEqual(classifyDelete(errSecAuthFailed), .failed)
+        XCTAssertEqual(classifyDelete(errSecUserCanceled), .failed)
+    }
 }
 
 private final class MemoryKeychain: KeychainStoring {
@@ -679,6 +790,13 @@ private final class Fixture {
 
     func cleanup() {
         try? FileManager.default.removeItem(at: home)
+    }
+
+    func writeLegacyRecord(name: String, blob: String) throws {
+        let now = { "2026-01-01T00:00:00Z" }
+        let meta = try decodeLogin(blob, source: .saved)
+        try AccountFiles(locations: locations, now: now).writeSaved(name: name, blob: blob, meta: meta)
+        try ToolProfile(home: home, now: now, preferredLanguages: ["zh-Hans"]).write(name: name, meta: meta)
     }
 
     func run(_ args: [String]) -> CommandResult {

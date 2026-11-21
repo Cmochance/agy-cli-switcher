@@ -3,7 +3,12 @@
 build:
 	swift build -c release
 	mkdir -p build
-	cp -f "$$(swift build -c release --show-bin-path)/agy-cs" build/agy-cs
+	bin_dir="$$(swift build -c release --show-bin-path)" && \
+	rm -f build/agy-cs && \
+	cp -f "$$bin_dir/agy-cs" build/agy-cs && \
+	codesign --force --sign - build/agy-cs && \
+	rm -rf build/agy-cs_AgyAccount.bundle && \
+	cp -R "$$bin_dir/agy-cs_AgyAccount.bundle" build/agy-cs_AgyAccount.bundle
 
 test:
 	swift test --disable-sandbox

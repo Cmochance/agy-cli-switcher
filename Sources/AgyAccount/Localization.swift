@@ -121,6 +121,7 @@ enum TextKey: String, CaseIterable {
     case menuCurrentLocked
     case menuBadChoice
     case switchNeedsTerminal
+    case switchAddNeedsTerminal
     case loginOpening
     case loginCancelled
     case loginNotFinished
@@ -132,6 +133,7 @@ enum TextKey: String, CaseIterable {
     case renameTooMany
     case renameFailed
     case nameTaken
+    case nameReserved
     case initializedSaved
     case initializedNoLogin
     case initializedNameRejected

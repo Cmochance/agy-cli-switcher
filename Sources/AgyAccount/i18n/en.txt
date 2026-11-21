@@ -10,6 +10,7 @@ Commands
   list, ls                     List saved accounts. This is the default command
   save <name>                  Save the current keychain login under a name
   switch                       Choose in the terminal. Item 1 is the current account and cannot be selected; item 2 adds an account; later items are saved accounts. agy then starts
+  switch add                   Add an account directly, without the menu. The current login is kept, then agy opens
   switch <name>                Switch to a saved account
   next                         Switch to the next saved account
   rename <new>                 Rename the current account. This does not open the keychain
@@ -25,7 +26,7 @@ With no language chosen, agy-cs follows the system language. Codes: zh-Hans ç®€ä
 On the first run, when no account is recorded yet, agy-cs reads the keychain once and saves the current login under the characters before @.
 After that, current, list, rm, rename, language, and help read only the non-secret records in ~/.agy-cs/.
 save, switch, next, and that first-run initialization read the keychain. Secret copies stay in ~/.gemini/antigravity-cli/accounts/.
-Only switch without a name starts agy in this terminal. Adding an account keeps the current login first, then opens agy. If you quit before a new email is stored, the previous login is restored.
+Only switch without a name, and switch add, start agy in this terminal. Adding an account keeps the current login first, then opens agy. If you quit before a new email is stored, the previous login is restored.
 
 [operationFailed]
 Couldn't finish the account operation.
@@ -195,6 +196,9 @@ That number is not in the list.
 [switchNeedsTerminal]
 switch without a name needs a terminal. Run agy-cs switch <name> to switch directly.
 
+[switchAddNeedsTerminal]
+agy-cs switch add needs a terminal to sign in to a new account.
+
 [loginOpening]
 agy will open in this terminal so you can log in. After that, the login is saved and agy opens again.
 
@@ -227,6 +231,9 @@ Couldn't rename account %1.
 
 [nameTaken]
 The name %1 is already used by %2.
+
+[nameReserved]
+%1 is the word used by agy-cs switch %1, so it cannot be an account name. Choose another name. If the characters before @ in the email are exactly %1, log in with agy first, then run agy-cs save <name>.
 
 [initializedSaved]
 Initialized the current login: %1  %2

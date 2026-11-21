@@ -24,6 +24,7 @@ protocol AgyLaunching {
 struct StandardTerminal: LineReading {
     var isInteractive: Bool {
         isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+            && ownsForeground(foreground: tcgetpgrp(STDIN_FILENO), own: getpgrp())
     }
 
     func readLine() -> String? {
@@ -37,9 +38,23 @@ struct InteractiveAgy: AgyLaunching {
         let pid = try spawn(binary)
         let tty = STDIN_FILENO
         let ownGroup = getpgrp()
-        let handedOff = isatty(tty) != 0 && tcsetpgrp(tty, pid) == 0
+        let interactive = isatty(tty) != 0
+        if interactive {
+            // 交出前台时不忽略 SIGTTOU：本进程在后台的话，这里会被停住，而不是把终端从 shell 手里拿走。
+            let owned = ownsForeground(foreground: tcgetpgrp(tty), own: ownGroup)
+            guard owned, tcsetpgrp(tty, pid) == 0 else {
+                let detail = String(owned ? errno : ENOTTY)
+                terminate(pid)
+                throw AccountFailure(.agyLaunchFailed, detail)
+            }
+            _ = kill(pid, SIGCONT)
+        }
+        // 前台交给 agy 后，本进程再 tcsetpgrp 会收到 SIGTTOU，shell 显示 suspended (tty output)。
+        // 忽略期间才能把终端收回来。defer 反序执行：先交还前台，再恢复原来的信号处理。
+        let savedStops = ignoreTerminalStopSignals()
+        defer { restoreTerminalStopSignals(savedStops) }
         defer {
-            if handedOff {
+            if interactive {
                 _ = tcsetpgrp(tty, ownGroup)
             }
         }
@@ -56,14 +71,20 @@ struct InteractiveAgy: AgyLaunching {
                 return .loggedIn(observed)
             }
             var status: Int32 = 0
-            let waited = waitpid(pid, &status, WNOHANG)
-            if waited == pid {
+            let waited = waitpid(pid, &status, WNOHANG | WUNTRACED)
+            let waitError = errno
+            switch nextStep(after: classifyWait(waited: waited, pid: pid, status: status, callErrno: waitError)) {
+            case .keepWaiting:
+                break
+            case .cancel:
+                terminate(pid)
+                return .exited
+            case .resume:
+                _ = kill(-pid, SIGCONT)
+            case .finished:
                 if let observed = try poll() {
                     return .loggedIn(observed)
                 }
-                return .exited
-            }
-            if waited == -1 && errno != EINTR {
                 return .exited
             }
             usleep(200_000)
@@ -96,6 +117,8 @@ struct InteractiveAgy: AgyLaunching {
         sigemptyset(&defaults)
         sigaddset(&defaults, SIGINT)
         sigaddset(&defaults, SIGTERM)
+        sigaddset(&defaults, SIGTTOU)
+        sigaddset(&defaults, SIGTTIN)
         posix_spawnattr_setsigdefault(&attributes, &defaults)
         posix_spawnattr_setpgroup(&attributes, 0)
         let flags = Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF)
@@ -111,6 +134,8 @@ struct InteractiveAgy: AgyLaunching {
     }
 
     private func terminate(_ pid: pid_t) {
+        // 停住的子进程要先继续，SIGTERM 才会被处理。
+        _ = kill(-pid, SIGCONT)
         _ = kill(-pid, SIGTERM)
         let deadline = Date().addingTimeInterval(2)
         while Date() < deadline {
@@ -125,6 +150,72 @@ struct InteractiveAgy: AgyLaunching {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
     }
+}
+
+enum ChildWait: Equatable {
+    case running
+    case stopped(Int32)
+    case finished
+}
+
+func classifyWait(waited: pid_t, pid: pid_t, status: Int32, callErrno: Int32) -> ChildWait {
+    if waited == 0 || (waited == -1 && callErrno == EINTR) {
+        return .running
+    }
+    guard waited == pid else {
+        return .finished
+    }
+    let signal = (status >> 8) & 0xff
+    if (status & 0x7f) == 0x7f {
+        return signal == SIGCONT ? .running : .stopped(signal)
+    }
+    return .finished
+}
+
+enum WaitStep: Equatable {
+    case keepWaiting
+    case resume
+    case cancel
+    case finished
+}
+
+func nextStep(after wait: ChildWait) -> WaitStep {
+    switch wait {
+    case .running:
+        return .keepWaiting
+    case .stopped(let signal):
+        return signal == SIGTSTP ? .cancel : .resume
+    case .finished:
+        return .finished
+    }
+}
+
+func ownsForeground(foreground: pid_t, own: pid_t) -> Bool {
+    foreground != -1 && foreground == own
+}
+
+private struct TerminalStopDisposition {
+    var output: sigaction
+    var input: sigaction
+}
+
+private func ignoreTerminalStopSignals() -> TerminalStopDisposition {
+    var ignore = sigaction()
+    ignore.__sigaction_u.__sa_handler = SIG_IGN
+    sigemptyset(&ignore.sa_mask)
+    ignore.sa_flags = 0
+    var output = sigaction()
+    var input = sigaction()
+    _ = sigaction(SIGTTOU, &ignore, &output)
+    _ = sigaction(SIGTTIN, &ignore, &input)
+    return TerminalStopDisposition(output: output, input: input)
+}
+
+private func restoreTerminalStopSignals(_ saved: TerminalStopDisposition) {
+    var output = saved.output
+    var input = saved.input
+    _ = sigaction(SIGTTOU, &output, nil)
+    _ = sigaction(SIGTTIN, &input, nil)
 }
 
 func agyExecutable() throws -> String {

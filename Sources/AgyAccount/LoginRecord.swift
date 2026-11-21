@@ -38,11 +38,21 @@ func checkName(_ name: String) throws -> String {
     return name
 }
 
+let reservedName = "add"
+
+func checkNewName(_ name: String) throws -> String {
+    let checked = try checkName(name)
+    guard checked != reservedName else {
+        throw AccountFailure(.nameReserved, checked)
+    }
+    return checked
+}
+
 func defaultAccountName(email: String) throws -> String {
     guard let separator = email.firstIndex(of: "@"), separator != email.startIndex else {
         throw AccountFailure(.invalidName)
     }
-    return try checkName(String(email[..<separator]))
+    return try checkNewName(String(email[..<separator]))
 }
 
 func decodeLogin(_ blob: String, source: LoginSource) throws -> LoginMeta {

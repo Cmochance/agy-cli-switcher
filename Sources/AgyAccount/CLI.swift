@@ -85,6 +85,8 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         switch arguments.count {
         case 1:
             return .choose
+        case 2 where arguments[1] == reservedName:
+            return .add
         case 2:
             return .change(arguments[1])
         default:
