@@ -81,6 +81,15 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(board.load().text.line(.panelQuit), "Quit")
         XCTAssertEqual(AccountBoard.languages.map(\.code), ["zh-Hans", "zh-Hant", "en", "ja"])
 
+        // 列出名字之后、读它之前被别的进程删掉的记录：跳过，不算整份名单读不出来。
+        try FileManager.default.createSymbolicLink(
+            at: fixture.tool.profileURL("ghost"),
+            withDestinationURL: fixture.tool.profileURL("gone-meanwhile")
+        )
+        XCTAssertFalse(board.load().failed)
+        XCTAssertEqual(board.load().rows.map(\.name), ["bob"])
+        XCTAssertEqual(fixture.run(["list"]).code, 0)
+
         try Data("{".utf8).write(to: fixture.tool.profileURL("bob"))
         let broken = board.load()
         XCTAssertTrue(broken.failed)
@@ -380,15 +389,14 @@ final class BoardTests: XCTestCase {
             }
         }
 
-        // 不知道面板在哪个窗口里时不计时：只在打开的那一下读一次。
-        let detached = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0.05, open: { _ in true })
-        detached.panelOpened()
-
         model.panelOpened()
         XCTAssertEqual(fixture.run(["rename", "bob", "bobby"]).code, 0)
         await wait { model.state.rows.map(\.name) == ["alice", "bobby"] }
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bobby"])
-        XCTAssertEqual(detached.state.rows.map(\.name), ["alice", "bob"])
+
+        // 不知道面板在哪个窗口里时不计时：只在打开的那一下读一次。
+        let detached = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0.05, open: { _ in true })
+        detached.panelOpened()
 
         model.switchTo(model.state.rows[0])
         await settle(model)
@@ -408,6 +416,7 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.run(["rename", "bobby", "bob"]).code, 0)
         try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bobby"])
+        XCTAssertEqual(detached.state.rows.map(\.name), ["alice", "bobby"])
 
         // 没做成的那句话留到下次打开。
         model.ask(.save)

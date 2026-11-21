@@ -343,8 +343,16 @@ struct AccountCommands {
     func listing() throws -> [AccountRow] {
         let activeEmail = profileEmail(profile.activeName())
         let moment = parseTimestamp(profile.now()) ?? Date()
-        return try profile.names().map { name in
-            let meta = try profile.read(name)
+        return try profile.names().compactMap { name in
+            // 面板每两秒读一次，别的进程可能正在改名或删除：列出名字之后、读它之前，这条记录没了就跳过。
+            let meta: LoginMeta
+            do {
+                meta = try profile.read(name)
+            } catch let error as AccountFailure
+                where error.key == .accountMissing || error.key == .accountMissingNone || !profile.names().contains(name)
+            {
+                return nil
+            }
             return AccountRow(
                 name: name,
                 email: meta.email,
