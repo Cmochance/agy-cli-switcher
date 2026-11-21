@@ -90,10 +90,13 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(makefile.contains("codesign --force --sign - build/agy-cs"))
         for token in [
             "rm -rf \"$(2)\"", "Packaging/Info.plist", "Packaging/AppIcon.icns", "Contents/MacOS/agy-cs",
-            "--arch arm64 --arch x86_64", "agy-cs-macos-universal.tar.gz", "Agy-Switcher.zip", "SHA256SUMS.txt"
+            "for arch in arm64 x86_64", "--arch $$arch", "lipo -create",
+            "agy-cs-macos-universal.tar.gz", "Agy-Switcher.zip", "SHA256SUMS.txt"
         ] {
             XCTAssertTrue(makefile.contains(token), token)
         }
+        // 一次传两个 --arch 在 Xcode 26.6 上编译不过（CI 实测），见 Makefile 里的说明。
+        XCTAssertFalse(makefile.contains("--arch arm64 --arch x86_64"))
         XCTAssertTrue(guide.contains("[saved]"))
         XCTAssertTrue(guide.contains("zh-Hans.txt"))
         XCTAssertTrue(guide.contains("%1"))

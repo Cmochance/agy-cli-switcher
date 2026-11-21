@@ -32,12 +32,18 @@ install: build
 app: build
 	$(call bundle,build/agy-cs,build/$(APP_NAME).app)
 
+# 两个架构分开编译再用 lipo 合并。一次传两个 --arch 时，Xcode 26.6 的 SwiftPM 换用另一套构建系统，
+# 它不生成 embedInCode 的 PackageResources，编译不过（CI 实测）。每个架构编完就拷走，
+# 因为有的版本两次编译用同一个输出目录。
 dist:
-	swift build -c release --arch arm64 --arch x86_64
 	rm -rf dist
-	mkdir -p dist/cli dist/app
-	bin_dir="$$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)" && \
-	cp "$$bin_dir/agy-cs" dist/cli/agy-cs && \
+	mkdir -p dist/thin dist/cli dist/app
+	for arch in arm64 x86_64; do \
+		swift build -c release --arch $$arch && \
+		cp "$$(swift build -c release --arch $$arch --show-bin-path)/agy-cs" dist/thin/$$arch || exit 1; \
+	done
+	lipo -create -output dist/cli/agy-cs dist/thin/arm64 dist/thin/x86_64
+	rm -rf dist/thin
 	codesign --force --sign "$(SIGN_IDENTITY)" dist/cli/agy-cs
 	$(call bundle,dist/cli/agy-cs,dist/app/$(APP_NAME).app)
 	tar --no-mac-metadata -czf dist/agy-cs-macos-universal.tar.gz -C dist/cli agy-cs
