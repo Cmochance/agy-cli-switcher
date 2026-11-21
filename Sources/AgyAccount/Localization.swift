@@ -92,6 +92,7 @@ enum TextKey: String, CaseIterable {
     case writeFailed
     case deleteFailed
     case quotaFailed
+    case usageFailed
     case noSavedAccounts
     case saved
     case alreadyActive

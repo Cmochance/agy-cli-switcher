@@ -6,10 +6,14 @@ struct ToolLocations {
     var languageFile: URL
     var activeFile: URL
     var initializedFile: URL
+    var usageDirectory: URL
+    var clientFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
+        usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
+        clientFile = root.appendingPathComponent("agy-client.json")
         languageFile = root.appendingPathComponent("language")
         activeFile = root.appendingPathComponent("active")
         initializedFile = root.appendingPathComponent("initialized")
@@ -17,6 +21,10 @@ struct ToolLocations {
 
     func profileURL(_ name: String) -> URL {
         accountsDirectory.appendingPathComponent("\(name).json")
+    }
+
+    func usageURL(_ name: String) -> URL {
+        usageDirectory.appendingPathComponent("\(name).json")
     }
 }
 
@@ -116,6 +124,19 @@ struct ToolProfile {
         }
     }
 
+    func readUsage(_ name: String) -> UsageSnapshot? {
+        (try? Data(contentsOf: locations.usageURL(name))).flatMap(decodeUsage)
+    }
+
+    func writeUsage(_ name: String, _ snapshot: UsageSnapshot) throws {
+        try AtomicFile.write(locations.usageURL(name), encodeUsage(snapshot, fetchedAt: now()))
+    }
+
+    func moveUsage(from source: String, to target: String) {
+        try? manager.removeItem(at: locations.usageURL(target))
+        try? manager.moveItem(at: locations.usageURL(source), to: locations.usageURL(target))
+    }
+
     func isInitialized() -> Bool {
         manager.fileExists(atPath: locations.initializedFile.path)
     }
@@ -133,6 +154,7 @@ struct ToolProfile {
                 throw AccountFailure(.deleteFailed, name)
             }
         }
+        try? manager.removeItem(at: locations.usageURL(name))
         if activeName() == name, manager.fileExists(atPath: locations.activeFile.path) {
             do {
                 try manager.removeItem(at: locations.activeFile)

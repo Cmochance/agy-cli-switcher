@@ -282,6 +282,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertFalse(added.output.contains("选择序号"))
         XCTAssertFalse(added.output.contains("已切换到 add"))
         XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
+        XCTAssertEqual(fixture.usage.calls, [["add", "alice", "carol"]])
         XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
         XCTAssertEqual(
             stripNewlines(try String(contentsOf: fixture.locations.tokenURL("add"), encoding: .utf8)),
@@ -376,6 +377,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(cancelled.keychain.blob, alice)
         XCTAssertFalse(cancelled.keychain.missing)
         XCTAssertEqual(cancelled.keychain.writes, [alice])
+        XCTAssertTrue(cancelled.usage.calls.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cancelled.quota.path))
 
         let failed = try Fixture(blob: alice)
@@ -479,6 +481,66 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.blob, alice)
         XCTAssertTrue(fixture.keychain.writes.isEmpty)
         XCTAssertEqual(fixture.launcher.started, 0)
+    }
+
+    func testSwitchRecordsUsageAndListOnlyReadsTheRecords() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        XCTAssertEqual(fixture.run(["list"]).output, ["  alice  alice@example.com", "* bob  bob@example.com"])
+
+        let pro = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [
+            UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-01-01T03:00:00Z"),
+            UsageBucket(id: "gemini-weekly", remaining: 0.4, resetTime: "2025-12-31T23:00:00Z"),
+            UsageBucket(id: "3p-5h", remaining: 0.1, resetTime: "2026-01-01T03:00:00Z"),
+            UsageBucket(id: "gemini-argon-wtu-weekly", remaining: 1, resetTime: "2026-01-08T00:00:00Z"),
+        ])
+        let free = UsageSnapshot(planID: "free-tier", planName: "Antigravity Starter Quota", buckets: [
+            UsageBucket(id: "gemini-weekly", remaining: 0.9962848, resetTime: "2026-01-07T10:23:00Z"),
+        ])
+        fixture.usage.snapshots = ["alice": pro, "bob": free]
+        let switched = fixture.run(["switch", "alice"])
+        XCTAssertEqual(switched.code, 0)
+        XCTAssertEqual(switched.errors, [])
+        XCTAssertEqual(fixture.usage.calls, [["alice", "bob"]])
+        XCTAssertEqual(try mode(fixture.tool.usageDirectory), 0o700)
+        XCTAssertEqual(try mode(fixture.tool.usageURL("alice")), 0o600)
+        let record = try String(contentsOf: fixture.tool.usageURL("alice"), encoding: .utf8)
+        XCTAssertFalse(record.contains("go-keyring"))
+        XCTAssertFalse(record.contains("refresh"))
+
+        let reads = fixture.keychain.reads
+        let listed = fixture.run(["list"]).output
+        XCTAssertEqual(listed.map(cells), [
+            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
+            ["bob", "bob@example.com", "Free", "5h —", "7d 99% \(localTime("2026-01-07T10:23:00Z"))", "Argon —"],
+        ])
+        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertEqual(fixture.keychain.reads, reads)
+
+        fixture.usage.snapshots = ["alice": pro]
+        let partial = fixture.run(["switch", "bob"])
+        XCTAssertEqual(partial.code, 0)
+        XCTAssertTrue(partial.errors.contains { $0.contains("bob") && $0.contains("额度") })
+        XCTAssertFalse(partial.errors.contains { $0.contains("alice") })
+        XCTAssertEqual(cells(fixture.run(["list"]).output[1])[2], "Free")
+
+        XCTAssertEqual(fixture.run(["rename", "alice", "anna"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("alice").path))
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), [
+            "anna", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%",
+        ])
+        XCTAssertEqual(fixture.run(["rm", "anna"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("anna").path))
+
+        let same = fixture.run(["switch", "bob"])
+        XCTAssertEqual(same.code, 0)
+        XCTAssertEqual(fixture.usage.calls.last, ["bob"])
     }
 
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
@@ -915,12 +977,40 @@ private final class ScriptedLauncher: AgyLaunching {
     }
 }
 
+private final class ScriptedUsage: UsageFetching {
+    var snapshots: [String: UsageSnapshot]?
+    var calls: [[String]] = []
+
+    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
+        calls.append(logins.map(\.name))
+        var answer: [String: UsageSnapshot] = [:]
+        for login in logins {
+            answer[login.name] = snapshots.map { $0[login.name] } ?? UsageSnapshot(planID: "", planName: "", buckets: [])
+        }
+        return answer
+    }
+}
+
+private func cells(_ line: String) -> [String] {
+    line.components(separatedBy: "  ")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+}
+
+private func localTime(_ timestamp: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MM-dd HH:mm"
+    return formatter.string(from: ISO8601DateFormatter().date(from: timestamp)!)
+}
+
 private final class Fixture {
     let home: URL
     let keychain: MemoryKeychain
     let processes = FixedProcesses()
     let terminal = ScriptedTerminal()
     let launcher = ScriptedLauncher()
+    let usage = ScriptedUsage()
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -974,6 +1064,7 @@ private final class Fixture {
             preferredLanguages: ["zh-Hans"],
             terminal: terminal,
             launcher: launcher,
+            usage: usage,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }
         )
@@ -1023,6 +1114,7 @@ private func runCommand(
         preferredLanguages: preferred,
         terminal: ScriptedTerminal(),
         launcher: ScriptedLauncher(),
+        usage: ScriptedUsage(),
         stdout: { capture.output.append($0) },
         stderr: { capture.errors.append($0) }
     )

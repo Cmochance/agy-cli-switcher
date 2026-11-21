@@ -22,6 +22,7 @@ struct AccountCommands {
     var processes: any ProcessListing
     var terminal: any LineReading
     var launcher: any AgyLaunching
+    var usage: any UsageFetching
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -179,7 +180,28 @@ struct AccountCommands {
         }
         stdout(text.line(.saved, name, observed.meta.email))
         reportOtherAgy()
+        recordUsage()
         try launchAgy()
+    }
+
+    // 只在切换和新增账号成功之后联网。list 只读这里写下的记录。失败不影响切换。
+    private func recordUsage() {
+        let logins = profile.names().compactMap { name in
+            (try? files.readSaved(name)).map { (name: name, blob: $0.blob) }
+        }
+        guard !logins.isEmpty else {
+            return
+        }
+        let fetched = usage.fetch(logins)
+        let failed = logins.map(\.name).filter { name in
+            guard let snapshot = fetched[name] else {
+                return true
+            }
+            return (try? profile.writeUsage(name, snapshot)) == nil
+        }
+        if !failed.isEmpty {
+            stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
+        }
     }
 
     private func keepSnapshot(_ snapshot: ObservedLogin) throws {
@@ -244,6 +266,7 @@ struct AccountCommands {
             throw error
         }
         try profile.deleteRecord(source)
+        profile.moveUsage(from: source, to: target)
         if profileWasActive {
             try profile.setActive(target)
         }
@@ -268,11 +291,15 @@ struct AccountCommands {
             return
         }
         let activeEmail = profileEmail(profile.activeName())
+        let moment = parseTimestamp(profile.now()) ?? Date()
+        var rows: [[String]] = []
         for name in names {
             let meta = try profile.read(name)
             let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            stdout("\(mark) \(name)  \(meta.email)")
+            let recorded = profile.readUsage(name).map { usageCells($0, now: moment, timeZone: .current) } ?? []
+            rows.append(["\(mark) \(name)", meta.email] + recorded)
         }
+        alignedRows(rows).forEach(stdout)
     }
 
     private func save(_ name: String) throws {
@@ -299,6 +326,7 @@ struct AccountCommands {
             if !updated.isEmpty {
                 stdout(text.line(.refreshedTokens, updated.joined(separator: ", ")))
             }
+            recordUsage()
             return
         }
         if profile.slots(forEmail: current.email).isEmpty {
@@ -317,6 +345,7 @@ struct AccountCommands {
         }
         reportOtherAgy()
         stdout(text.line(.reopenAgy))
+        recordUsage()
     }
 
     private func next() throws {

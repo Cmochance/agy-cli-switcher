@@ -7,7 +7,7 @@ Usage
 
 Commands
   current                      Show the recorded email. This does not open the keychain
-  list, ls                     List saved accounts. This is the default command
+  list, ls                     List saved accounts with the plan and quota recorded at the last switch. This is the default command
   save <name>                  Save the current keychain login under a name
   switch                       Choose in the terminal. Item 1 is the current account and cannot be selected; item 2 adds an account; later items are saved accounts. agy then starts
   switch add                   Add an account directly, without the menu. The current login is kept, then agy opens
@@ -26,6 +26,7 @@ With no language chosen, agy-cs follows the system language. Codes: zh-Hans ç®€ä
 On the first run, when no account is recorded yet, agy-cs reads the keychain once and saves the current login under the characters before @.
 After that, current, list, rm, rename, language, and help read only the non-secret records in ~/.agy-cs/.
 save, switch, next, and that first-run initialization read the keychain. Secret copies stay in ~/.gemini/antigravity-cli/accounts/.
+After a switch, next, or a new account, agy-cs asks Google for each account's plan and quota and records them in ~/.agy-cs/usage/. list only shows those records and makes no request. A quota whose reset time has passed is shown as 100%.
 Only switch without a name, and switch add, start agy in this terminal. Adding an account keeps the current login first, then opens agy. If you quit before a new email is stored, the previous login is restored.
 
 [operationFailed]
@@ -108,6 +109,9 @@ Couldn't delete the saved copy %1.
 
 [quotaFailed]
 Couldn't delete the quota cache %1: %2
+
+[usageFailed]
+Couldn't update the plan and quota records for: %1
 
 [noSavedAccounts]
 No accounts are saved yet. Log in with agy, then run agy-cs save <name>.

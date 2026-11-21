@@ -100,6 +100,23 @@ final class CatalogTests: XCTestCase {
         }
     }
 
+    func testNoOAuthClientSecretIsWrittenInTheRepository() throws {
+        var files = ["AGENTS.md", "README.md", "README.en.md", "SECURITY_MODEL.md"].map { repoRoot.appendingPathComponent($0) }
+        for folder in ["Sources", "Tests"] {
+            let walker = FileManager.default.enumerator(at: repoRoot.appendingPathComponent(folder), includingPropertiesForKeys: nil)
+            while let url = walker?.nextObject() as? URL {
+                if ["swift", "txt", "md"].contains(url.pathExtension) {
+                    files.append(url)
+                }
+            }
+        }
+        XCTAssertGreaterThan(files.count, 10)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertNil(text.range(of: "GOCSPX-[A-Za-z0-9_-]{28}", options: .regularExpression), file.lastPathComponent)
+        }
+    }
+
     private func placeholders(_ text: String) -> [String] {
         var found: [String] = []
         var index = text.startIndex

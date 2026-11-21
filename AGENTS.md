@@ -27,6 +27,10 @@
 - 命令名是 `agy-cs`。本机 `~/.local/bin/agy-cs` 指向仓库 `build/agy-cs`。改完后执行 `make install`。它会把 release 二进制和旁边的 `agy-cs_AgyAccount.bundle` 一起放到 `build/`。只复制二进制的话，运行时找不到语言包，会在 `resource_bundle_accessor.swift` 里崩溃。安装时先删掉旧的 `build/agy-cs` 再复制，然后执行 `codesign --force --sign - build/agy-cs`。直接 `cp -f` 覆盖旧文件时，内核会沿用旧的代码签名缓存，打开第一页就发 SIGKILL，zsh 显示 `killed`。
 - 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。
 - 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。
+- 只有 `switch`、`next` 和新增账号会联网，而且只在成功之后：用每个保存副本里的 refresh token 向 `oauth2.googleapis.com` 换一个临时 access token，再请求 `daily-cloudcode-pa.googleapis.com` 的 `loadCodeAssist`（套餐）和 `retrieveUserQuotaSummary`（额度），结果写到 `~/.agy-cs/usage/<名字>.json`。临时 token 只留在内存里，不回写任何文件，也不读钥匙串。全部请求合计最多等 10 秒，失败只提示，不影响切换。`list` 不联网，只读这些记录。
+- `list` 的每一行是：套餐、`5h`（`gemini-5h`）、`7d`（`gemini-weekly`）、`Argon`（id 里带 `argon` 的那一项）。每项显示剩余百分比和本机时区的重置时间。剩余 100% 时不显示重置时间。当前时间过了重置时间就按 100% 显示。账号没有这一项时显示 `—`。不显示套餐到期时间，这两个接口里没有这个字段。
+- 这两个接口是 `agy` 自己用的，没有公开文档。请求的 User-Agent 必须是 `antigravity/cli/<版本号>`，版本号取自 `agy --version`。标识不对时接口返回 403，版本太旧时回答里没有 Gemini 那一组（实测 1.0.13 只剩 Claude/GPT 一组）。
+- 换 token 用的 OAuth client secret 不写进仓库。运行时从 `PATH` 上的 `agy` 二进制里找 `GOCSPX-` 加 28 个字符，二进制里有几个候选，逐个试。`~/.agy-cs/agy-client.json` 只记 `agy` 的大小、修改时间、版本号和可用那个候选的位置，不记 secret 本身。
 - `agy-cs switch` 不带名字时在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。选已有账号完成切换后，在当前终端启动 `agy`。`agy-cs switch add` 跳过选择，直接新增账号。新增账号会先保存当前登录，临时移开钥匙串那一项，再启动 `agy` 让用户登录；登录写入新邮箱后按 `@` 前的字符保存，然后重新启动 `agy`。登录没有完成就退出时，把原来的钥匙串登录写回去。`agy-cs switch <名字>` 只切换，不启动 `agy`。`add` 不是账号名：`save`、`rename` 的新名字和按邮箱自动取名都拒绝它；以前留下的 `add` 记录仍能在菜单里选，也能 `rename`、`rm`。
 - 把终端交给 `agy` 之前，要求本进程是终端的前台进程组（`tcgetpgrp` 等于 `getpgrp`）。`agy-cs switch &` 这样放到后台时直接报错，不删除也不改写钥匙串那一项。首次运行的那一次读取照常发生，和其他指令一样。交出前台那一步不忽略 `SIGTTOU`，只在交出之后、收回终端期间忽略 `SIGTTOU` / `SIGTTIN`。
 - `rename <新名字>` 改当前账号的名字。`rename <旧名字> <新名字>` 改指定账号的名字。只改保存的副本和 `~/.agy-cs/` 记录，不读钥匙串。
@@ -38,6 +42,7 @@
 - 说完成之前核对：`~/.local/bin/agy-cs` 的符号链接目标、钥匙串的 service 和 account 没变、当前邮箱仍能读出。
 - 输出里不打印 token。
 - 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 swift test --disable-sandbox --filter testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
+- 改了套餐和额度的抓取之后，跑一遍真实请求：`AGY_USAGE_LIVE=1 swift test --disable-sandbox --filter testLiveUsageFetchWhenEnabled`。它用本机保存的每个账号各查一次，只打印套餐和额度项的 id。
 
 ## 合并之后
 
