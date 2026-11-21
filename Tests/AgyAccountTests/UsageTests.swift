@@ -13,6 +13,11 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(current.id, "free-tier")
         XCTAssertEqual(current.project, "")
         XCTAssertEqual(parsePlan(Data(#"{"paidTier":"g1-ultra-tier"}"#.utf8))?.id, "g1-ultra-tier")
+        let odd = try XCTUnwrap(parsePlan(Data(#"{"cloudaicompanionProject":{"id":"pro\u001b[31mject-\#(String(repeating: "x", count: 80))"}}"#.utf8)))
+        XCTAssertFalse(odd.project.contains("\u{1b}"))
+        XCTAssertEqual(odd.project.count, 64)
+        let kept = encodeUsage(UsageSnapshot(planID: "", planName: "", buckets: [], project: odd.project), email: "a@b.c", fetchedAt: "")
+        XCTAssertFalse(kept.contains("\\u001b"))
         XCTAssertNil(parsePlan(Data("nope".utf8)))
 
         let buckets = try XCTUnwrap(parseBuckets(Data(summaryJSON.utf8)))

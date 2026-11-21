@@ -42,7 +42,7 @@ func parsePlan(_ data: Data) -> UsagePlan? {
     return UsagePlan(
         id: plain(tier as? String ?? fields["id"] as? String ?? ""),
         name: plain(fields["name"] as? String ?? ""),
-        project: project as? String ?? (project as? [String: Any])?["id"] as? String ?? ""
+        project: plain(project as? String ?? (project as? [String: Any])?["id"] as? String ?? "")
     )
 }
 
