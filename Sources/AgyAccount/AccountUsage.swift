@@ -12,6 +12,8 @@ struct UsageSnapshot: Equatable {
     var buckets: [UsageBucket]
     // Gemini 4 Argon 对这个账号是不是锁着的。nil 表示没取到模型列表。
     var argonLocked: Bool? = nil
+    // 这个账号在 Cloud Code 那边的 project。下次查询用它提前发额度请求。
+    var project = ""
 }
 
 struct UsagePlan {
@@ -23,7 +25,10 @@ struct UsagePlan {
 protocol UsageFetching {
     // 一次查询从开始到结束最多用多久。等别的进程查完也用这个时限。
     var budget: TimeInterval { get }
-    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot]
+    func fetch(
+        _ logins: [(name: String, blob: String, project: String)],
+        within seconds: TimeInterval
+    ) -> [String: UsageSnapshot]
 }
 
 // loadCodeAssist 的回答。付费套餐在 paidTier，没有时用 currentTier。
@@ -89,6 +94,7 @@ func encodeUsage(_ snapshot: UsageSnapshot, email: String, fetchedAt: String) ->
         "fetched_at": fetchedAt,
         "plan_id": snapshot.planID,
         "plan_name": snapshot.planName,
+        "project": snapshot.project,
         "buckets": snapshot.buckets.map { ["id": $0.id, "remaining": $0.remaining, "reset_time": $0.resetTime] },
     ]
     if let locked = snapshot.argonLocked {
@@ -114,7 +120,8 @@ func decodeUsage(_ data: Data, email: String) -> UsageSnapshot? {
         planID: plain(object["plan_id"] as? String ?? ""),
         planName: plain(object["plan_name"] as? String ?? ""),
         buckets: buckets,
-        argonLocked: object["argon_locked"] as? Bool
+        argonLocked: object["argon_locked"] as? Bool,
+        project: plain(object["project"] as? String ?? "")
     )
 }
 

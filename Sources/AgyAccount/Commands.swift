@@ -218,7 +218,13 @@ struct AccountCommands {
         let spent = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
         let fetched = saved.isEmpty
             ? [:]
-            : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) }, within: usage.budget - spent)
+            : usage.fetch(
+                saved.map { login in
+                    let known = profile.readUsage(login.name, email: login.email)?.project ?? ""
+                    return (name: login.name, blob: login.blob, project: known)
+                },
+                within: usage.budget - spent
+            )
         failed += saved.filter { login in
             // 查询期间这个名字可能已经被删掉或改存成别的登录。
             guard var snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {

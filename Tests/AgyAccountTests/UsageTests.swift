@@ -185,6 +185,8 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fetched["alice"]?.planID, "g1-pro-tier")
         XCTAssertEqual(fetched["alice"]?.buckets.count, 4)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
+        XCTAssertEqual(http.tokenSecrets.count, 3)
+        XCTAssertEqual(http.warmed.map(\.host), ["daily-cloudcode-pa.googleapis.com"])
         let asked = http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }
         XCTAssertEqual(asked.count, 6)
         XCTAssertEqual(asked.filter { $0.url.absoluteString.hasSuffix(":fetchAvailableModels") }.count, 2)
@@ -207,12 +209,40 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(usage.fetch(logins).count, 2)
         XCTAssertEqual(http.tokenSecrets.filter { $0 == wrong }.count, 1)
         XCTAssertEqual(versionCalls, 1)
+        XCTAssertEqual(fetched["alice"]?.project, "project-1")
+        XCTAssertEqual(client.resolve(scan: false)?.secrets.map(\.value), [right])
+        XCTAssertEqual(client.resolve(scan: false)?.remembered, true)
+        XCTAssertEqual(client.resolve()?.secrets.count, 2)
+
+        // 记着的 project 对得上时不多发请求；对不上时按套餐回答里的再问一次额度。
+        func cloudCalls() -> Int {
+            http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }.count
+        }
+        var before = cloudCalls()
+        XCTAssertEqual(usage.fetch([logins[0]], project: "project-1")["alice"]?.buckets.count, 4)
+        XCTAssertEqual(cloudCalls() - before, 3)
+        before = cloudCalls()
+        XCTAssertEqual(usage.fetch([logins[0]], project: "stale")["alice"]?.buckets.count, 4)
+        XCTAssertEqual(cloudCalls() - before, 4)
+        let corrected = http.requests.suffix(4)
+            .filter { $0.url.absoluteString.hasSuffix(":retrieveUserQuotaSummary") }
+            .map { String(decoding: $0.body, as: UTF8.self) }
+        XCTAssertEqual(corrected.count, 2)
+        XCTAssertTrue(corrected.contains { $0.contains("stale") })
+        XCTAssertTrue(corrected.contains { $0.contains("project-1") })
+
+        // 记着的 secret 不再可用时，重新找一遍并记下新的。
+        http.rightSecret = wrong
+        XCTAssertEqual(usage.fetch(logins).count, 2)
+        XCTAssertEqual(client.resolve(scan: false)?.secrets.map(\.value), [wrong])
+        http.rightSecret = right
+        XCTAssertEqual(usage.fetch(logins).count, 2)
         signed = false
         XCTAssertEqual(usage.fetch(logins).count, 2)
 
         XCTAssertEqual(usage.fetch([(name: "gone", blob: blob(refresh: "revoked")), logins[0]]).keys.sorted(), ["alice"])
         http.summaryStatus = 403
-        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true))
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true, project: "project-1"))
         http.modelsStatus = 500
         http.summaryStatus = 200
         XCTAssertEqual(usage.fetch([logins[0]])["alice"]?.buckets.count, 4)
@@ -272,7 +302,7 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: cache) }
         let started = Date()
         XCTAssertTrue(isGoogleSigned(try agyExecutable()))
-        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins, within: 10)
+        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins.map { (name: $0.name, blob: $0.blob, project: "") }, within: 10)
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         XCTAssertEqual(fetched.count, logins.count)
         for (index, login) in logins.enumerated() {
@@ -318,8 +348,8 @@ final class UsageTests: XCTestCase {
 }
 
 private extension CloudCodeUsage {
-    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
-        fetch(logins, within: budget)
+    func fetch(_ logins: [(name: String, blob: String)], project: String = "") -> [String: UsageSnapshot] {
+        fetch(logins.map { (name: $0.name, blob: $0.blob, project: project) }, within: budget)
     }
 }
 
@@ -329,7 +359,14 @@ private final class ScriptedHTTP: HTTPPosting {
     var offline = false
     var summaryStatus = 200
     var modelsStatus = 200
-    private let rightSecret: String
+    var warmed: [URL] = []
+
+    func warm(_ url: URL) {
+        lock.lock()
+        warmed.append(url)
+        lock.unlock()
+    }
+    var rightSecret: String
     private let plan: String
     private let summary: String
     private let lock = NSLock()

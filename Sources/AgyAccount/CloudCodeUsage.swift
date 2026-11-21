@@ -15,10 +15,24 @@ struct HTTPResponse {
 
 protocol HTTPPosting {
     func post(_ request: HTTPRequest) -> HTTPResponse?
+    func warm(_ url: URL)
+}
+
+extension HTTPPosting {
+    func warm(_ url: URL) {}
 }
 
 struct URLSessionPoster: HTTPPosting {
     private static let session = URLSession(configuration: .ephemeral)
+
+    // 提前把到这个主机的连接建好，回答不看。请求里不带登录。
+    func warm(_ url: URL) {
+        var call = URLRequest(url: url, timeoutInterval: 6)
+        call.httpMethod = "POST"
+        call.httpBody = Data("{}".utf8)
+        call.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        Self.session.dataTask(with: call).resume()
+    }
 
     func post(_ request: HTTPRequest) -> HTTPResponse? {
         let timeout = request.timeout
@@ -62,39 +76,60 @@ struct CloudCodeUsage: UsageFetching {
         #"{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}"#.utf8
     )
 
-    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot] {
+    func fetch(
+        _ logins: [(name: String, blob: String, project: String)],
+        within seconds: TimeInterval
+    ) -> [String: UsageSnapshot] {
         let tokens = logins.compactMap { login in
-            loginRefreshToken(login.blob).map { (name: login.name, refresh: $0) }
+            loginRefreshToken(login.blob).map { (name: login.name, refresh: $0, project: login.project) }
         }
         let deadline = DispatchTime.now() + max(0, seconds)
-        guard !tokens.isEmpty, let agy = client.resolve() else {
+        return tokens.isEmpty ? [:] : run(tokens, deadline: deadline, trusting: true)
+    }
+
+    // 记着上次可用的 secret 时，所有账号同时换 token。它被拒绝了，再把候选完整找一遍。
+    private func run(
+        _ tokens: [(name: String, refresh: String, project: String)],
+        deadline: DispatchTime,
+        trusting: Bool
+    ) -> [String: UsageSnapshot] {
+        guard let agy = client.resolve(scan: !trusting) else {
             return [:]
         }
-        var working: (offset: Int, value: String)?
+        // 换 token 的同时把到 Cloud Code 的连接建好，后面三个请求不用再等握手。
+        if DispatchTime.now() + 0.5 < deadline {
+            http.warm(Self.planURL)
+        }
+        var working = agy.remembered ? agy.secrets.first : nil
         var granted: (index: Int, access: String)?
-        // 一个登录被拒绝时，分不清是 secret 不对还是这个登录失效了，所以换下一个登录再试。
-        search: for (index, token) in tokens.enumerated() {
-            for candidate in agy.secrets {
-                switch grant(token.refresh, secret: candidate.value, deadline: deadline) {
-                case .granted(let access):
-                    working = candidate
-                    granted = (index, access)
-                    break search
-                case .wrongClient:
-                    continue
-                case .refused:
-                    continue search
-                case .unreachable:
-                    return [:]
+        if working == nil {
+            // 一个登录被拒绝时，分不清是 secret 不对还是这个登录失效了，所以换下一个登录再试。
+            search: for (index, token) in tokens.enumerated() {
+                for candidate in agy.secrets {
+                    switch grant(token.refresh, secret: candidate.value, deadline: deadline) {
+                    case .granted(let access):
+                        working = candidate
+                        granted = (index, access)
+                        break search
+                    case .wrongClient:
+                        continue
+                    case .refused:
+                        continue search
+                    case .unreachable:
+                        return [:]
+                    }
                 }
+                // 每个候选都被当成错误的 client。这和登录无关（实测），换下一个登录也一样。
+                break
             }
-            // 每个候选都被当成错误的 client。这和登录无关（实测），换下一个登录也一样。
-            break
+            guard let working else {
+                return [:]
+            }
+            client.remember(agy, secretOffset: working.offset)
         }
-        guard let working, let granted else {
+        guard let secret = working?.value else {
             return [:]
         }
-        client.remember(agy, secretOffset: working.offset)
         #if arch(arm64)
         let machine = "arm64"
         #else
@@ -102,17 +137,30 @@ struct CloudCodeUsage: UsageFetching {
         #endif
         let agent = "antigravity/cli/\(agy.version) (aidev_client; os_type=darwin; arch=\(machine))"
         let found = Shared<[String: UsageSnapshot]>([:])
+        let rejected = Shared(false)
+        let ready = granted
         DispatchQueue.concurrentPerform(iterations: tokens.count) { index in
-            var access = index == granted.index ? granted.access : nil
-            if access == nil,
-               case .granted(let fresh) = grant(tokens[index].refresh, secret: working.value, deadline: deadline)
-            {
-                access = fresh
+            let token = tokens[index]
+            var access = index == ready?.index ? ready?.access : nil
+            if access == nil {
+                switch grant(token.refresh, secret: secret, deadline: deadline) {
+                case .granted(let fresh):
+                    access = fresh
+                case .wrongClient:
+                    rejected.set(true)
+                case .refused, .unreachable:
+                    break
+                }
             }
-            guard let access, let snapshot = snapshot(access: access, agent: agent, deadline: deadline) else {
+            guard let access,
+                  let snapshot = snapshot(access: access, agent: agent, hint: token.project, deadline: deadline)
+            else {
                 return
             }
-            found.update { $0[tokens[index].name] = snapshot }
+            found.update { $0[token.name] = snapshot }
+        }
+        if found.value.isEmpty, rejected.value, agy.remembered {
+            return run(tokens, deadline: deadline, trusting: false)
         }
         return found.value
     }
@@ -155,39 +203,64 @@ struct CloudCodeUsage: UsageFetching {
         return object["error"] as? String == "invalid_client" ? .wrongClient : .refused
     }
 
-    private func snapshot(access: String, agent: String, deadline: DispatchTime) -> UsageSnapshot? {
+    // 套餐、额度、模型列表三个请求同时发。额度请求要带 project，它本来要等套餐的回答才知道：
+    // 上次记下的 project 和这次套餐回答里的一样时，直接用提前发出的那个回答，否则按新的再问一次。
+    private func snapshot(access: String, agent: String, hint: String, deadline: DispatchTime) -> UsageSnapshot? {
         let headers = ["Authorization": "Bearer \(access)", "Content-Type": "application/json", "User-Agent": agent]
+        func summary(_ project: String) -> HTTPResponse? {
+            let fields: [String: Any] = project.isEmpty ? [:] : ["project": project]
+            guard let body = try? JSONSerialization.data(withJSONObject: fields) else {
+                return nil
+            }
+            return send(Self.summaryURL, headers, body, deadline: deadline)
+        }
+        // 模型列表只用来判断 Argon 能不能用，取不到不算这个账号失败。
+        let locked = Shared<Bool?>(nil)
+        let models = DispatchGroup()
+        DispatchQueue.global().async(group: models) {
+            if let answer = send(Self.modelsURL, headers, Data("{}".utf8), deadline: deadline), answer.status == 200 {
+                locked.set(parseArgonLocked(answer.body))
+            }
+        }
+        let early = Shared<HTTPResponse?>(nil)
+        let guess = DispatchGroup()
+        if !hint.isEmpty {
+            DispatchQueue.global().async(group: guess) {
+                early.set(summary(hint))
+            }
+        }
+        defer {
+            guess.wait()
+            models.wait()
+        }
         guard let planAnswer = send(Self.planURL, headers, Self.planBody, deadline: deadline),
               planAnswer.status == 200,
               let plan = parsePlan(planAnswer.body)
         else {
             return nil
         }
-        let project: [String: Any] = plan.project.isEmpty ? [:] : ["project": plan.project]
-        guard let body = try? JSONSerialization.data(withJSONObject: project) else {
-            return nil
+        var answer: HTTPResponse?
+        if !hint.isEmpty, hint == plan.project {
+            guess.wait()
+            answer = early.value
+        } else {
+            answer = summary(plan.project)
         }
-        // 模型列表和额度同时请求。它只用来判断 Argon 能不能用，取不到不算这个账号失败。
-        let locked = Shared<Bool?>(nil)
-        let models = DispatchGroup()
-        DispatchQueue.global().async(group: models) {
-            if let answer = send(Self.modelsURL, headers, body, deadline: deadline), answer.status == 200 {
-                locked.set(parseArgonLocked(answer.body))
-            }
-        }
-        let summary = send(Self.summaryURL, headers, body, deadline: deadline)
         models.wait()
-        guard let summary else {
+        guard let answer else {
             return nil
         }
+        var snapshot = UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [], argonLocked: locked.value)
+        snapshot.project = plan.project
         // 403 表示这个账号不提供额度数据，套餐仍然记下来。
-        if summary.status == 403 {
-            return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [], argonLocked: locked.value)
+        if answer.status == 403 {
+            return snapshot
         }
-        guard summary.status == 200, let buckets = parseBuckets(summary.body) else {
+        guard answer.status == 200, let buckets = parseBuckets(answer.body) else {
             return nil
         }
-        return UsageSnapshot(planID: plan.id, planName: plan.name, buckets: buckets, argonLocked: locked.value)
+        snapshot.buckets = buckets
+        return snapshot
     }
 }
 
@@ -196,6 +269,8 @@ struct AgyIdentity {
     var secrets: [(offset: Int, value: String)]
     var size: Int
     var modified: Double
+    // 候选只有记录里记着的那一个，没有扫描整个文件。
+    var remembered = false
 }
 
 // 换 token 要用 agy 的 OAuth client secret。它不写进仓库，运行时从本机的 agy 二进制里读。
@@ -206,23 +281,34 @@ struct AgyClient {
     var trusted: (String) -> Bool = isGoogleSigned
     var versionOf: (String) -> String? = agyVersion
 
-    func resolve() -> AgyIdentity? {
+    func resolve(scan: Bool = true) -> AgyIdentity? {
         guard let found = locate() else {
             return nil
         }
         let path = (found as NSString).resolvingSymlinksInPath
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.intValue,
-              let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970,
-              let binary = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped)
+              let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970
         else {
             return nil
         }
-        var secrets = clientSecrets(in: binary)
         let cached = (try? Data(contentsOf: cacheURL)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
         let current = (cached?["size"] as? NSNumber)?.intValue == size
             && (cached?["modified"] as? NSNumber)?.doubleValue == modified
         let known = current ? cached?["version"] as? String : nil
+        // agy 没变时，只读记录里那个位置上的 35 个字节，不扫描整个文件。
+        if !scan, let version = known, isVersion(version),
+           let offset = (cached?["secret_offset"] as? NSNumber)?.intValue,
+           let secret = readSecret(path, at: offset)
+        {
+            return AgyIdentity(
+                version: version, secrets: [(offset, secret)], size: size, modified: modified, remembered: true
+            )
+        }
+        guard let binary = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else {
+            return nil
+        }
+        var secrets = clientSecrets(in: binary)
         // 版本号要执行 agy 才知道。PATH 上的文件可能是别人放的，所以只执行签名对得上的，
         // 并且只在记录里的大小或修改时间对不上时才执行。
         guard !secrets.isEmpty, let version = known ?? (trusted(path) ? versionOf(path) : nil), isVersion(version) else {
@@ -247,6 +333,17 @@ struct AgyClient {
             return
         }
         try? AtomicFile.write(cacheURL, String(decoding: data, as: UTF8.self) + "\n")
+    }
+
+    private func readSecret(_ path: String, at offset: Int) -> String? {
+        guard offset >= 0, let handle = FileHandle(forReadingAtPath: path) else {
+            return nil
+        }
+        defer { try? handle.close() }
+        guard (try? handle.seek(toOffset: UInt64(offset))) != nil, let bytes = try? handle.read(upToCount: 35) else {
+            return nil
+        }
+        return clientSecrets(in: bytes).first { $0.offset == 0 }?.value
     }
 
     private func isVersion(_ text: String) -> Bool {
