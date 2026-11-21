@@ -8,6 +8,8 @@ enum AccountCommandKind {
     case add
     case change(String)
     case next
+    case refreshQuota
+    case refreshQuotaDetached
     case rename(from: String?, to: String)
     case remove(String, force: Bool)
     case help
@@ -22,6 +24,8 @@ struct AccountCommands {
     var processes: any ProcessListing
     var terminal: any LineReading
     var launcher: any AgyLaunching
+    var usage: any UsageFetching
+    var refresher: any QuotaRefreshStarting
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -65,6 +69,7 @@ struct AccountCommands {
             try current()
         case .list:
             try list()
+            reportFailedRefresh()
         case .save(let name):
             try save(name)
         case .choose:
@@ -75,6 +80,10 @@ struct AccountCommands {
             try switchTo(name)
         case .next:
             try next()
+        case .refreshQuota:
+            try refreshQuota()
+        case .refreshQuotaDetached:
+            refresher.spawnWorker()
         case .rename(let from, let to):
             try rename(from: from, to: to)
         case .remove(let name, let force):
@@ -179,7 +188,63 @@ struct AccountCommands {
         }
         stdout(text.line(.saved, name, observed.meta.email))
         reportOtherAgy()
+        refresher.startDetached()
         try launchAgy()
+    }
+
+    // 联网查询所有已保存账号的套餐和额度。只用保存的副本，不读钥匙串。
+    // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
+    private func refreshQuota() throws {
+        let started = DispatchTime.now()
+        guard let lock = profile.lockUsage(wait: usage.budget) else {
+            throw AccountFailure(.usageBusy)
+        }
+        defer { close(lock.descriptor) }
+        // 等过锁，说明另一个进程刚查完。它查过的账号直接用它记下的结果，只补查它没见过的。
+        let earlier = lock.waited ? failedRefresh() : []
+        var failed: [String] = []
+        var saved: [(name: String, blob: String, email: String)] = []
+        for name in profile.names() {
+            guard let login = try? files.readSaved(name) else {
+                failed.append(name)
+                continue
+            }
+            if earlier.contains(name) {
+                failed.append(name)
+            } else if !lock.waited || profile.readUsage(name, email: login.meta.email) == nil {
+                saved.append((name, login.blob, login.meta.email))
+            }
+        }
+        let spent = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+        let fetched = saved.isEmpty
+            ? [:]
+            : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) }, within: usage.budget - spent)
+        failed += saved.filter { login in
+            // 查询期间这个名字可能已经被删掉或改存成别的登录。
+            guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
+                return true
+            }
+            return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
+        }.map(\.name)
+        failed.sort()
+        try profile.writeUsageStatus(failed: failed)
+        try list()
+        if !failed.isEmpty {
+            throw AccountFailure(.usageFailed, failed.joined(separator: ", "))
+        }
+    }
+
+    // 后台那次查询没有终端可以报错，所以把结果记下来，在 list 里提示。
+    private func reportFailedRefresh() {
+        let failed = failedRefresh()
+        if !failed.isEmpty {
+            stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
+        }
+    }
+
+    private func failedRefresh() -> [String] {
+        let names = profile.names()
+        return profile.failedUsage().filter(names.contains)
     }
 
     private func keepSnapshot(_ snapshot: ObservedLogin) throws {
@@ -244,6 +309,7 @@ struct AccountCommands {
             throw error
         }
         try profile.deleteRecord(source)
+        profile.moveUsage(from: source, to: target)
         if profileWasActive {
             try profile.setActive(target)
         }
@@ -268,11 +334,15 @@ struct AccountCommands {
             return
         }
         let activeEmail = profileEmail(profile.activeName())
+        let moment = parseTimestamp(profile.now()) ?? Date()
+        var rows: [[String]] = []
         for name in names {
             let meta = try profile.read(name)
             let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            stdout("\(mark) \(name)  \(meta.email)")
+            let recorded = profile.readUsage(name, email: meta.email).map { usageCells($0, now: moment, timeZone: .current) } ?? []
+            rows.append(["\(mark) \(name)", meta.email] + recorded)
         }
+        alignedRows(rows).forEach(stdout)
     }
 
     private func save(_ name: String) throws {
@@ -317,6 +387,7 @@ struct AccountCommands {
         }
         reportOtherAgy()
         stdout(text.line(.reopenAgy))
+        refresher.startDetached()
     }
 
     private func next() throws {

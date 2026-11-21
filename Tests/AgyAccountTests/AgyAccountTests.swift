@@ -282,6 +282,8 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertFalse(added.output.contains("选择序号"))
         XCTAssertFalse(added.output.contains("已切换到 add"))
         XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
+        XCTAssertEqual(fixture.refresher.started, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
         XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
         XCTAssertEqual(
             stripNewlines(try String(contentsOf: fixture.locations.tokenURL("add"), encoding: .utf8)),
@@ -376,6 +378,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(cancelled.keychain.blob, alice)
         XCTAssertFalse(cancelled.keychain.missing)
         XCTAssertEqual(cancelled.keychain.writes, [alice])
+        XCTAssertEqual(cancelled.refresher.started, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cancelled.quota.path))
 
         let failed = try Fixture(blob: alice)
@@ -479,6 +482,163 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.blob, alice)
         XCTAssertTrue(fixture.keychain.writes.isEmpty)
         XCTAssertEqual(fixture.launcher.started, 0)
+    }
+
+    func testSwitchRecordsUsageAndListOnlyReadsTheRecords() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        XCTAssertEqual(fixture.run(["list"]).output, ["  alice  alice@example.com", "* bob  bob@example.com"])
+
+        let pro = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [
+            UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-01-01T03:00:00Z"),
+            UsageBucket(id: "gemini-weekly", remaining: 0.4, resetTime: "2025-12-31T23:00:00Z"),
+            UsageBucket(id: "3p-5h", remaining: 0.1, resetTime: "2026-01-01T03:00:00Z"),
+            UsageBucket(id: "gemini-argon-wtu-weekly", remaining: 1, resetTime: "2026-01-08T00:00:00Z"),
+        ])
+        let free = UsageSnapshot(planID: "free-tier", planName: "Antigravity Starter Quota", buckets: [
+            UsageBucket(id: "gemini-weekly", remaining: 0.9962848, resetTime: "2026-01-07T10:23:00Z"),
+        ])
+        fixture.usage.snapshots = ["alice": pro, "bob": free]
+        let switched = fixture.run(["switch", "alice"])
+        XCTAssertEqual(switched.code, 0)
+        XCTAssertEqual(switched.errors, [])
+        XCTAssertEqual(fixture.refresher.started, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("alice").path))
+        XCTAssertEqual(fixture.run(["refresh", "quota", "--detach"]).code, 0)
+        XCTAssertEqual(fixture.refresher.workers, 1)
+        XCTAssertTrue(fixture.usage.calls.isEmpty)
+        for wrong in [["refresh"], ["refresh", "nope"], ["refresh", "quota", "now"]] {
+            XCTAssertEqual(fixture.run(wrong).code, 2)
+        }
+
+        let reads = fixture.keychain.reads
+        let expected = [
+            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
+            ["bob", "bob@example.com", "Free", "5h —", "7d 99% \(localTime("2026-01-07T10:23:00Z"))", "Argon —"],
+        ]
+        let refreshed = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(refreshed.code, 0)
+        XCTAssertEqual(refreshed.errors, [])
+        XCTAssertEqual(refreshed.output.map(cells), expected)
+        XCTAssertEqual(fixture.usage.calls, [["alice", "bob"]])
+        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
+        XCTAssertEqual(try mode(fixture.tool.usageDirectory), 0o700)
+        XCTAssertEqual(try mode(fixture.tool.usageURL("alice")), 0o600)
+        let record = try String(contentsOf: fixture.tool.usageURL("alice"), encoding: .utf8)
+        XCTAssertFalse(record.contains("go-keyring"))
+        XCTAssertFalse(record.contains("refresh"))
+
+        let listed = fixture.run(["list"])
+        XCTAssertEqual(listed.output, refreshed.output)
+        XCTAssertEqual(listed.errors, [])
+        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertEqual(fixture.keychain.reads, reads)
+
+        fixture.usage.snapshots = ["alice": pro]
+        let partial = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(partial.code, 1)
+        XCTAssertEqual(partial.errors.count, 1)
+        XCTAssertTrue(partial.errors[0].contains("bob") && partial.errors[0].contains("refresh quota"))
+        XCTAssertFalse(partial.errors[0].contains("alice"))
+        XCTAssertEqual(partial.output.map(cells), expected)
+        XCTAssertEqual(fixture.run(["list"]).errors, partial.errors)
+
+        let back = fixture.run(["switch", "bob"])
+        XCTAssertEqual(back.code, 0)
+        XCTAssertEqual(back.errors, [])
+        XCTAssertEqual(fixture.refresher.started, 2)
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        XCTAssertEqual(fixture.refresher.started, 2)
+        XCTAssertEqual(fixture.usage.calls.count, 2)
+
+        XCTAssertEqual(fixture.run(["rename", "alice", "anna"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("alice").path))
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), ["anna"] + expected[0].dropFirst())
+        XCTAssertEqual(fixture.run(["rm", "anna"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("anna").path))
+
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com"])
+        fixture.usage.snapshots = nil
+        let healed = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(healed.code, 0)
+        XCTAssertEqual(fixture.run(["list"]).errors, [])
+    }
+
+    func testRefreshQuotaReportsUnreadableCopiesAndWaitsForARunningLookup() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        try FileManager.default.removeItem(at: fixture.locations.tokenURL("alice"))
+        let lopsided = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(lopsided.code, 1)
+        XCTAssertEqual(fixture.usage.calls, [["bob"]])
+        XCTAssertTrue(lopsided.errors.contains { $0.contains("alice") && !$0.contains("bob") })
+        XCTAssertTrue(fixture.run(["list"]).errors.contains { $0.contains("alice") })
+
+        let held = open(fixture.tool.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertEqual(flock(held, LOCK_EX), 0)
+        fixture.usage.budget = 0.3
+        let status = try String(contentsOf: fixture.tool.usageStatusFile, encoding: .utf8)
+        let busy = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(busy.code, 1)
+        XCTAssertTrue(busy.errors.contains { $0.contains("还没结束") })
+        XCTAssertTrue(busy.output.isEmpty)
+        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertEqual(try String(contentsOf: fixture.tool.usageStatusFile, encoding: .utf8), status)
+
+        // 另一个进程查完了 bob。它开始之后才存进来的 alice 要补查，bob 不再查一遍。
+        fixture.usage.budget = 5
+        let profile = ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: [])
+        try profile.writeUsageStatus(failed: [])
+        try fixture.writeLegacyRecord(name: "alice", blob: alice)
+        func releaseSoon(_ descriptor: Int32) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+        }
+        releaseSoon(held)
+        let started = Date()
+        let waited = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(waited.code, 0)
+        XCTAssertEqual(waited.errors, [])
+        XCTAssertEqual(waited.output.map { cells($0).count }, [6, 6])
+        XCTAssertEqual(fixture.usage.calls.last, ["alice"])
+        XCTAssertGreaterThan(Date().timeIntervalSince(started), 0.2)
+        XCTAssertLessThan(try XCTUnwrap(fixture.usage.allowed.last), 4.9)
+
+        let again = open(fixture.tool.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertEqual(flock(again, LOCK_EX), 0)
+        releaseSoon(again)
+        XCTAssertEqual(fixture.run(["refresh", "quota"]).code, 0)
+        XCTAssertEqual(fixture.usage.calls.count, 2)
+
+        // 结果写不下来时不能报成功，也不能拿上一次的结果顶替。
+        try FileManager.default.removeItem(at: fixture.tool.usageStatusFile)
+        try FileManager.default.createDirectory(
+            at: fixture.tool.usageStatusFile.appendingPathComponent("blocked"),
+            withIntermediateDirectories: true
+        )
+        let unwritable = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(unwritable.code, 1)
+        XCTAssertEqual(fixture.usage.calls.last, ["alice", "bob"])
+        XCTAssertTrue(unwritable.errors.contains { $0.contains("usage-status.json") })
     }
 
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
@@ -915,12 +1075,58 @@ private final class ScriptedLauncher: AgyLaunching {
     }
 }
 
+private final class ScriptedUsage: UsageFetching {
+    var budget: TimeInterval = 1
+    var snapshots: [String: UsageSnapshot]?
+    var calls: [[String]] = []
+
+    var allowed: [TimeInterval] = []
+
+    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot] {
+        calls.append(logins.map(\.name))
+        allowed.append(seconds)
+        var answer: [String: UsageSnapshot] = [:]
+        for login in logins {
+            answer[login.name] = snapshots.map { $0[login.name] } ?? UsageSnapshot(planID: "", planName: "", buckets: [])
+        }
+        return answer
+    }
+}
+
+private final class ScriptedRefresher: QuotaRefreshStarting {
+    var started = 0
+    var workers = 0
+
+    func startDetached() {
+        started += 1
+    }
+
+    func spawnWorker() {
+        workers += 1
+    }
+}
+
+private func cells(_ line: String) -> [String] {
+    line.components(separatedBy: "  ")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+}
+
+private func localTime(_ timestamp: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MM-dd HH:mm"
+    return formatter.string(from: ISO8601DateFormatter().date(from: timestamp)!)
+}
+
 private final class Fixture {
     let home: URL
     let keychain: MemoryKeychain
     let processes = FixedProcesses()
     let terminal = ScriptedTerminal()
     let launcher = ScriptedLauncher()
+    let usage = ScriptedUsage()
+    let refresher = ScriptedRefresher()
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -974,6 +1180,8 @@ private final class Fixture {
             preferredLanguages: ["zh-Hans"],
             terminal: terminal,
             launcher: launcher,
+            usage: usage,
+            refresher: refresher,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }
         )
@@ -1023,6 +1231,8 @@ private func runCommand(
         preferredLanguages: preferred,
         terminal: ScriptedTerminal(),
         launcher: ScriptedLauncher(),
+        usage: ScriptedUsage(),
+        refresher: ScriptedRefresher(),
         stdout: { capture.output.append($0) },
         stderr: { capture.errors.append($0) }
     )

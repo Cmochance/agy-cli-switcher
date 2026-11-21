@@ -84,6 +84,19 @@ func decodeLogin(_ blob: String, source: LoginSource) throws -> LoginMeta {
     return LoginMeta(email: email, authMethod: authMethod, expiry: expiry)
 }
 
+func loginRefreshToken(_ blob: String) -> String? {
+    guard blob.hasPrefix(keychainPrefix),
+          let payload = decodeBase64(String(blob.dropFirst(keychainPrefix.count))),
+          let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+          let token = object["token"] as? [String: Any],
+          let refresh = token["refresh_token"] as? String,
+          !refresh.isEmpty
+    else {
+        return nil
+    }
+    return refresh
+}
+
 private func isNameLetter(_ scalar: Unicode.Scalar) -> Bool {
     ("0" ... "9").contains(Character(scalar))
         || ("A" ... "Z").contains(Character(scalar))

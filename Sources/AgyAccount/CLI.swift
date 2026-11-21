@@ -3,15 +3,18 @@ import Foundation
 
 public enum AgyAccountCLI {
     public static func run(_ arguments: [String]) -> Int32 {
-        run(
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return run(
             arguments,
-            home: FileManager.default.homeDirectoryForCurrentUser,
+            home: home,
             keychain: LoginKeychainStore(),
             processes: SystemProcessList(),
             now: AccountClock.utcTimestamp,
             preferredLanguages: Locale.preferredLanguages,
             terminal: StandardTerminal(),
             launcher: InteractiveAgy(),
+            usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
+            refresher: SelfSpawner(),
             stdout: { print($0) },
             stderr: { message in
                 fputs(message + "\n", stderr)
@@ -28,6 +31,8 @@ public enum AgyAccountCLI {
         preferredLanguages: [String] = Locale.preferredLanguages,
         terminal: any LineReading,
         launcher: any AgyLaunching,
+        usage: any UsageFetching,
+        refresher: any QuotaRefreshStarting,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
@@ -40,6 +45,8 @@ public enum AgyAccountCLI {
             processes: processes,
             terminal: terminal,
             launcher: launcher,
+            usage: usage,
+            refresher: refresher,
             text: text,
             stdout: stdout,
             stderr: stderr
@@ -91,6 +98,15 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
             return .change(arguments[1])
         default:
             throw UsageFailure(.commandNoExtra, "switch")
+        }
+    case "refresh":
+        switch Array(arguments.dropFirst()) {
+        case ["quota"]:
+            return .refreshQuota
+        case ["quota", "--detach"]:
+            return .refreshQuotaDetached
+        default:
+            throw UsageFailure(.refreshNeedsQuota)
         }
     case "use":
         throw UsageFailure(.useRenamed)

@@ -46,7 +46,7 @@ final class CatalogTests: XCTestCase {
 
         for language in AppLanguage.allCases {
             let help = try XCTUnwrap(byLanguage[language]?.values["help"])
-            for token in ["current", "list", "save", "switch", "switch add", "next", "rename", "rm", "language", "help"] {
+            for token in ["current", "list", "save", "switch", "switch add", "next", "refresh quota", "rename", "rm", "language", "help"] {
                 XCTAssertTrue(help.contains(token), "\(language.rawValue) help missing \(token)")
             }
         }
@@ -69,7 +69,7 @@ final class CatalogTests: XCTestCase {
         let guide = try String(contentsOf: repoRoot.appendingPathComponent("Sources/AgyAccount/i18n/README.md"), encoding: .utf8)
         for document in [readme, english] {
             for token in [
-                "current", "list", "save", "switch", "next", "rename", "rm", "language", "help",
+                "current", "list", "save", "switch", "next", "refresh quota", "rename", "rm", "language", "help",
                 "make install", "make test", "agy-cs", "Sources/AgyAccount/i18n", "macOS 13"
             ] {
                 XCTAssertTrue(document.contains(token), token)
@@ -97,6 +97,23 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(combined.contains("\"/usr/bin/security\""))
         for token in ["SecItemUpdate(", "SecItemAdd(", "SecItemDelete(", "SecKeychainItemDelete(", "kSecReturnData", "kSecValueData"] {
             XCTAssertFalse(combined.contains(token), token)
+        }
+    }
+
+    func testNoOAuthClientSecretIsWrittenInTheRepository() throws {
+        var files = ["AGENTS.md", "README.md", "README.en.md", "SECURITY_MODEL.md"].map { repoRoot.appendingPathComponent($0) }
+        for folder in ["Sources", "Tests"] {
+            let walker = FileManager.default.enumerator(at: repoRoot.appendingPathComponent(folder), includingPropertiesForKeys: nil)
+            while let url = walker?.nextObject() as? URL {
+                if ["swift", "txt", "md"].contains(url.pathExtension) {
+                    files.append(url)
+                }
+            }
+        }
+        XCTAssertGreaterThan(files.count, 10)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertNil(text.range(of: "GOCSPX-[A-Za-z0-9_-]{28}", options: .regularExpression), file.lastPathComponent)
         }
     }
 
