@@ -204,6 +204,9 @@ language 只接受一个语言代码。执行 agy-cs language 查看可选语言
 [loginNotFinished]
 登录没有完成。
 
+[loginRestored]
+已恢复原来的钥匙串登录。
+
 [startingAgy]
 正在当前终端启动 agy。
 

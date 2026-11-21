@@ -124,6 +124,7 @@ enum TextKey: String, CaseIterable {
     case loginOpening
     case loginCancelled
     case loginNotFinished
+    case loginRestored
     case startingAgy
     case renamed
     case renameUnchanged

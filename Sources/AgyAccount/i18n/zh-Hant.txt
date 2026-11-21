@@ -204,6 +204,9 @@ language 只接受一個語言代碼。執行 agy-cs language 查看可選語言
 [loginNotFinished]
 登入沒有完成。
 
+[loginRestored]
+已恢復原來的鑰匙圈登入。
+
 [startingAgy]
 正在目前終端機啟動 agy。
 
