@@ -5,6 +5,7 @@ protocol KeychainStoring {
     func readBlob() throws -> String
     func writeBlob(_ blob: String) throws
     func deleteBlob() throws
+    func checkWritable(_ blob: String) throws
 }
 
 struct SecurityToolResult {
@@ -70,11 +71,20 @@ struct LoginKeychainStore: KeychainStoring {
         return (result as? [Any])?.count ?? 0
     }
 
+    func checkWritable(_ blob: String) throws {
+        _ = try addLine(blob)
+    }
+
+    private func addLine(_ blob: String) throws -> String {
+        guard let line = securityAddLine(service: service, account: account, blob: blob) else {
+            throw AccountFailure(.loginNotWritable)
+        }
+        return line
+    }
+
     // 内容从标准输入送给 security -i，不出现在任何进程的参数里。
     private func store(_ blob: String) throws {
-        guard let line = securityAddLine(service: service, account: account, blob: blob) else {
-            throw AccountFailure(.keychainFailed, "login")
-        }
+        let line = try addLine(blob)
         let result = try tool.run(["-i"], input: Data(line.utf8))
         guard result.status == 0 else {
             throw securityFailure(exitStatus: result.status)

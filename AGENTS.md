@@ -10,7 +10,7 @@
 - 工程形态用 Swift Package 的单个可执行文件，对齐本机 `mouse-switch` 的 `Package.swift`。
 - 钥匙串那一项的读、写、删都通过 `/usr/bin/security`，和 `agy` 自己的做法一致。路径写绝对路径，不从 `PATH` 里找。读用 `find-generic-password -w`，删用 `delete-generic-password`。写用 `security -i`，把 `add-generic-password -U … -w <内容>` 从标准输入送进去，token 不出现在任何进程的参数里。
 - 不要用 Security.framework 的 `SecItem*` 或 Python 读写这一项的内容。这一项只信任 `/usr/bin/security`，分区名单里只有 `apple-tool:`。在本进程里读，每读一次弹两个钥匙串密码窗口。在本进程里写，分区名单会被换成本程序的 `cdhash:`，之后 `agy` 自己读取也会弹窗。只数这一项有几条、不取内容时，可以用 `SecItemCopyMatching`。
-- `security -i` 的一行连换行超过 4096 个字节时，前 4095 个字节会被当成一条指令执行，剩下的被当成下一条指令。写入前检查内容只有 `go-keyring-base64:` 加 base64 字符，并且整行不超过 4095 个字节。
+- `security -i` 的一行连换行超过 4096 个字节时，前 4095 个字节会被当成一条指令执行，剩下的被当成下一条指令。写入前检查内容只有 `go-keyring-base64:` 加 base64 字符，并且整行不超过 4095 个字节。新增账号在移开钥匙串那一项之前先做同样的检查，写不回去的登录不动它。
 
 ## 登录数据
 

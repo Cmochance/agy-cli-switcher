@@ -47,7 +47,7 @@ Trust boundaries:
 - `AtomicFile.write`: temp file opened 0600 with O_CREAT|O_TRUNC (no O_EXCL/O_NOFOLLOW), fsync, rename, then chmod 600; the parent directory is chmod 700.
 - Keychain access goes through `/usr/bin/security`, started by absolute path and not looked up on `PATH`. Reads and deletes pass only the service and account names as arguments. Writes send `add-generic-password` on stdin (`security -i`), so tokens never appear in argv.
 - Before a write, the login must be `go-keyring-base64:` followed by base64 characters only, and the whole command line must fit in 4095 bytes. A newline, a space or an over-long value cannot reach `security -i`, so no second command can be injected and no truncated login is stored.
-- `writeBlob` verifies after writing and restores the original when they differ; `addAccount` saves the snapshot to a token file before deleting the keychain item, and restores it on any error before the new login is saved (cancelled login, agy launch failure, keychain read denied, name clash); the spawned agy is terminated if polling throws.
+- `writeBlob` verifies after writing and restores the original when they differ; `addAccount` checks that the snapshot can be written back and saves it to a token file before deleting the keychain item, and restores it on any error before the new login is saved (cancelled login, agy launch failure, keychain read denied, name clash); the spawned agy is terminated if polling throws.
 - `.gitignore` excludes `*.token` and `accounts/`; AGENTS.md forbids printing tokens.
 - CI workflows use `permissions: contents: read` (no-ai-coauthor) and no secrets.
 

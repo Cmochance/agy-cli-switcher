@@ -94,6 +94,9 @@ use は switch に変わりました。agy-cs switch <名前> を実行してく
 [writeMismatch]
 キーチェーンへ書き戻した内容が切り替え先と一致しないため、中止しました。
 
+[loginNotWritable]
+このログインは /usr/bin/security でキーチェーンへ書き戻せません（長すぎるか、形式が違います）。キーチェーンは変更していません。
+
 [readFailed]
 %1 を読み取れませんでした。
 

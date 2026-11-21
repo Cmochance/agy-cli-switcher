@@ -464,6 +464,23 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(taken.run(["current"]).output, ["alice@example.com"])
     }
 
+    func testAddAccountLeavesALoginAloneWhenItCouldNotBeWrittenBack() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.writeLimit = alice.count - 1
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = { XCTFail("agy must not open") }
+        let refused = fixture.run(["switch", "add"])
+        XCTAssertEqual(refused.code, 1)
+        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("没有改动钥匙串"))
+        XCTAssertFalse(fixture.keychain.missing)
+        XCTAssertEqual(fixture.keychain.blob, alice)
+        XCTAssertTrue(fixture.keychain.writes.isEmpty)
+        XCTAssertEqual(fixture.launcher.started, 0)
+    }
+
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let bob = makeBlob(email: "bob@example.com", refresh: "b")
@@ -733,7 +750,10 @@ final class AgyAccountTests: XCTestCase {
         try store.writeBlob(first)
         XCTAssertEqual(try store.readBlob(), first)
         let fixed = "add-generic-password -U -s agy-cs-test-probe -a probe -w \(keychainPrefix)\n".utf8.count
-        let longest = keychainPrefix + String(repeating: "A+/=", count: (securityLineLimit - fixed) / 4)
+        let room = securityLineLimit - fixed
+        let longest = keychainPrefix + String(repeating: "A+/=", count: room / 4) + String(repeating: "A", count: room % 4)
+        XCTAssertEqual(securityAddLine(service: store.service, account: store.account, blob: longest)?.utf8.count, securityLineLimit)
+        XCTAssertThrowsError(try store.checkWritable(longest + "A"))
         try store.writeBlob(longest)
         XCTAssertEqual(try store.readBlob(), longest)
         XCTAssertEqual(try store.matchingItemCount(dataProtection: false), 1)
@@ -791,6 +811,13 @@ private final class MemoryKeychain: KeychainStoring {
 
     var missing = false
     var denied = false
+    var writeLimit: Int?
+
+    func checkWritable(_ blob: String) throws {
+        if let writeLimit, blob.count > writeLimit {
+            throw AccountFailure(.loginNotWritable)
+        }
+    }
 
     func readBlob() throws -> String {
         reads += 1
@@ -804,6 +831,7 @@ private final class MemoryKeychain: KeychainStoring {
     }
 
     func writeBlob(_ blob: String) throws {
+        try checkWritable(blob)
         writes.append(blob)
         self.blob = blob
         missing = false
@@ -831,6 +859,8 @@ private final class ExplodingKeychain: KeychainStoring {
     func deleteBlob() throws {
         throw AccountFailure(.keychainDenied)
     }
+
+    func checkWritable(_ blob: String) throws {}
 }
 
 private final class FixedProcesses: ProcessListing {

@@ -146,6 +146,7 @@ struct AccountCommands {
     private func addAccount() throws {
         let snapshot = try captureLogin()
         if let snapshot {
+            try keychain.checkWritable(snapshot.blob)
             try keepSnapshot(snapshot)
         }
         try keychain.deleteBlob()
