@@ -209,17 +209,36 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.run(["next"]).output.first, "已切换到 alice  alice@example.com")
         XCTAssertEqual(fixture.run(["next"]).output.first, "已切换到 carol  carol@example.com")
 
-        // 新存的账号排在最后。改名留在原位。删掉的名字以后再存，不占原来的位置。
+        // 新存的账号排在最后，先存的在前，不按字母。同一个名字再存一次不挪位置。
+        fixture.keychain.blob = makeBlob(email: "zoe@example.com", refresh: "z")
+        XCTAssertEqual(fixture.run(["save", "zoe"]).code, 0)
         fixture.keychain.blob = makeBlob(email: "dave@example.com", refresh: "d")
         XCTAssertEqual(fixture.run(["save", "aaron"]).code, 0)
-        XCTAssertEqual(names(), ["carol", "bob", "alice", "aaron"])
+        XCTAssertEqual(names(), ["carol", "bob", "alice", "zoe", "aaron"])
+        XCTAssertEqual(fixture.run(["save", "aaron"]).code, 0)
+        XCTAssertEqual(names(), ["carol", "bob", "alice", "zoe", "aaron"])
+        // 改名留在原位。删掉的名字以后再存，不占原来的位置。
         XCTAssertEqual(fixture.run(["rename", "bob", "zed"]).code, 0)
-        XCTAssertEqual(names(), ["carol", "zed", "alice", "aaron"])
+        XCTAssertEqual(names(), ["carol", "zed", "alice", "zoe", "aaron"])
         XCTAssertEqual(fixture.run(["rm", "zed"]).code, 0)
+        XCTAssertEqual(fixture.run(["rm", "zoe"]).code, 0)
         XCTAssertEqual(names(), ["carol", "alice", "aaron"])
         fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
         XCTAssertEqual(fixture.run(["save", "zed"]).code, 0)
         XCTAssertEqual(names(), ["carol", "alice", "aaron", "zed"])
+
+        // 从没排过顺序时改名，也留在原来的位置，不按新名字重新排。
+        let plain = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { plain.cleanup() }
+        for name in ["alice", "bob", "carol"] {
+            plain.keychain.blob = makeBlob(email: "\(name)@example.com", refresh: name)
+            XCTAssertEqual(plain.run(["save", name]).code, 0)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plain.tool.orderFile.path))
+        XCTAssertEqual(plain.run(["rename", "bob", "zed"]).code, 0)
+        XCTAssertEqual(plain.board.load().rows.map(\.name), ["alice", "zed", "carol"])
+        XCTAssertEqual(plain.run(["rename", "carol", "abe"]).code, 0)
+        XCTAssertEqual(plain.board.load().rows.map(\.name), ["alice", "zed", "abe"])
 
         let before = names()
         XCTAssertEqual(board.perform(["move", "nobody", "1"]).failure, .accountMissing)
@@ -720,6 +739,16 @@ final class BoardTests: XCTestCase {
         await pause()
         await settle(model)
         XCTAssertEqual(model.state.rows.map(\.name), ["carol", "bob", "alice"])
+
+        // 最后一次拖动还没过下一行的中线，松手的位置过了：按松手的位置算。
+        send(.leftMouseDown, row: 0)
+        await pause()
+        send(.leftMouseDragged, row: 0, down: 8)
+        await pause(0.03)
+        send(.leftMouseUp, row: 0, down: rowHeight * 0.8)
+        await pause()
+        await settle(model)
+        XCTAssertEqual(model.state.rows.map(\.name), ["bob", "carol", "alice"])
     }
 
     // 把面板画成图片，用来在改界面之后看一眼：

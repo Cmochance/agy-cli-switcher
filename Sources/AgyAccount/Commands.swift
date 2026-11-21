@@ -316,7 +316,9 @@ struct AccountCommands {
         let savedAt = profile.savedAt(source)
         let profileWasActive = profile.activeName() == source
         let filesWereActive = files.activeName() == source
-        try profile.write(name: target, meta: meta, savedAt: savedAt)
+        // 改名之后这个账号留在原来的位置。没记过顺序时它原来按字母排，新名字会排到别处，所以这里把顺序记下来。
+        let sequence = profile.names().map { $0 == source ? target : $0 }
+        try profile.write(name: target, meta: meta, savedAt: savedAt, placing: false)
         do {
             try files.renameSaved(from: source, to: target, meta: meta, savedAt: savedAt)
         } catch {
@@ -325,7 +327,7 @@ struct AccountCommands {
         }
         try profile.deleteRecord(source)
         profile.moveUsage(from: source, to: target)
-        profile.renameInOrder(from: source, to: target)
+        try? profile.setOrder(sequence)
         if profileWasActive {
             try profile.setActive(target)
         }

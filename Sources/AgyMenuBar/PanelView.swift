@@ -57,22 +57,20 @@ struct PanelView: View {
                             Divider()
                         }
                     }
+                    .offset(y: drag.map { lifted ? $0.offset : $0.shift(of: index) } ?? 0)
+                    // 量位置放在 offset 之后：量到的是这一行排版上的位置，不带拖动时挪开的那一段。
+                    // 带着那一段量的话，把一行拖到列表尽头松手时，让开后的位置和重排后的位置一模一样，
+                    // 收不到“位置变了”，下一次拖动就按旧位置算（测试里撞到过）。
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: RowFrames.self, value: [row.id: proxy.frame(in: .named(list))])
                     })
-                    .offset(y: drag.map { lifted ? $0.offset : $0.shift(of: index) } ?? 0)
                     .zIndex(lifted ? 1 : 0)
                     // 松手的那一下不带动画：顺序已经换好，让开的行直接落在新位置上。
                     .animation(lifted || drag == nil ? nil : .easeOut(duration: 0.15), value: drag?.target)
             }
         }
         .coordinateSpace(name: list)
-        .onPreferenceChange(RowFrames.self) { measured in
-            // 拖动期间行被挪开了，量到的不是原来的位置。
-            if drag == nil {
-                frames = measured
-            }
-        }
+        .onPreferenceChange(RowFrames.self) { frames = $0 }
         if model.state.rows.isEmpty {
             Text(model.text(.panelNoAccounts))
                 .foregroundStyle(.secondary)
@@ -106,10 +104,12 @@ struct PanelView: View {
     }
 
     private func released(_ row: AccountRow, at index: Int, moved: CGSize) {
-        if let finished = drag {
+        if var finished = drag {
             guard finished.index == index else {
                 return
             }
+            // 松手的位置可能比最后一次拖动又走了一段。
+            finished.translation = moved.height
             drag = nil
             model.move(row, to: finished.target)
         } else if abs(moved.height) < slack, abs(moved.width) < slack {
@@ -246,6 +246,18 @@ private struct AccountRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+            }
+            .background {
+                // 鼠标走下面的手势。这个看不见的按钮只给键盘用：系统打开“键盘导航”时，Tab 能停在这一行，空格切换。
+                Button {
+                    model.switchTo(row)
+                } label: {
+                    Color.clear
+                }
+                .buttonStyle(.plain)
+                .allowsHitTesting(false)
+                .disabled(!selectable)
+                .accessibilityHidden(true)
             }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)

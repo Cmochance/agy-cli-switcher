@@ -73,21 +73,13 @@ struct ToolProfile {
             }
             found.append(name)
         }
-        // 用 move 排过的名字按排好的顺序在前，没排过的按字母顺序接在后面。
+        // 记过顺序的名字按记下的顺序在前，没记过的按字母顺序接在后面。
         let placed = order().filter(found.contains)
         return placed + found.sorted().filter { !placed.contains($0) }
     }
 
     func setOrder(_ names: [String]) throws {
         try AtomicFile.write(locations.orderFile, names.map { $0 + "\n" }.joined())
-    }
-
-    // 改名之后这个账号留在原来的位置。
-    func renameInOrder(from source: String, to target: String) {
-        let listed = order()
-        if listed.contains(source) {
-            try? setOrder(listed.filter { $0 != target }.map { $0 == source ? target : $0 })
-        }
     }
 
     private func order() -> [String] {
@@ -107,7 +99,11 @@ struct ToolProfile {
         return LoginMeta(email: record.email, authMethod: record.authMethod, expiry: record.expiry)
     }
 
-    func write(name: String, meta: LoginMeta, savedAt: String? = nil) throws {
+    // 已经记过顺序时，新名字接在最后，先存的在前。还没记过顺序时不记，照旧按字母顺序。
+    // 改名自己安排位置，不走这一步（placing 为 false）。
+    func write(name: String, meta: LoginMeta, savedAt: String? = nil, placing: Bool = true) throws {
+        let isNew = !manager.fileExists(atPath: locations.profileURL(name).path)
+        let earlier = placing && isNew && manager.fileExists(atPath: locations.orderFile.path) ? names() : nil
         let sidecar = encodeSidecar(
             name: name,
             email: meta.email,
@@ -116,6 +112,9 @@ struct ToolProfile {
             savedAt: savedAt ?? now()
         )
         try AtomicFile.write(locations.profileURL(name), sidecar)
+        if let earlier {
+            try? setOrder(earlier + [name])
+        }
     }
 
     func setActive(_ name: String) throws {
