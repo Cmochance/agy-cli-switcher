@@ -5,6 +5,7 @@ enum AccountCommandKind {
     case list
     case save(String)
     case choose
+    case add
     case change(String)
     case next
     case rename(from: String?, to: String)
@@ -68,6 +69,8 @@ struct AccountCommands {
             try save(name)
         case .choose:
             try choose()
+        case .add:
+            try addFromCommand()
         case .change(let name):
             try switchTo(name)
         case .next:
@@ -131,6 +134,13 @@ struct AccountCommands {
             try launchAgy()
             return
         }
+    }
+
+    private func addFromCommand() throws {
+        guard terminal.isInteractive else {
+            throw UsageFailure(.switchAddNeedsTerminal)
+        }
+        try addAccount()
     }
 
     private func addAccount() throws {

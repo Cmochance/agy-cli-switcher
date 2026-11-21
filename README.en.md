@@ -21,6 +21,7 @@ Current version **v0.1.0** (see [Changelog](documents/CHANGELOG.md)).
 
 - Switch between `agy` logins, and keep the name, email, and active record
 - `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal
+- `agy-cs switch add` adds an account directly, without the menu. The current login is kept, then `agy` opens
 - `agy-cs switch <name>` only switches. It does not start `agy`
 - On the first run, when no account is recorded yet, read the current login once and save it under the characters before `@`
 - Switching to another email deletes `~/.gemini/antigravity-cli/.quota_cache.json`. `~/.gemini/antigravity-cli/conversations` stays in place
@@ -55,6 +56,7 @@ export PATH="$HOME/.local/bin:$PATH"
 | `list` | List saved accounts. `ls` is the same |
 | `save <name>` | Save the current login under a name |
 | `switch` | Choose in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal |
+| `switch add` | Add an account directly, without the menu. The current login is kept, then `agy` opens |
 | `switch <name>` | Switch to a saved account without starting `agy` |
 | `next` | Switch to the next saved account |
 | `rename <new>` | Rename the current account |

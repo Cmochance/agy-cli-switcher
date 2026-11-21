@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import AgyAccount
 
@@ -257,9 +258,39 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(again.keychain.reads, reads)
         XCTAssertEqual(again.launcher.started, 0)
         XCTAssertEqual(again.run(["switch", "alice", "extra"]).code, 2)
+        XCTAssertEqual(again.run(["switch", "add", "extra"]).code, 2)
         again.terminal.isInteractive = false
         XCTAssertEqual(again.run(["switch"]).code, 2)
         XCTAssertEqual(again.launcher.started, 0)
+    }
+
+    func testSwitchAddSkipsTheMenuAndKeepsTheSavedNameAdd() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        XCTAssertEqual(fixture.run(["save", "add"]).code, 0)
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = {
+            fixture.keychain.blob = carol
+            fixture.keychain.missing = false
+        }
+        let added = fixture.run(["switch", "add"])
+        XCTAssertEqual(added.code, 0)
+        XCTAssertEqual(fixture.launcher.started, 1)
+        XCTAssertFalse(added.output.contains("选择序号"))
+        XCTAssertFalse(added.output.contains("已切换到 add"))
+        XCTAssertTrue(added.output.contains("已保存 carol  carol@example.com"))
+        XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: fixture.locations.tokenURL("add"), encoding: .utf8)),
+            alice
+        )
+
+        fixture.terminal.isInteractive = false
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 2)
+        XCTAssertEqual(fixture.launcher.started, 1)
     }
 
     func testAddAccountSavesLocalPartAndRestoresWhenLoginStops() throws {
@@ -532,6 +563,18 @@ final class AgyAccountTests: XCTestCase {
         let second = runCommand(args: ["help"], keychain: denied, home: home, markInitialized: false)
         XCTAssertEqual(second.code, 1)
         XCTAssertEqual(denied.reads, 4)
+    }
+
+    func testChildWaitDistinguishesStopFromExit() {
+        XCTAssertEqual(classifyWait(waited: 0, pid: 10, status: 0, callErrno: 0), .running)
+        XCTAssertEqual(classifyWait(waited: -1, pid: 10, status: 0, callErrno: EINTR), .running)
+        XCTAssertEqual(classifyWait(waited: -1, pid: 10, status: 0, callErrno: ECHILD), .finished)
+        let stopped = (SIGTSTP << 8) | 0x7f
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: stopped, callErrno: 0), .stopped(SIGTSTP))
+        let continued = (SIGCONT << 8) | 0x7f
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: continued, callErrno: 0), .running)
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: 0, callErrno: 0), .finished)
+        XCTAssertEqual(classifyWait(waited: 10, pid: 10, status: SIGTERM, callErrno: 0), .finished)
     }
 }
 

@@ -21,6 +21,7 @@
 
 - 在多个 `agy` 登录之间切换，并记下名字、邮箱和当前项
 - `agy-cs switch` 在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy`
+- `agy-cs switch add` 直接新增账号，不进入选择。先保住当前登录，再打开 `agy`
 - `agy-cs switch <名字>` 只切换，不启动 `agy`
 - 第一次运行、并且还没有账号记录时，读取一次当前登录，用邮箱 `@` 前面的字符保存
 - 换到另一个邮箱时删除 `~/.gemini/antigravity-cli/.quota_cache.json`。`~/.gemini/antigravity-cli/conversations` 保持不动
@@ -55,6 +56,7 @@ export PATH="$HOME/.local/bin:$PATH"
 | `list` | 列出已保存的账号。`ls` 相同 |
 | `save <名字>` | 把当前登录存成一个名字 |
 | `switch` | 在终端里选择。第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy` |
+| `switch add` | 直接新增账号，不进入选择。先保住当前登录，再打开 `agy` |
 | `switch <名字>` | 切换到已保存的账号，不启动 `agy` |
 | `next` | 切换到下一个已保存的账号 |
 | `rename <新名字>` | 把当前账号改名 |

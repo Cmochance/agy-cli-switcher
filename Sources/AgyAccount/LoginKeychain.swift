@@ -33,7 +33,31 @@ struct LoginKeychainStore: KeychainStoring {
         if status == errSecSuccess || status == errSecItemNotFound {
             return
         }
+        // /usr/bin/security 创建的项，SecItemDelete 返回 errSecInvalidOwnerEdit (-25244)，项还在。
+        if status == errSecInvalidOwnerEdit {
+            try deleteItemReference()
+            return
+        }
         throw statusError(status)
+    }
+
+    private func deleteItemReference() throws {
+        var spec = query()
+        spec[kSecReturnRef as String] = true
+        spec[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let found = SecItemCopyMatching(spec as CFDictionary, &result)
+        if found == errSecItemNotFound {
+            return
+        }
+        guard found == errSecSuccess, let result else {
+            throw statusError(found)
+        }
+        let deleted = SecKeychainItemDelete(result as! SecKeychainItem)
+        if deleted == errSecSuccess || deleted == errSecItemNotFound {
+            return
+        }
+        throw statusError(deleted)
     }
 
     func matchingItemCount(dataProtection: Bool) throws -> Int {

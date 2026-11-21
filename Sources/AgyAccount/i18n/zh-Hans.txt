@@ -10,6 +10,7 @@
   list, ls                     列出已保存的账号。不写指令时也是这条
   save <名字>                  把当前钥匙串登录存成一个名字
   switch                       在终端里选择。第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。完成后启动 agy
+  switch add                   直接新增账号，不进入选择。先保住当前登录，再打开 agy
   switch <名字>                切换到已保存的账号
   next                         切换到下一个已保存的账号
   rename <新名字>              把当前账号改名为新名字，不打开钥匙串
@@ -25,7 +26,7 @@ help、-h、--help 都显示这份说明。
 首次安装且还没有账号记录时，会读取一次钥匙串，用邮箱 @ 前面的字符保存当前登录。
 之后 current、list、rm、rename、language、help 只读 ~/.agy-cs/ 里的非密钥记录。
 save、switch、next，以及上面这次初始化，才会读取钥匙串。密钥副本仍在 ~/.gemini/antigravity-cli/accounts/。
-不带名字的 switch 才会在当前终端启动 agy。新增账号会先保住当前登录，再打开 agy；没有换成新邮箱就退出时，会恢复原来的登录。
+不带名字的 switch 和 switch add 才会在当前终端启动 agy。新增账号会先保住当前登录，再打开 agy；没有换成新邮箱就退出时，会恢复原来的登录。
 
 [operationFailed]
 没能完成账号操作。
@@ -194,6 +195,9 @@ language 只接受一个语言代码。执行 agy-cs language 查看可选语言
 
 [switchNeedsTerminal]
 不带名字的 switch 需要在终端里选择。直接切换请执行 agy-cs switch <名字>。
+
+[switchAddNeedsTerminal]
+agy-cs switch add 需要在终端里登录新账号。
 
 [loginOpening]
 将在当前终端打开 agy 登录新账号。登录完成后会保存，并重新打开 agy。
