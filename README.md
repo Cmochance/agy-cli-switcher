@@ -41,10 +41,13 @@
 也可以在终端里下载。这样下载的文件不带 `com.apple.quarantine` 标记，不用去系统设置里放行：
 
 ```bash
-curl -L -o /tmp/Agy-Switcher.zip https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip
-ditto -x -k /tmp/Agy-Switcher.zip /Applications
-open "/Applications/Agy Switcher.app"
+tmp="$(mktemp -d)" && \
+  curl -fL -o "$tmp/Agy-Switcher.zip" https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip && \
+  ditto -x -k "$tmp/Agy-Switcher.zip" /Applications && \
+  open "/Applications/Agy Switcher.app"
 ```
+
+`mktemp -d` 建的目录只有你自己能进，前一步没成功后面就不执行。
 
 更新时先退出 Agy Switcher 并删掉旧的 `Agy Switcher.app`，再装新的。
 
@@ -54,7 +57,7 @@ open "/Applications/Agy Switcher.app"
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 已经装了 Agy Switcher 的话不用再下载，包里就是同一个程序：
@@ -92,8 +95,9 @@ export PATH="$HOME/.local/bin:$PATH"
 
 点菜单栏上的图标打开面板。
 
-- 每行是一个已保存的账号：名字、邮箱、套餐，以及 5h、7d、Argon 额度。打勾的是当前账号
-- 点另一行就切换过去，和 `agy-cs switch <名字>` 一样，只切换，不启动 `agy`
+- 每行是一个已保存的账号：名字、邮箱、套餐，以及 5h、7d、Argon 额度。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾
+- 点一行就切换过去，和 `agy-cs switch <名字>` 一样，只切换，不启动 `agy`
+- 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
 - “新增账号…”打开终端执行 `agy-cs switch add`，在那里登录。登录完再点开面板就能看到新账号
 - 每行右边的 `…` 里可以改名、删除。齿轮里可以保存当前登录、换语言、退出

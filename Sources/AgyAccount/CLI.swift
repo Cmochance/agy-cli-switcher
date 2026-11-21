@@ -97,13 +97,14 @@ public enum AgyAccountCLI {
         ).code
     }
 
-    // failure 是没做成时的那句话的键。面板靠它分辨“这是唯一的副本”这样要再问一次的情况。
+    // failure 是没做成时的那句话的键，details 是填进那句话里的名字和邮箱。
+    // 面板靠它们分辨“这是唯一的副本”“名字被别人占着”这样要再问一次的情况。
     static func execute(
         _ arguments: [String],
         services: CommandServices,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
-    ) -> (code: Int32, failure: TextKey?) {
+    ) -> (code: Int32, failure: TextKey?, details: [String]) {
         let profile = services.profile
         let text = Localizer(language: profile.resolvedLanguage())
         let commands = services.commands(text: text, stdout: stdout, stderr: stderr)
@@ -111,17 +112,17 @@ public enum AgyAccountCLI {
             try profile.prepare()
             try commands.initializeIfNeeded()
             try commands.run(try parse(arguments))
-            return (0, nil)
+            return (0, nil, [])
         } catch let error as AccountFailure {
             stderr(text.line(error.key, argumentList: error.arguments))
-            return (1, error.key)
+            return (1, error.key, error.arguments)
         } catch let error as UsageFailure {
             let spoken = usageLanguage(commandArguments: arguments, profile: profile, fallback: text)
             stderr(spoken.line(error.key, argumentList: error.arguments))
-            return (2, error.key)
+            return (2, error.key, error.arguments)
         } catch {
             stderr(text.line(.operationFailed))
-            return (1, .operationFailed)
+            return (1, .operationFailed, [])
         }
     }
 }
@@ -143,7 +144,7 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         try rejectExtra(arguments, command: first)
         return .list
     case "save":
-        return .save(try singleName(arguments, command: "save"))
+        return try parseSave(arguments)
     case "switch":
         switch arguments.count {
         case 1:
@@ -152,6 +153,9 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
             return .add
         case 2:
             return .change(arguments[1])
+        // 面板点一行用这种写法。以前留下的、名字正好是 add 的记录也能切过去，不会被当成新增账号。
+        case 3 where arguments[1] == "--":
+            return .change(arguments[2])
         default:
             throw UsageFailure(.commandNoExtra, "switch")
         }
@@ -186,11 +190,17 @@ private func rejectExtra(_ arguments: [String], command: String) throws {
     }
 }
 
-private func singleName(_ arguments: [String], command: String) throws -> String {
-    guard arguments.count == 2 else {
-        throw UsageFailure(.needsName, command)
+// --expect 只给面板用，不写进 help。后面跟着面板上这个名字下面显示的邮箱，名字空着时是空字符串。
+// 面板上看到的可能已经过时：指令动手之前核对一次，对不上就不覆盖、不删除。
+private func parseSave(_ arguments: [String]) throws -> AccountCommandKind {
+    switch arguments.count {
+    case 2:
+        return .save(arguments[1], expecting: nil)
+    case 4 where arguments[2] == "--expect":
+        return .save(arguments[1], expecting: arguments[3])
+    default:
+        throw UsageFailure(.needsName, "save")
     }
-    return arguments[1]
 }
 
 private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
@@ -210,9 +220,13 @@ private func parseRename(_ arguments: [String]) throws -> AccountCommandKind {
 private func parseRemove(_ arguments: [String]) throws -> AccountCommandKind {
     var name: String?
     var force = false
-    for argument in arguments.dropFirst() {
+    var expecting: String?
+    var rest = arguments.dropFirst()
+    while let argument = rest.popFirst() {
         if argument == "--force" {
             force = true
+        } else if argument == "--expect", let email = rest.popFirst() {
+            expecting = email
         } else if argument.hasPrefix("-") {
             throw UsageFailure(.rmUnknownArgument, argument)
         } else if name == nil {
@@ -224,7 +238,7 @@ private func parseRemove(_ arguments: [String]) throws -> AccountCommandKind {
     guard let name else {
         throw UsageFailure(.rmNeedsName)
     }
-    return .remove(name, force: force)
+    return .remove(name, force: force, expecting: expecting)
 }
 
 private func parseLanguage(_ arguments: [String]) throws -> AccountCommandKind {

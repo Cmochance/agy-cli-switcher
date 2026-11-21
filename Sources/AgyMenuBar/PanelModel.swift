@@ -4,6 +4,8 @@ import Foundation
 
 enum PanelPrompt: Equatable {
     case save
+    // 要存的名字下面已经存着别的邮箱 holder。
+    case replace(name: String, holder: String)
     case rename(AccountRow)
     case remove(AccountRow)
     case removeLastCopy(AccountRow)
@@ -12,7 +14,7 @@ enum PanelPrompt: Equatable {
         switch self {
         case .save, .rename:
             return true
-        case .remove, .removeLastCopy:
+        case .replace, .remove, .removeLastCopy:
             return false
         }
     }
@@ -80,8 +82,9 @@ final class PanelModel: ObservableObject {
         }
     }
 
+    // 当前账号那几行也能点：同一个登录存了几个名字时，点另一个名字把它记成当前项。
     func switchTo(_ row: AccountRow) {
-        run(["switch", row.name], saying: text(.panelWorking)) { $0.output + $0.errors }
+        run(["switch", "--", row.name], saying: text(.panelWorking)) { $0.output + $0.errors }
     }
 
     func refresh() {
@@ -140,17 +143,33 @@ final class PanelModel: ObservableObject {
         let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         switch question {
         case .save:
-            run(["save", name], saying: text(.panelWorking)) { $0.output + $0.errors }
+            save(name, over: "")
+        case .replace(let name, let holder):
+            save(name, over: holder)
         case .rename(let row):
             run(["rename", row.name, name], saying: text(.panelWorking)) { $0.output + $0.errors }
         case .remove(let row):
             // 当前记录只剩这一份副本时，指令会拒绝。这时再问一次，确认了才带 --force。
-            run(["rm", row.name], saying: text(.panelWorking), retry: { $0.failure == .onlyCopy ? .removeLastCopy(row) : nil }) {
-                $0.output + $0.errors
-            }
+            // --expect 带着这一行显示的邮箱：这个名字后来存成了别的登录时，指令不删。
+            run(
+                ["rm", row.name, "--expect", row.email],
+                saying: text(.panelWorking),
+                retry: { $0.failure == .onlyCopy ? .removeLastCopy(row) : nil }
+            ) { $0.output + $0.errors }
         case .removeLastCopy(let row):
-            run(["rm", row.name, "--force"], saying: text(.panelWorking)) { $0.output + $0.errors }
+            run(["rm", row.name, "--force", "--expect", row.email], saying: text(.panelWorking)) { $0.output + $0.errors }
         }
+    }
+
+    // holder 是用户已经同意替换掉的那个邮箱，还没问过时是空字符串。名字下面存着别的邮箱时指令会拒绝，
+    // 这时把它存着的邮箱拿来问一次。读不出邮箱的副本没法这样确认，直接显示指令说的话。
+    private func save(_ name: String, over holder: String) {
+        run(["save", name, "--expect", holder], saying: text(.panelWorking), retry: { outcome in
+            guard outcome.failure == .nameTaken, outcome.details.count == 2, !outcome.details[1].isEmpty else {
+                return nil
+            }
+            return .replace(name: outcome.details[0], holder: outcome.details[1])
+        }) { $0.output + $0.errors }
     }
 
     func quit() {

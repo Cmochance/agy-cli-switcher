@@ -3,7 +3,7 @@ import Foundation
 enum AccountCommandKind {
     case current
     case list
-    case save(String)
+    case save(String, expecting: String?)
     case choose
     case add
     case change(String)
@@ -11,7 +11,7 @@ enum AccountCommandKind {
     case refreshQuota
     case refreshQuotaDetached
     case rename(from: String?, to: String)
-    case remove(String, force: Bool)
+    case remove(String, force: Bool, expecting: String?)
     case help
     case languageShow
     case languageSet(String)
@@ -70,8 +70,8 @@ struct AccountCommands {
         case .list:
             try list()
             reportFailedRefresh()
-        case .save(let name):
-            try save(name)
+        case .save(let name, let expecting):
+            try save(name, expecting: expecting)
         case .choose:
             try choose()
         case .add:
@@ -86,8 +86,8 @@ struct AccountCommands {
             refresher.spawnWorker()
         case .rename(let from, let to):
             try rename(from: from, to: to)
-        case .remove(let name, let force):
-            try remove(name, force: force)
+        case .remove(let name, let force, let expecting):
+            try remove(name, force: force, expecting: expecting)
         case .help:
             stdout(text.line(.help))
         case .languageShow:
@@ -368,10 +368,15 @@ struct AccountCommands {
         alignedRows(rows).forEach(stdout)
     }
 
-    private func save(_ name: String) throws {
+    // expecting 是面板上这个名字下面显示的邮箱，名字空着时是空字符串。带着它时，名字下面实际存着的
+    // 只能是当前登录自己或者这个邮箱，否则不覆盖。不带它是命令行的写法，照旧直接存。
+    private func save(_ name: String, expecting: String?) throws {
         let checked = try checkNewName(name)
         let blob = try readKeychain()
         let meta = try decodeLogin(blob, source: .keychain)
+        if let expecting {
+            try checkHolder(of: checked, allowed: expecting.isEmpty ? [meta.email] : [meta.email, expecting])
+        }
         try files.writeSaved(name: checked, blob: blob, meta: meta)
         try profile.write(name: checked, meta: meta)
         try files.setActive(checked)
@@ -449,7 +454,7 @@ struct AccountCommands {
         try switchTo(upcoming)
     }
 
-    private func remove(_ name: String, force: Bool) throws {
+    private func remove(_ name: String, force: Bool, expecting: String?) throws {
         let checked = try checkName(name)
         let tokenExists = FileManager.default.fileExists(atPath: files.locations.tokenURL(checked).path)
         let recorded = profile.names().contains(checked)
@@ -464,6 +469,10 @@ struct AccountCommands {
             throw AccountFailure(.accountMissing, checked, existing.joined(separator: ", "))
         }
         let meta = try profile.read(checked)
+        // 面板上的确认可能是对着旧的一行点的。这个名字后来存成了别的登录时不删，带着 --force 也一样。
+        if let expecting, meta.email != expecting {
+            throw AccountFailure(.accountChanged, checked, meta.email)
+        }
         let currentEmail = profileEmail(profile.activeName())
         if meta.email == currentEmail, !force {
             let others = profile.slots(forEmail: meta.email).filter { $0 != checked }
@@ -547,17 +556,24 @@ struct AccountCommands {
 
     private func availableDefaultName(_ email: String) throws -> String {
         let name = try defaultAccountName(email: email)
+        try checkHolder(of: name, allowed: [email])
+        return name
+    }
+
+    // 名字下面已经有记录或副本时，它的邮箱要在 allowed 里。副本读不出邮箱也算被别人占着。
+    private func checkHolder(of name: String, allowed: [String]) throws {
         if profile.names().contains(name) {
             let existing = try profile.read(name).email
-            if existing != email {
+            if !allowed.contains(existing) {
                 throw AccountFailure(.nameTaken, name, existing)
             }
         }
-        if files.secretExists(name), (try? files.readSaved(name).meta.email) != email {
-            let occupant = (try? files.readSaved(name).meta.email) ?? ""
-            throw AccountFailure(.nameTaken, name, occupant)
+        if files.secretExists(name) {
+            let saved = try? files.readSaved(name).meta.email
+            if saved.map(allowed.contains) != true {
+                throw AccountFailure(.nameTaken, name, saved ?? "")
+            }
         }
-        return name
     }
 
     private func storeLogin(name: String, blob: String, meta: LoginMeta) throws {

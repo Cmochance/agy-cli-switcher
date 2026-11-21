@@ -163,6 +163,9 @@ public enum TextKey: String, CaseIterable {
     case panelQuit
     case panelCancel
     case panelConfirm
+    case panelReplaceConfirm
+    case panelReplaceNow
+    case accountChanged
 }
 
 struct AccountFailure: Error, Equatable {

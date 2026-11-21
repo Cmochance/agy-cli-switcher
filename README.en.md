@@ -41,10 +41,13 @@ Requires macOS 13 or later, on Apple silicon or Intel. Pick either form below.
 You can also download it in the terminal. A file downloaded this way has no `com.apple.quarantine` mark, so there is nothing to allow in System Settings:
 
 ```bash
-curl -L -o /tmp/Agy-Switcher.zip https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip
-ditto -x -k /tmp/Agy-Switcher.zip /Applications
-open "/Applications/Agy Switcher.app"
+tmp="$(mktemp -d)" && \
+  curl -fL -o "$tmp/Agy-Switcher.zip" https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip && \
+  ditto -x -k "$tmp/Agy-Switcher.zip" /Applications && \
+  open "/Applications/Agy Switcher.app"
 ```
+
+The directory made by `mktemp -d` can only be entered by you, and each step runs only if the one before it succeeded.
 
 To update, quit Agy Switcher and delete the old `Agy Switcher.app` first, then install the new one.
 
@@ -54,7 +57,7 @@ The prebuilt command is a single file:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 If Agy Switcher is already installed, there is nothing more to download. The app contains the same program:
@@ -92,8 +95,9 @@ Both downloads can be checked against `SHA256SUMS.txt` from the same page: `shas
 
 Click the icon in the menu bar to open the panel.
 
-- Each row is one saved account: name, email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account
-- Click another row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
+- Each row is one saved account: name, email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked
+- Click a row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
+- When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
 - The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits

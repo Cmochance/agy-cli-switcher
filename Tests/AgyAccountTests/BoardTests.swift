@@ -100,6 +100,65 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.writes, [])
     }
 
+    // 面板上看到的一行可能已经过时。带着 --expect 的指令在动手之前核对这个名字下面存的是谁。
+    func testExpectedHolderIsCheckedBeforeReplacingOrDeleting() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        let board = fixture.board
+        func saved(_ name: String) throws -> String {
+            try AccountFiles(locations: fixture.locations, now: { "" }).readSaved(name).meta.email
+        }
+
+        XCTAssertTrue(board.perform(["save", "work", "--expect", ""]).succeeded)
+        XCTAssertTrue(board.perform(["save", "work", "--expect", ""]).succeeded)
+        fixture.keychain.blob = bob
+        let taken = board.perform(["save", "work", "--expect", ""])
+        XCTAssertEqual(taken.code, 1)
+        XCTAssertEqual(taken.failure, .nameTaken)
+        XCTAssertEqual(taken.details, ["work", "alice@example.com"])
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        XCTAssertEqual(board.perform(["save", "work", "--expect", "carol@example.com"]).failure, .nameTaken)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        XCTAssertTrue(board.perform(["save", "work", "--expect", "alice@example.com"]).succeeded)
+        XCTAssertEqual(try saved("work"), "bob@example.com")
+        // 命令行的写法不变：不带 --expect 直接存。
+        fixture.keychain.blob = alice
+        XCTAssertTrue(board.perform(["save", "work"]).succeeded)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        // 副本读不出邮箱时，也算被别人占着。
+        try Data("broken\n".utf8).write(to: fixture.locations.tokenURL("work"))
+        XCTAssertEqual(board.perform(["save", "work", "--expect", "alice@example.com"]).details, ["work", ""])
+        XCTAssertTrue(board.perform(["save", "work"]).succeeded)
+
+        fixture.keychain.blob = bob
+        XCTAssertTrue(board.perform(["save", "spare"]).succeeded)
+        let changed = board.perform(["rm", "spare", "--expect", "alice@example.com"])
+        XCTAssertEqual(changed.failure, .accountChanged)
+        XCTAssertEqual(changed.details, ["spare", "bob@example.com"])
+        XCTAssertEqual(board.perform(["rm", "spare", "--force", "--expect", "alice@example.com"]).failure, .accountChanged)
+        XCTAssertEqual(try saved("spare"), "bob@example.com")
+        XCTAssertEqual(board.perform(["rm", "spare", "--expect", "bob@example.com"]).failure, .onlyCopy)
+        XCTAssertTrue(board.perform(["rm", "spare", "--expect", "bob@example.com", "--force"]).succeeded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("spare").path))
+
+        for wrong in [["rm", "work", "--expect"], ["save", "work", "--expect"], ["save", "work", "--other", "x"], ["save"]] {
+            XCTAssertEqual(board.perform(wrong).code, 2, wrong.joined(separator: " "))
+        }
+
+        // 以前留下的、名字正好是 add 的记录：switch -- add 是切换，switch add 仍是新增账号。
+        fixture.keychain.blob = alice
+        try fixture.writeLegacyRecord(name: "add", blob: bob)
+        XCTAssertEqual(board.perform(["switch", "add"]).failure, .switchAddNeedsTerminal)
+        XCTAssertEqual(fixture.keychain.blob, alice)
+        let legacy = board.perform(["switch", "--", "add"])
+        XCTAssertTrue(legacy.succeeded)
+        XCTAssertEqual(legacy.output.first, "已切换到 add  bob@example.com")
+        XCTAssertEqual(fixture.keychain.blob, bob)
+        XCTAssertEqual(board.perform(["switch", "--", "work", "extra"]).code, 2)
+    }
+
     func testAddAccountCommandOnlyNamesThisProgram() throws {
         let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"))
         defer { fixture.cleanup() }
@@ -220,6 +279,78 @@ final class BoardTests: XCTestCase {
     }
 
     @MainActor
+    func testPanelAsksBeforeReplacingANameAndRefusesAStaleDelete() async throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "work"]).code, 0)
+        XCTAssertEqual(fixture.run(["save", "travel"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        func saved(_ name: String) throws -> String {
+            try AccountFiles(locations: fixture.locations, now: { "" }).readSaved(name).meta.email
+        }
+        func active() -> String {
+            ToolProfile(home: fixture.home, now: { "" }, preferredLanguages: []).activeName()
+        }
+        let model = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        XCTAssertEqual(model.state.rows.map(\.name), ["bob", "travel", "work"])
+
+        // 要存的名字下面是别的登录：先问，问之前什么都不覆盖。
+        model.ask(.save)
+        model.draft = "work"
+        model.confirm()
+        await settle(model)
+        XCTAssertEqual(model.prompt, .replace(name: "work", holder: "alice@example.com"))
+        XCTAssertEqual(model.messages, [])
+        XCTAssertFalse(model.showsFailure)
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        model.cancel()
+        XCTAssertEqual(try saved("work"), "alice@example.com")
+        model.ask(.save)
+        model.draft = "work"
+        model.confirm()
+        await settle(model)
+        model.confirm()
+        await settle(model)
+        XCTAssertNil(model.prompt)
+        XCTAssertEqual(model.messages, ["已保存 work  bob@example.com"])
+        XCTAssertEqual(try saved("work"), "bob@example.com")
+        XCTAssertEqual(active(), "work")
+
+        // 同一个登录存了两个名字：两行都打勾，点另一行把它记成当前项，不改钥匙串。
+        XCTAssertEqual(model.state.rows.map(\.isCurrent), [true, false, true])
+        let writes = fixture.keychain.writes
+        model.switchTo(model.state.rows[0])
+        await settle(model)
+        XCTAssertEqual(model.messages, ["已经是 bob  bob@example.com"])
+        XCTAssertEqual(active(), "bob")
+        XCTAssertEqual(fixture.keychain.writes, writes)
+
+        // 确认删除的那一下，这个名字已经存成了别的登录：不删。
+        model.ask(.remove(model.state.rows[1]))
+        fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
+        XCTAssertEqual(fixture.run(["save", "travel"]).code, 0)
+        model.confirm()
+        await settle(model)
+        XCTAssertNil(model.prompt)
+        XCTAssertTrue(model.showsFailure)
+        XCTAssertEqual(model.messages, ["travel 现在保存的是 carol@example.com，和刚才看到的不一样，所以没有删除。"])
+        XCTAssertEqual(try saved("travel"), "carol@example.com")
+        XCTAssertEqual(model.state.rows[1], AccountRow(name: "travel", email: "carol@example.com", isCurrent: true, usage: nil))
+
+        // 以前留下的、名字正好是 add 的记录：点它是切换，不是新增账号。
+        try fixture.writeLegacyRecord(name: "add", blob: alice)
+        let later = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        later.switchTo(try XCTUnwrap(later.state.rows.first { $0.name == "add" }))
+        await settle(later)
+        XCTAssertFalse(later.showsFailure)
+        XCTAssertEqual(later.messages.first, "已切换到 add  alice@example.com")
+        XCTAssertEqual(fixture.keychain.blob, alice)
+    }
+
+    @MainActor
     func testPanelRereadsWhileItIsOpenAndForgetsFinishedWorkOnceClosed() async throws {
         let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
         defer { fixture.cleanup() }
@@ -327,16 +458,22 @@ final class BoardTests: XCTestCase {
         model.confirm()
         await settle(model)
         try picture(PanelView(model: model), to: output.appendingPathComponent("5-refused.png"))
+        model.ask(.save)
+        model.draft = "chenmo449"
+        model.confirm()
+        await settle(model)
+        try picture(PanelView(model: model), to: output.appendingPathComponent("6-replace.png"))
+        model.cancel()
         model.setLanguage("en")
         await settle(model)
-        try picture(PanelView(model: model), to: output.appendingPathComponent("6-english.png"))
+        try picture(PanelView(model: model), to: output.appendingPathComponent("7-english.png"))
 
         let empty = try Fixture(blob: makeBlob(email: "nobody@example.com"))
         defer { empty.cleanup() }
         empty.keychain.missing = true
         try picture(
             PanelView(model: PanelModel(board: empty.board, executable: "/somewhere/agy-cs", open: { _ in true })),
-            to: output.appendingPathComponent("7-empty.png")
+            to: output.appendingPathComponent("8-empty.png")
         )
     }
 }

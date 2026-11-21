@@ -10,7 +10,9 @@
 - 工程形态用 Swift Package 的单个可执行文件，对齐本机 `mouse-switch` 的 `Package.swift`。
 - 这一个可执行文件两用。`Sources/agy-cs/main.swift` 用 `launchMode` 判断：没有参数、父进程是 launchd（`getppid() == 1`）、环境里有 `AGY_CS_MENU_BAR=1`，三样都对上才进菜单栏，其余情况都是命令行。这个标记只写在 `Packaging/Info.plist` 的 `LSEnvironment` 里，被系统打开（Finder、Dock、`open`）时才有（实测）。进菜单栏之后立刻 `unsetenv`，不传给之后启动的进程。不要另加一个 app 专用的可执行文件：切换后查额度的进程是重新执行自己，新增账号也是让终端执行包里的这同一个文件。
 - 目标分三个。`AgyAccount` 是全部逻辑。`AgyMenuBar` 只有 SwiftUI 界面，用 `MenuBarExtra` 的窗口样式面板。`agy-cs` 只剩 `main.swift`。面板不自己实现任何账号操作，每个动作都经 `AccountBoard.perform` 在本进程里执行一条 `agy-cs` 指令，说的话收集起来显示。面板要的新能力先做成指令，再接到面板上。
-- 面板里的操作：点一行等于 `switch <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
+- 面板里的操作：点一行等于 `switch -- <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
+- `switch -- <名字>` 和 `switch <名字>` 一样，只是名字正好是 `add` 的旧记录也能切过去，不会被当成新增账号。打勾的行也能点：同一个登录存了几个名字时，每一行都打勾，点另一个名字把它记成当前项，不改钥匙串。
+- 面板上看到的一行可能已经过时，所以它发出的 `save` 和 `rm` 都带 `--expect <邮箱>`，指令在动手之前核对这个名字下面实际存的是谁。`rm <名字> --expect <邮箱>`：存的不是这个邮箱就不删，带 `--force` 也一样。`save <名字> --expect <邮箱>`：名字下面存着的只能是当前登录自己或这个邮箱，否则按“名字被占用”拒绝；邮箱写空字符串表示名字应当空着。面板先用空字符串存一次，被拒绝了就把占着名字的邮箱拿来问“替换？”，确认之后才带着那个邮箱再存。`--expect` 和 `switch --` 只给面板用，不写进 help。命令行里不带 `--expect` 的 `save <名字>` 照旧直接存。
 - 四个语言文件用 `Package.swift` 的 `.embedInCode` 编进二进制，`StringCatalog` 读 `PackageResources`。不要改回 `.copy` 加 `Bundle.module`：经符号链接运行时 `Bundle.main` 指向链接所在的目录（实测），按位置找资源包会找不到，放进 app 包之后也一样。
 - 钥匙串那一项的读、写、删都通过 `/usr/bin/security`，和 `agy` 自己的做法一致。路径写绝对路径，不从 `PATH` 里找。读用 `find-generic-password -w`，删用 `delete-generic-password`。写用 `security -i`，把 `add-generic-password -U … -w <内容>` 从标准输入送进去，token 不出现在任何进程的参数里。
 - 不要用 Security.framework 的 `SecItem*` 或 Python 读写这一项的内容。这一项只信任 `/usr/bin/security`，分区名单里只有 `apple-tool:`。在本进程里读，每读一次弹两个钥匙串密码窗口。在本进程里写，分区名单会被换成本程序的 `cdhash:`，之后 `agy` 自己读取也会弹窗。只数这一项有几条、不取内容时，可以用 `SecItemCopyMatching`。
@@ -30,7 +32,7 @@
 - 不移动、不删除 `~/.gemini/antigravity-cli/conversations`。
 - 命令名是 `agy-cs`。本机 `~/.local/bin/agy-cs` 指向仓库 `build/agy-cs`。改完后执行 `make install`。`build/agy-cs` 是单个文件，旁边不需要别的东西。安装时先删掉旧的 `build/agy-cs` 再复制，然后执行 `codesign --force --sign - build/agy-cs`。直接 `cp -f` 覆盖旧文件时，内核会沿用旧的代码签名缓存，打开第一页就发 SIGKILL，zsh 显示 `killed`。
 - `make app` 生成 `build/Agy Switcher.app`。`Contents/MacOS/agy-cs` 就是上面那个二进制，另有 `Packaging/Info.plist` 和 `Packaging/AppIcon.icns`，整个包 ad-hoc 签名。同样先 `rm -rf` 旧的包再拷。图标由 `Packaging/AppIcon.swift` 画出来，换图标时改它，再重新生成 icns。
-- `make dist` 编译 arm64 加 x86_64 的通用二进制，生成 `dist/agy-cs-macos-universal.tar.gz`、`dist/Agy-Switcher.zip` 和 `dist/SHA256SUMS.txt`。包名里不带版本号，这样 README 里的 `releases/latest/download/…` 链接不用每版改。版本号只写在 `Packaging/Info.plist`，README 和 CHANGELOG 跟它一致，测试会核对。
+- `make dist` 编译 arm64 加 x86_64 的通用二进制，生成 `dist/agy-cs-macos-universal.tar.gz`、`dist/Agy-Switcher.zip` 和 `dist/SHA256SUMS.txt`。两个架构分开编译，再用 `lipo -create` 合并。不要改成一次传两个 `--arch`：Xcode 26.6 的 SwiftPM 这时换用另一套构建系统，不生成 `.embedInCode` 的 `PackageResources`，编译不过（CI 实测）。每个架构编完就把二进制拷走，因为本机这版 SwiftPM 两次编译用同一个输出目录。zip 用 `ditto --norsrc --noextattr` 打，里面不带 `._` 开头的文件，否则用别的工具解开后签名对不上。包名里不带版本号，这样 README 里的 `releases/latest/download/…` 链接不用每版改。版本号只写在 `Packaging/Info.plist`，README 和 CHANGELOG 跟它一致，测试会核对。
 - 发布：推 `v` 加版本号的 tag，`release.yml` 跑测试、执行 `make dist`，然后建 draft release。它只建 draft，不要在 workflow 里加发正式版的步骤。签名是 ad-hoc，没有公证，因为没有 Developer ID 证书；浏览器下载的 app 第一次打开要到“系统设置 → 隐私与安全性”里放行。以后有证书时用 `make dist SIGN_IDENTITY=…`，公证另加。
 - 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。菜单栏工具启动时走的是同一步。
 - 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。面板打开时和打开期间每两秒的重读，读的是 `list` 那一份记录，同样不读钥匙串、不联网。

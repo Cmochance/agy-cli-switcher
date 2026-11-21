@@ -324,3 +324,12 @@ Cancel
 
 [panelConfirm]
 OK
+
+[panelReplaceConfirm]
+The name %1 now holds %2. Replace it with the current keychain login? After that, the saved login for %2 is gone.
+
+[panelReplaceNow]
+Replace
+
+[accountChanged]
+%1 now holds %2, which is not what was shown a moment ago, so nothing was deleted.

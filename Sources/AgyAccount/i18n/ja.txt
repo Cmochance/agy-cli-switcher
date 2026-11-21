@@ -324,3 +324,12 @@ rename は名前を二つまで受け付けます。agy-cs help で全コマン�
 
 [panelConfirm]
 OK
+
+[panelReplaceConfirm]
+名前 %1 には現在 %2 が保存されています。キーチェーンの現在のログインで置き換えますか？置き換えると、%2 の保存済みログインはなくなります。
+
+[panelReplaceNow]
+置き換える
+
+[accountChanged]
+%1 に保存されているのは %2 で、先ほどの表示と異なるため、削除しませんでした。

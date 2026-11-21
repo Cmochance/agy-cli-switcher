@@ -35,6 +35,8 @@ public struct BoardState {
 public struct ActionOutcome {
     public var code: Int32
     public var failure: TextKey?
+    // 填进 failure 那句话里的名字和邮箱，顺序和句子里的 %1、%2 一样。
+    public var details: [String]
     public var output: [String]
     public var errors: [String]
 
@@ -85,7 +87,9 @@ public struct AccountBoard: @unchecked Sendable {
         let output = Lines()
         let errors = Lines()
         let result = AgyAccountCLI.execute(arguments, services: services, stdout: output.add, stderr: errors.add)
-        return ActionOutcome(code: result.code, failure: result.failure, output: output.all, errors: errors.all)
+        return ActionOutcome(
+            code: result.code, failure: result.failure, details: result.details, output: output.all, errors: errors.all
+        )
     }
 
     // agy 的登录界面要一个终端，面板里登录不了。这里写一个两行的 .command 文件，由面板交给系统默认的终端程序打开。

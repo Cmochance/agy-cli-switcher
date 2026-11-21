@@ -129,7 +129,7 @@ private struct AccountRowView: View {
     @State private var hovering = false
 
     private var selectable: Bool {
-        !row.isCurrent && model.busy == nil
+        model.busy == nil
     }
 
     var body: some View {
@@ -211,12 +211,25 @@ private struct PromptView: View {
         switch prompt {
         case .save:
             return model.text(.panelSavePrompt)
+        case .replace(let name, let holder):
+            return model.text(.panelReplaceConfirm, name, holder)
         case .rename(let row):
             return model.text(.panelRenamePrompt, row.name)
         case .remove(let row):
             return model.text(.panelRemoveConfirm, row.name, row.email)
         case .removeLastCopy(let row):
             return model.text(.panelRemoveLastCopy, row.name, row.email)
+        }
+    }
+
+    private var confirmLabel: TextKey {
+        switch prompt {
+        case .save, .rename:
+            return .panelConfirm
+        case .replace:
+            return .panelReplaceNow
+        case .remove, .removeLastCopy:
+            return .panelRemoveNow
         }
     }
 
@@ -237,7 +250,7 @@ private struct PromptView: View {
                     model.cancel()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button(model.text(prompt.needsText ? .panelConfirm : .panelRemoveNow)) {
+                Button(model.text(confirmLabel)) {
                     model.confirm()
                 }
                 .keyboardShortcut(.defaultAction)

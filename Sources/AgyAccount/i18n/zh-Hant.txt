@@ -324,3 +324,12 @@ rename 最多接受兩個名字。執行 agy-cs help 查看全部指令。
 
 [panelConfirm]
 確定
+
+[panelReplaceConfirm]
+名字 %1 現在存著 %2。用鑰匙圈裡的目前登入取代它？取代之後，%2 保存的這份登入就沒有了。
+
+[panelReplaceNow]
+取代
+
+[accountChanged]
+%1 現在保存的是 %2，和剛才看到的不一樣，所以沒有刪除。

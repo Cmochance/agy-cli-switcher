@@ -324,3 +324,12 @@ rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
 
 [panelConfirm]
 确定
+
+[panelReplaceConfirm]
+名字 %1 现在存着 %2。用钥匙串里的当前登录替换它？替换之后，%2 保存的这份登录就没有了。
+
+[panelReplaceNow]
+替换
+
+[accountChanged]
+%1 现在保存的是 %2，和刚才看到的不一样，所以没有删除。
