@@ -8,7 +8,9 @@
 - 不要改成 Rust、Python、shell、Tauri 或网页。
 - 界面是 macOS 菜单栏工具：SwiftUI + AppKit，部署目标 macOS 13。点开列出已保存邮箱，再点一项完成切换。不要做独立大窗口，也不要做浏览器页面。
 - 工程形态用 Swift Package 的单个可执行文件，对齐本机 `mouse-switch` 的 `Package.swift`。
-- 钥匙串用 Security.framework 在进程内读写。不要再启动 `security` 或 Python 去读写登录。`/usr/bin/security` 创建的那一项，`SecItemDelete` 会返回 `errSecInvalidOwnerEdit`（-25244）并且删不掉，这时用 `SecKeychainItemDelete` 按引用删除。带 `kSecValueRef` 或 `kSecMatchItemList` 再调 `SecItemDelete` 同样是 -25244。
+- 钥匙串那一项的读、写、删都通过 `/usr/bin/security`，和 `agy` 自己的做法一致。路径写绝对路径，不从 `PATH` 里找。读用 `find-generic-password -w`，删用 `delete-generic-password`。写用 `security -i`，把 `add-generic-password -U … -w <内容>` 从标准输入送进去，token 不出现在任何进程的参数里。
+- 不要用 Security.framework 的 `SecItem*` 或 Python 读写这一项的内容。这一项只信任 `/usr/bin/security`，分区名单里只有 `apple-tool:`。在本进程里读，每读一次弹两个钥匙串密码窗口。在本进程里写，分区名单会被换成本程序的 `cdhash:`，之后 `agy` 自己读取也会弹窗。只数这一项有几条、不取内容时，可以用 `SecItemCopyMatching`。
+- `security -i` 的一行连换行超过 4096 个字节时，前 4095 个字节会被当成一条指令执行，剩下的被当成下一条指令。写入前检查内容只有 `go-keyring-base64:` 加 base64 字符，并且整行不超过 4095 个字节。新增账号在移开钥匙串那一项之前先做同样的检查，写不回去的登录不动它。
 
 ## 登录数据
 
@@ -35,3 +37,13 @@
 
 - 说完成之前核对：`~/.local/bin/agy-cs` 的符号链接目标、钥匙串的 service 和 account 没变、当前邮箱仍能读出。
 - 输出里不打印 token。
+- 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 swift test --disable-sandbox --filter testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
+
+## 合并之后
+
+- 合并 PR 仍要用户当条消息明确说合并。合并完成后，下面几步默认接着做，不用再问：
+  1. 先确认本地分支和合并后的 `main` 内容一致（`git diff --quiet main <分支>`）。不一致就停下来报告，不删。
+  2. `git switch main`，`git pull --ff-only`。
+  3. 删除本地分支（squash 合并后要用 `git branch -D`）和远端分支（`git push origin --delete <分支>`），再 `git fetch --prune`。
+  4. 用 `git branch -a` 核对两个分支都已消失。
+- 只删刚合并的那个 PR 的分支，其他分支不动。

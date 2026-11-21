@@ -94,6 +94,9 @@ use 已改為 switch。執行 agy-cs switch <名字>。
 [writeMismatch]
 寫回鑰匙圈後讀出來的內容和要切換的帳號不一致，已停止。
 
+[loginNotWritable]
+這筆登入沒辦法透過 /usr/bin/security 寫回鑰匙圈（內容太長，或者格式不對），所以沒有改動鑰匙圈。
+
 [readFailed]
 沒能讀取 %1。
 

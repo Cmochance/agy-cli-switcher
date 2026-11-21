@@ -94,6 +94,9 @@ use 已改为 switch。执行 agy-cs switch <名字>。
 [writeMismatch]
 写回钥匙串后读出来的内容和要切换的账号不一致，已停止。
 
+[loginNotWritable]
+这条登录没法通过 /usr/bin/security 写回钥匙串（内容太长，或者格式不对），所以没有改动钥匙串。
+
 [readFailed]
 没能读取 %1。
 

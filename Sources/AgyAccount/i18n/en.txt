@@ -94,6 +94,9 @@ The keychain operation failed (error %1).
 [writeMismatch]
 The keychain did not contain the account after writing it, so the switch stopped.
 
+[loginNotWritable]
+This login cannot be written back to the keychain through /usr/bin/security (it is too long, or not in the expected format), so the keychain was left unchanged.
+
 [readFailed]
 Couldn't read %1.
 

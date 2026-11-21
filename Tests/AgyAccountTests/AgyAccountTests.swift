@@ -464,6 +464,23 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(taken.run(["current"]).output, ["alice@example.com"])
     }
 
+    func testAddAccountLeavesALoginAloneWhenItCouldNotBeWrittenBack() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.writeLimit = alice.count - 1
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = { XCTFail("agy must not open") }
+        let refused = fixture.run(["switch", "add"])
+        XCTAssertEqual(refused.code, 1)
+        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("没有改动钥匙串"))
+        XCTAssertFalse(fixture.keychain.missing)
+        XCTAssertEqual(fixture.keychain.blob, alice)
+        XCTAssertTrue(fixture.keychain.writes.isEmpty)
+        XCTAssertEqual(fixture.launcher.started, 0)
+    }
+
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let bob = makeBlob(email: "bob@example.com", refresh: "b")
@@ -636,13 +653,150 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertFalse(ownsForeground(foreground: -1, own: -1))
     }
 
-    func testKeychainDeleteFallsBackToItemReferenceForOwnerEdit() {
-        XCTAssertEqual(classifyDelete(errSecSuccess), .done)
-        XCTAssertEqual(classifyDelete(errSecItemNotFound), .done)
-        XCTAssertEqual(classifyDelete(errSecInvalidOwnerEdit), .byReference)
-        XCTAssertEqual(classifyDelete(-25244), .byReference)
-        XCTAssertEqual(classifyDelete(errSecAuthFailed), .failed)
-        XCTAssertEqual(classifyDelete(errSecUserCanceled), .failed)
+    func testKeychainStoreTalksToSecurityAndKeepsTheLoginOutOfArguments() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let tool = ScriptedSecurityTool()
+        let store = LoginKeychainStore(tool: tool)
+        XCTAssertThrowsError(try store.readBlob()) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainMissing))
+        }
+        tool.stored = alice
+        XCTAssertEqual(try store.readBlob(), alice)
+        XCTAssertEqual(tool.calls.last?.arguments, ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"])
+        XCTAssertNil(tool.calls.last?.input)
+
+        try store.writeBlob(bob)
+        XCTAssertEqual(tool.stored, bob)
+        XCTAssertEqual(tool.calls.compactMap(\.input), ["add-generic-password -U -s gemini -a antigravity -w \(bob)\n"])
+        XCTAssertEqual(tool.calls.first { $0.input != nil }?.arguments, ["-i"])
+        XCTAssertFalse(tool.calls.contains { $0.arguments.contains { $0.contains("go-keyring") } })
+
+        try store.deleteBlob()
+        XCTAssertNil(tool.stored)
+        XCTAssertEqual(tool.calls.last?.arguments, ["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
+        XCTAssertNoThrow(try store.deleteBlob())
+    }
+
+    func testKeychainStoreRefusesLoginsThatCouldCarryASecondCommand() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let tool = ScriptedSecurityTool()
+        tool.stored = alice
+        let store = LoginKeychainStore(tool: tool)
+        let unsafe = [
+            alice + "\ndelete-keychain",
+            alice + " -T /bin/sh",
+            alice + "\"",
+            "plain",
+            keychainPrefix,
+            keychainPrefix + String(repeating: "A", count: securityLineLimit),
+        ]
+        for blob in unsafe {
+            XCTAssertThrowsError(try store.writeBlob(blob), String(blob.suffix(20)))
+        }
+        XCTAssertTrue(tool.calls.allSatisfy { $0.input == nil })
+        XCTAssertEqual(tool.stored, alice)
+
+        let fixed = "add-generic-password -U -s gemini -a antigravity -w \(keychainPrefix)\n".utf8.count
+        let longest = keychainPrefix + String(repeating: "A", count: securityLineLimit - fixed)
+        XCTAssertEqual(
+            securityAddLine(service: "gemini", account: "antigravity", blob: longest)?.utf8.count,
+            securityLineLimit
+        )
+        XCTAssertNil(securityAddLine(service: "gemini", account: "antigravity", blob: longest + "A"))
+        XCTAssertNil(securityAddLine(service: "gemini -a other", account: "antigravity", blob: alice))
+    }
+
+    func testKeychainStoreRestoresTheOriginalAndMapsExitCodes() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let tool = ScriptedSecurityTool()
+        tool.stored = alice
+        tool.garbleNextWrite = true
+        let store = LoginKeychainStore(tool: tool)
+        XCTAssertThrowsError(try store.writeBlob(bob)) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.writeMismatch))
+        }
+        XCTAssertEqual(tool.stored, alice)
+
+        XCTAssertEqual(securityFailure(exitStatus: 44), AccountFailure(.keychainMissing))
+        for status: Int32 in [128, 51, 36] {
+            XCTAssertEqual(securityFailure(exitStatus: status), AccountFailure(.keychainDenied))
+        }
+        XCTAssertEqual(securityFailure(exitStatus: 1), AccountFailure(.keychainFailed, "1"))
+        tool.failStatus = 51
+        XCTAssertThrowsError(try store.readBlob()) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainDenied))
+        }
+        XCTAssertThrowsError(try store.deleteBlob()) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainDenied))
+        }
+        XCTAssertThrowsError(try store.writeBlob(bob)) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainDenied))
+        }
+    }
+
+    func testSecurityToolRoundTripOnAProbeItemWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["AGY_ACCOUNT_PROBE"] == "1" else {
+            return
+        }
+        let store = LoginKeychainStore(service: "agy-cs-test-probe", account: "probe")
+        defer { try? store.deleteBlob() }
+        try store.deleteBlob()
+        XCTAssertThrowsError(try store.readBlob()) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainMissing))
+        }
+        let first = makeBlob(email: "alice@example.com", refresh: String(repeating: "r", count: 900))
+        try store.writeBlob(first)
+        XCTAssertEqual(try store.readBlob(), first)
+        let fixed = "add-generic-password -U -s agy-cs-test-probe -a probe -w \(keychainPrefix)\n".utf8.count
+        let room = securityLineLimit - fixed
+        let longest = keychainPrefix + String(repeating: "A+/=", count: room / 4) + String(repeating: "A", count: room % 4)
+        XCTAssertEqual(securityAddLine(service: store.service, account: store.account, blob: longest)?.utf8.count, securityLineLimit)
+        XCTAssertThrowsError(try store.checkWritable(longest + "A"))
+        try store.writeBlob(longest)
+        XCTAssertEqual(try store.readBlob(), longest)
+        XCTAssertEqual(try store.matchingItemCount(dataProtection: false), 1)
+        try store.deleteBlob()
+        XCTAssertThrowsError(try store.readBlob()) {
+            XCTAssertEqual($0 as? AccountFailure, AccountFailure(.keychainMissing))
+        }
+        XCTAssertNoThrow(try store.deleteBlob())
+    }
+}
+
+private final class ScriptedSecurityTool: SecurityToolRunning {
+    var stored: String?
+    var calls: [(arguments: [String], input: String?)] = []
+    var failStatus: Int32?
+    var garbleNextWrite = false
+
+    func run(_ arguments: [String], input: Data?) throws -> SecurityToolResult {
+        let text = input.map { String(decoding: $0, as: UTF8.self) }
+        calls.append((arguments, text))
+        if let failStatus {
+            return SecurityToolResult(status: failStatus, output: Data())
+        }
+        switch arguments.first {
+        case "find-generic-password":
+            guard let stored else {
+                return SecurityToolResult(status: 44, output: Data())
+            }
+            return SecurityToolResult(status: 0, output: Data((stored + "\n").utf8))
+        case "delete-generic-password":
+            guard stored != nil else {
+                return SecurityToolResult(status: 44, output: Data())
+            }
+            stored = nil
+            return SecurityToolResult(status: 0, output: Data("keychain: \"login.keychain-db\"\n".utf8))
+        case "-i":
+            let value = text?.components(separatedBy: " -w ").last?.trimmingCharacters(in: .newlines)
+            stored = garbleNextWrite ? keychainPrefix + "AAAA" : value
+            garbleNextWrite = false
+            return SecurityToolResult(status: 0, output: Data())
+        default:
+            return SecurityToolResult(status: 1, output: Data())
+        }
     }
 }
 
@@ -657,6 +811,13 @@ private final class MemoryKeychain: KeychainStoring {
 
     var missing = false
     var denied = false
+    var writeLimit: Int?
+
+    func checkWritable(_ blob: String) throws {
+        if let writeLimit, blob.count > writeLimit {
+            throw AccountFailure(.loginNotWritable)
+        }
+    }
 
     func readBlob() throws -> String {
         reads += 1
@@ -670,6 +831,7 @@ private final class MemoryKeychain: KeychainStoring {
     }
 
     func writeBlob(_ blob: String) throws {
+        try checkWritable(blob)
         writes.append(blob)
         self.blob = blob
         missing = false
@@ -697,6 +859,8 @@ private final class ExplodingKeychain: KeychainStoring {
     func deleteBlob() throws {
         throw AccountFailure(.keychainDenied)
     }
+
+    func checkWritable(_ blob: String) throws {}
 }
 
 private final class FixedProcesses: ProcessListing {

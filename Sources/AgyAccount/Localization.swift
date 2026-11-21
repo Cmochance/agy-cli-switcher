@@ -87,6 +87,7 @@ enum TextKey: String, CaseIterable {
     case keychainDenied
     case keychainFailed
     case writeMismatch
+    case loginNotWritable
     case readFailed
     case writeFailed
     case deleteFailed
