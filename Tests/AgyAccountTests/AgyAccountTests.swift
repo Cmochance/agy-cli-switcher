@@ -602,19 +602,43 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.usage.calls.count, 1)
         XCTAssertEqual(try String(contentsOf: fixture.tool.usageStatusFile, encoding: .utf8), status)
 
+        // 另一个进程查完了 bob。它开始之后才存进来的 alice 要补查，bob 不再查一遍。
         fixture.usage.budget = 5
-        try ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: []).writeUsageStatus(failed: [])
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
-            flock(held, LOCK_UN)
-            close(held)
+        let profile = ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: [])
+        try profile.writeUsageStatus(failed: [])
+        try fixture.writeLegacyRecord(name: "alice", blob: alice)
+        func releaseSoon(_ descriptor: Int32) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
         }
+        releaseSoon(held)
         let started = Date()
         let waited = fixture.run(["refresh", "quota"])
         XCTAssertEqual(waited.code, 0)
         XCTAssertEqual(waited.errors, [])
-        XCTAssertEqual(waited.output.count, 2)
-        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertEqual(waited.output.map { cells($0).count }, [6, 6])
+        XCTAssertEqual(fixture.usage.calls.last, ["alice"])
         XCTAssertGreaterThan(Date().timeIntervalSince(started), 0.2)
+        XCTAssertLessThan(try XCTUnwrap(fixture.usage.allowed.last), 4.9)
+
+        let again = open(fixture.tool.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertEqual(flock(again, LOCK_EX), 0)
+        releaseSoon(again)
+        XCTAssertEqual(fixture.run(["refresh", "quota"]).code, 0)
+        XCTAssertEqual(fixture.usage.calls.count, 2)
+
+        // 结果写不下来时不能报成功，也不能拿上一次的结果顶替。
+        try FileManager.default.removeItem(at: fixture.tool.usageStatusFile)
+        try FileManager.default.createDirectory(
+            at: fixture.tool.usageStatusFile.appendingPathComponent("blocked"),
+            withIntermediateDirectories: true
+        )
+        let unwritable = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(unwritable.code, 1)
+        XCTAssertEqual(fixture.usage.calls.last, ["alice", "bob"])
+        XCTAssertTrue(unwritable.errors.contains { $0.contains("usage-status.json") })
     }
 
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
@@ -1056,8 +1080,11 @@ private final class ScriptedUsage: UsageFetching {
     var snapshots: [String: UsageSnapshot]?
     var calls: [[String]] = []
 
-    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
+    var allowed: [TimeInterval] = []
+
+    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot] {
         calls.append(logins.map(\.name))
+        allowed.append(seconds)
         var answer: [String: UsageSnapshot] = [:]
         for login in logins {
             answer[login.name] = snapshots.map { $0[login.name] } ?? UsageSnapshot(planID: "", planName: "", buckets: [])

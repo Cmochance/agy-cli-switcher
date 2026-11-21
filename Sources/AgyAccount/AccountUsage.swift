@@ -21,7 +21,7 @@ struct UsagePlan {
 protocol UsageFetching {
     // 一次查询从开始到结束最多用多久。等别的进程查完也用这个时限。
     var budget: TimeInterval { get }
-    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot]
+    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot]
 }
 
 // loadCodeAssist 的回答。付费套餐在 paidTier，没有时用 currentTier。

@@ -195,33 +195,40 @@ struct AccountCommands {
     // 联网查询所有已保存账号的套餐和额度。只用保存的副本，不读钥匙串。
     // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
     private func refreshQuota() throws {
+        let started = DispatchTime.now()
         guard let lock = profile.lockUsage(wait: usage.budget) else {
             throw AccountFailure(.usageBusy)
         }
         defer { close(lock.descriptor) }
-        // 等过锁，说明另一个进程刚查完，直接用它记下的结果，不再请求一遍。
-        if !lock.waited {
-            var failed: [String] = []
-            var saved: [(name: String, blob: String, email: String)] = []
-            for name in profile.names() {
-                if let login = try? files.readSaved(name) {
-                    saved.append((name, login.blob, login.meta.email))
-                } else {
-                    failed.append(name)
-                }
+        // 等过锁，说明另一个进程刚查完。它查过的账号直接用它记下的结果，只补查它没见过的。
+        let earlier = lock.waited ? failedRefresh() : []
+        var failed: [String] = []
+        var saved: [(name: String, blob: String, email: String)] = []
+        for name in profile.names() {
+            guard let login = try? files.readSaved(name) else {
+                failed.append(name)
+                continue
             }
-            let fetched = saved.isEmpty ? [:] : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
-            failed += saved.filter { login in
-                // 查询期间这个名字可能已经被删掉或改存成别的登录。
-                guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
-                    return true
-                }
-                return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
-            }.map(\.name)
-            try? profile.writeUsageStatus(failed: failed.sorted())
+            if earlier.contains(name) {
+                failed.append(name)
+            } else if !lock.waited || profile.readUsage(name, email: login.meta.email) == nil {
+                saved.append((name, login.blob, login.meta.email))
+            }
         }
+        let spent = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+        let fetched = saved.isEmpty
+            ? [:]
+            : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) }, within: usage.budget - spent)
+        failed += saved.filter { login in
+            // 查询期间这个名字可能已经被删掉或改存成别的登录。
+            guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
+                return true
+            }
+            return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
+        }.map(\.name)
+        failed.sort()
+        try profile.writeUsageStatus(failed: failed)
         try list()
-        let failed = failedRefresh()
         if !failed.isEmpty {
             throw AccountFailure(.usageFailed, failed.joined(separator: ", "))
         }

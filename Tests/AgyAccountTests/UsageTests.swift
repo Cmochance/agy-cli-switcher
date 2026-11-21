@@ -236,7 +236,7 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: cache) }
         let started = Date()
         XCTAssertTrue(isGoogleSigned(try agyExecutable()))
-        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins)
+        let fetched = CloudCodeUsage(client: AgyClient(cacheURL: cache)).fetch(logins, within: 10)
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         XCTAssertEqual(fetched.count, logins.count)
         for (index, login) in logins.enumerated() {
@@ -279,6 +279,12 @@ final class UsageTests: XCTestCase {
     {"bucketId":"gemini-argon-wtu-weekly","window":"weekly","resetTime":"2026-11-28T10:35:35Z","remainingFraction":1},\
     {"bucketId":"switched-off","disabled":true,"remainingFraction":1}]}]}
     """
+}
+
+private extension CloudCodeUsage {
+    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
+        fetch(logins, within: budget)
+    }
 }
 
 private final class ScriptedHTTP: HTTPPosting {

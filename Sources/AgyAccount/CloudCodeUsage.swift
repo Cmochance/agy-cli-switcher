@@ -50,7 +50,7 @@ struct URLSessionPoster: HTTPPosting {
 struct CloudCodeUsage: UsageFetching {
     var http: any HTTPPosting = URLSessionPoster()
     var client: AgyClient
-    // 切换要等这一步结束，所以从开始到最后一个回答，合计有一个时间上限。
+    // 一次查询从开始到最后一个回答的时间上限。
     var budget: TimeInterval = 10
 
     private static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
@@ -61,11 +61,11 @@ struct CloudCodeUsage: UsageFetching {
         #"{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}"#.utf8
     )
 
-    func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot] {
+    func fetch(_ logins: [(name: String, blob: String)], within seconds: TimeInterval) -> [String: UsageSnapshot] {
         let tokens = logins.compactMap { login in
             loginRefreshToken(login.blob).map { (name: login.name, refresh: $0) }
         }
-        let deadline = DispatchTime.now() + budget
+        let deadline = DispatchTime.now() + max(0, seconds)
         guard !tokens.isEmpty, let agy = client.resolve() else {
             return [:]
         }
