@@ -85,6 +85,21 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(guide.contains("%1"))
     }
 
+    func testKeychainContentOnlyGoesThroughTheSecurityTool() throws {
+        let sources = repoRoot.appendingPathComponent("Sources/AgyAccount")
+        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        XCTAssertFalse(files.isEmpty)
+        var combined = ""
+        for file in files {
+            combined += try String(contentsOf: file, encoding: .utf8)
+        }
+        XCTAssertTrue(combined.contains("\"/usr/bin/security\""))
+        for token in ["SecItemUpdate(", "SecItemAdd(", "SecItemDelete(", "SecKeychainItemDelete(", "kSecReturnData", "kSecValueData"] {
+            XCTAssertFalse(combined.contains(token), token)
+        }
+    }
+
     private func placeholders(_ text: String) -> [String] {
         var found: [String] = []
         var index = text.startIndex

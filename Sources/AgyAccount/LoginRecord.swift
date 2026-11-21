@@ -94,9 +94,14 @@ private func isNameBody(_ scalar: Unicode.Scalar) -> Bool {
     isNameLetter(scalar) || scalar == "." || scalar == "_" || scalar == "-"
 }
 
+private let base64Alphabet = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+
+func isBase64Text<Text: StringProtocol>(_ value: Text) -> Bool {
+    !value.isEmpty && value.allSatisfy { base64Alphabet.contains($0) }
+}
+
 private func decodeBase64(_ value: String) -> Data? {
-    let alphabet = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
-    guard !value.isEmpty, value.count.isMultiple(of: 4), value.allSatisfy({ alphabet.contains($0) }) else {
+    guard isBase64Text(value), value.count.isMultiple(of: 4) else {
         return nil
     }
     return Data(base64Encoded: value)
