@@ -118,6 +118,9 @@ refresh 後面只接受 quota。執行 agy-cs refresh quota 重新查詢所有�
 [usageFailed]
 沒能更新這些帳號的方案和額度記錄: %1。執行 agy-cs refresh quota 可以再試一次。
 
+[usageBusy]
+另一個額度查詢還沒結束。稍後執行 agy-cs ls 查看結果。
+
 [noSavedAccounts]
 還沒有保存的帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。
 

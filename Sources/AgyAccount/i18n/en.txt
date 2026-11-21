@@ -118,6 +118,9 @@ Couldn't delete the quota cache %1: %2
 [usageFailed]
 Couldn't update the plan and quota records for: %1. Run agy-cs refresh quota to try again.
 
+[usageBusy]
+Another quota lookup is still running. Run agy-cs ls in a moment to see the result.
+
 [noSavedAccounts]
 No accounts are saved yet. Log in with agy, then run agy-cs save <name>.
 

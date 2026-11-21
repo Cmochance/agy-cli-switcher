@@ -118,6 +118,9 @@ refresh の後ろに書けるのは quota だけです。agy-cs refresh quota �
 [usageFailed]
 次のアカウントのプランと利用枠の記録を更新できませんでした: %1。agy-cs refresh quota でもう一度試せます。
 
+[usageBusy]
+別の利用枠の問い合わせがまだ終わっていません。少し待ってから agy-cs ls で結果を確認してください。
+
 [noSavedAccounts]
 保存したアカウントはまだありません。agy でログインしてから agy-cs save <名前> を実行してください。
 

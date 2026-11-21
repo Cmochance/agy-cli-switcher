@@ -136,13 +136,21 @@ struct ToolProfile {
         try AtomicFile.write(locations.usageURL(name), encodeUsage(snapshot, email: email, fetchedAt: now()))
     }
 
-    // 同一时间只让一个进程写额度记录。进程结束时锁自动释放。
-    func lockUsage() -> Int32 {
+    // 同一时间只让一个进程查询并写额度记录。进程结束时锁自动释放。
+    // 锁被占着时最多等 wait 秒，等不到返回 nil。waited 表示等过别的进程。
+    func lockUsage(wait: TimeInterval) -> (descriptor: Int32, waited: Bool)? {
         let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
-        if descriptor >= 0 {
-            while flock(descriptor, LOCK_EX) == -1 && errno == EINTR {}
+        let deadline = DispatchTime.now() + wait
+        var waited = false
+        while descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) != 0, errno == EWOULDBLOCK || errno == EINTR {
+            guard DispatchTime.now() < deadline else {
+                close(descriptor)
+                return nil
+            }
+            waited = true
+            usleep(100_000)
         }
-        return descriptor
+        return (descriptor, waited)
     }
 
     func writeUsageStatus(failed: [String]) throws {

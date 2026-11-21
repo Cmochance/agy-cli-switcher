@@ -19,6 +19,8 @@ struct UsagePlan {
 }
 
 protocol UsageFetching {
+    // 一次查询从开始到结束最多用多久。等别的进程查完也用这个时限。
+    var budget: TimeInterval { get }
     func fetch(_ logins: [(name: String, blob: String)]) -> [String: UsageSnapshot]
 }
 

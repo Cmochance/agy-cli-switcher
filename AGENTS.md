@@ -29,7 +29,7 @@
 - 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。
 - 联网只发生在 `agy-cs refresh quota` 里：用每个保存副本里的 refresh token 向 `oauth2.googleapis.com` 换一个临时 access token，再请求 `daily-cloudcode-pa.googleapis.com` 的 `loadCodeAssist`（套餐）和 `retrieveUserQuotaSummary`（额度），结果写到 `~/.agy-cs/usage/<名字>.json`。临时 token 只留在内存里，不回写任何文件，也不读钥匙串。从开始到最后一个回答合计最多等 10 秒。`list` 不联网，只读这些记录。记录里带着邮箱；同一个名字后来存成了另一个登录时，旧记录不再显示。
 - 额度查询和切换互不干涉。`switch`、`next` 和新增账号成功之后不在本进程里查，而是另起进程执行 `agy-cs refresh quota`，不等它结束，它失败也不影响切换；切换失败时不会启动它。启动分两步：先启动 `agy-cs refresh quota --detach` 并等它退出，它再启动真正查询的进程（自成会话，标准输入输出接 `/dev/null`）然后立刻退出。这样查询进程没有父进程，菜单里随后换成 `agy` 的那个进程下面不会留下僵尸进程。`--detach` 只给这一步用，不写进 help。
-- 后台那次查询没有终端可以报错，所以每次查询都把没查到的账号写进 `~/.agy-cs/usage-status.json`，`list` 发现有就在 stderr 提示。`~/.agy-cs/usage.lock` 上的 `flock` 保证同一时间只有一个进程在写记录。写记录前再核对一次这个名字现在的邮箱，查询期间被删掉或改存成别的登录的名字不写。
+- 后台那次查询没有终端可以报错，所以每次查询都把没查到的账号写进 `~/.agy-cs/usage-status.json`，`list` 发现有就在 stderr 提示。`~/.agy-cs/usage.lock` 上的 `flock` 保证同一时间只有一个进程在查询和写记录。锁被占着时最多等 10 秒：等到了说明另一个进程刚查完，直接列出它记下的结果，不再请求一遍；等不到就报忙，不写任何记录。保存的副本读不出来的账号也算没查到。写记录前再核对一次这个名字现在的邮箱，查询期间被删掉或改存成别的登录的名字不写。
 - `list` 的每一行是：套餐、`5h`（`gemini-5h`）、`7d`（`gemini-weekly`）、`Argon`（id 里带 `argon` 的那一项）。每项显示剩余百分比和本机时区的重置时间。剩余 100% 时不显示重置时间。当前时间过了重置时间就按 100% 显示。账号没有这一项时显示 `—`。不显示套餐到期时间，这两个接口里没有这个字段。
 - 这两个接口是 `agy` 自己用的，没有公开文档。请求的 User-Agent 必须是 `antigravity/cli/<版本号>`，版本号取自 `agy --version`。标识不对时接口返回 403，版本太旧时回答里的组不全（实测 1.3.0 起是完整的三组，1.2.0 只有两组，1.1.0 只剩 Claude/GPT 一组）。
 - `agy --version` 只在 `~/.agy-cs/agy-client.json` 里记的大小或修改时间和现在的 `agy` 对不上时才执行，执行前先核对代码签名是 Google 的 Developer ID（团队 `EQHXZ8M8AV`）。`PATH` 上签名对不上的 `agy` 不会被执行。`switch <名字>` 和 `next` 原本不启动 `agy`，不能因为查额度而去执行一个来路不明的文件。

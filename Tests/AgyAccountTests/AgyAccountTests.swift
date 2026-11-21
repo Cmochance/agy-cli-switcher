@@ -577,6 +577,46 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.run(["list"]).errors, [])
     }
 
+    func testRefreshQuotaReportsUnreadableCopiesAndWaitsForARunningLookup() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        try FileManager.default.removeItem(at: fixture.locations.tokenURL("alice"))
+        let lopsided = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(lopsided.code, 1)
+        XCTAssertEqual(fixture.usage.calls, [["bob"]])
+        XCTAssertTrue(lopsided.errors.contains { $0.contains("alice") && !$0.contains("bob") })
+        XCTAssertTrue(fixture.run(["list"]).errors.contains { $0.contains("alice") })
+
+        let held = open(fixture.tool.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertEqual(flock(held, LOCK_EX), 0)
+        fixture.usage.budget = 0.3
+        let status = try String(contentsOf: fixture.tool.usageStatusFile, encoding: .utf8)
+        let busy = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(busy.code, 1)
+        XCTAssertTrue(busy.errors.contains { $0.contains("还没结束") })
+        XCTAssertTrue(busy.output.isEmpty)
+        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertEqual(try String(contentsOf: fixture.tool.usageStatusFile, encoding: .utf8), status)
+
+        fixture.usage.budget = 5
+        try ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: []).writeUsageStatus(failed: [])
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            flock(held, LOCK_UN)
+            close(held)
+        }
+        let started = Date()
+        let waited = fixture.run(["refresh", "quota"])
+        XCTAssertEqual(waited.code, 0)
+        XCTAssertEqual(waited.errors, [])
+        XCTAssertEqual(waited.output.count, 2)
+        XCTAssertEqual(fixture.usage.calls.count, 1)
+        XCTAssertGreaterThan(Date().timeIntervalSince(started), 0.2)
+    }
+
     func testKeepSnapshotDoesNotOverwriteMismatchedOrUnreadableToken() throws {
         let alice = makeBlob(email: "alice@example.com", refresh: "a")
         let bob = makeBlob(email: "bob@example.com", refresh: "b")
@@ -1012,6 +1052,7 @@ private final class ScriptedLauncher: AgyLaunching {
 }
 
 private final class ScriptedUsage: UsageFetching {
+    var budget: TimeInterval = 1
     var snapshots: [String: UsageSnapshot]?
     var calls: [[String]] = []
 

@@ -195,21 +195,33 @@ struct AccountCommands {
     // 联网查询所有已保存账号的套餐和额度。只用保存的副本，不读钥匙串。
     // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
     private func refreshQuota() throws {
-        let lock = profile.lockUsage()
-        defer { close(lock) }
-        let saved = profile.names().compactMap { name in
-            (try? files.readSaved(name)).map { (name: name, blob: $0.blob, email: $0.meta.email) }
+        guard let lock = profile.lockUsage(wait: usage.budget) else {
+            throw AccountFailure(.usageBusy)
         }
-        let fetched = saved.isEmpty ? [:] : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
-        let failed = saved.filter { login in
-            // 查询期间这个名字可能已经被删掉或改存成别的登录。
-            guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
-                return true
+        defer { close(lock.descriptor) }
+        // 等过锁，说明另一个进程刚查完，直接用它记下的结果，不再请求一遍。
+        if !lock.waited {
+            var failed: [String] = []
+            var saved: [(name: String, blob: String, email: String)] = []
+            for name in profile.names() {
+                if let login = try? files.readSaved(name) {
+                    saved.append((name, login.blob, login.meta.email))
+                } else {
+                    failed.append(name)
+                }
             }
-            return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
-        }.map(\.name)
-        try? profile.writeUsageStatus(failed: failed)
+            let fetched = saved.isEmpty ? [:] : usage.fetch(saved.map { (name: $0.name, blob: $0.blob) })
+            failed += saved.filter { login in
+                // 查询期间这个名字可能已经被删掉或改存成别的登录。
+                guard let snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
+                    return true
+                }
+                return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
+            }.map(\.name)
+            try? profile.writeUsageStatus(failed: failed.sorted())
+        }
         try list()
+        let failed = failedRefresh()
         if !failed.isEmpty {
             throw AccountFailure(.usageFailed, failed.joined(separator: ", "))
         }
@@ -217,11 +229,15 @@ struct AccountCommands {
 
     // 后台那次查询没有终端可以报错，所以把结果记下来，在 list 里提示。
     private func reportFailedRefresh() {
-        let names = profile.names()
-        let failed = profile.failedUsage().filter(names.contains)
+        let failed = failedRefresh()
         if !failed.isEmpty {
             stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
         }
+    }
+
+    private func failedRefresh() -> [String] {
+        let names = profile.names()
+        return profile.failedUsage().filter(names.contains)
     }
 
     private func keepSnapshot(_ snapshot: ObservedLogin) throws {
