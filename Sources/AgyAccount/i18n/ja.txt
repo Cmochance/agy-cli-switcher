@@ -264,3 +264,63 @@ rename は名前を二つまで受け付けます。agy-cs help で全コマン�
 
 [agyLaunchFailed]
 この端末で agy を起動できませんでした（%1）。
+
+[panelNoAccounts]
+保存したアカウントはまだありません。「アカウントを追加」からログインしてください。
+
+[panelWorking]
+処理中…
+
+[panelRefresh]
+利用枠を更新
+
+[panelRefreshing]
+プランと利用枠を問い合わせています…
+
+[panelRefreshed]
+プランと利用枠を更新しました。
+
+[panelAdd]
+アカウントを追加…
+
+[panelAddOpened]
+端末でログインを開きました。完了したら、もう一度ここを開くと新しいアカウントが表示されます。
+
+[panelAddFailed]
+端末を開けませんでした。端末で次を実行してください: %1
+
+[panelSave]
+現在のログインを保存…
+
+[panelSavePrompt]
+キーチェーンにある現在のログインの名前
+
+[panelRename]
+名前を変更…
+
+[panelRenamePrompt]
+%1 の新しい名前
+
+[panelRemove]
+削除…
+
+[panelRemoveConfirm]
+保存したコピー %1  %2 を削除しますか？キーチェーンの現在のログインは変わりません。
+
+[panelRemoveLastCopy]
+%1 は記録中のログイン %2 の唯一のコピーです。それでも削除しますか？
+
+[panelRemoveNow]
+削除
+
+[panelLanguage]
+言語
+
+[panelQuit]
+終了
+
+[panelCancel]
+キャンセル
+
+[panelConfirm]
+OK

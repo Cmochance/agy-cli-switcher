@@ -264,3 +264,63 @@ rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
 
 [agyLaunchFailed]
 没能在当前终端启动 agy（%1）。
+
+[panelNoAccounts]
+还没有保存的账号。点“新增账号”登录一个。
+
+[panelWorking]
+正在处理…
+
+[panelRefresh]
+刷新额度
+
+[panelRefreshing]
+正在查询套餐和额度…
+
+[panelRefreshed]
+套餐和额度已更新。
+
+[panelAdd]
+新增账号…
+
+[panelAddOpened]
+已在终端里打开登录。登录完成后，再点开这里就能看到新账号。
+
+[panelAddFailed]
+没能打开终端。可以自己在终端里执行: %1
+
+[panelSave]
+保存当前登录…
+
+[panelSavePrompt]
+给钥匙串里的当前登录起个名字
+
+[panelRename]
+改名…
+
+[panelRenamePrompt]
+%1 的新名字
+
+[panelRemove]
+删除…
+
+[panelRemoveConfirm]
+删除保存的副本 %1  %2？钥匙串里的当前登录不会改。
+
+[panelRemoveLastCopy]
+%1 是当前记录 %2 唯一的副本。仍然删除？
+
+[panelRemoveNow]
+删除
+
+[panelLanguage]
+语言
+
+[panelQuit]
+退出
+
+[panelCancel]
+取消
+
+[panelConfirm]
+确定

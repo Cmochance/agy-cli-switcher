@@ -264,3 +264,63 @@ rename 最多接受兩個名字。執行 agy-cs help 查看全部指令。
 
 [agyLaunchFailed]
 沒能在目前終端機啟動 agy（%1）。
+
+[panelNoAccounts]
+還沒有保存的帳號。點「新增帳號」登入一個。
+
+[panelWorking]
+正在處理…
+
+[panelRefresh]
+重新整理額度
+
+[panelRefreshing]
+正在查詢方案和額度…
+
+[panelRefreshed]
+方案和額度已更新。
+
+[panelAdd]
+新增帳號…
+
+[panelAddOpened]
+已在終端機裡開啟登入。登入完成後，再點開這裡就能看到新帳號。
+
+[panelAddFailed]
+沒能開啟終端機。可以自己在終端機裡執行: %1
+
+[panelSave]
+保存目前登入…
+
+[panelSavePrompt]
+給鑰匙圈裡的目前登入取個名字
+
+[panelRename]
+改名…
+
+[panelRenamePrompt]
+%1 的新名字
+
+[panelRemove]
+刪除…
+
+[panelRemoveConfirm]
+刪除保存的副本 %1  %2？鑰匙圈裡的目前登入不會改。
+
+[panelRemoveLastCopy]
+%1 是目前記錄 %2 唯一的副本。仍然刪除？
+
+[panelRemoveNow]
+刪除
+
+[panelLanguage]
+語言
+
+[panelQuit]
+結束
+
+[panelCancel]
+取消
+
+[panelConfirm]
+確定

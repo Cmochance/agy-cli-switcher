@@ -220,13 +220,30 @@ private func restoreTerminalStopSignals(_ saved: TerminalStopDisposition) {
 
 func agyExecutable() throws -> String {
     let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-    for directory in path.split(separator: ":") where !directory.isEmpty {
-        let candidate = URL(fileURLWithPath: String(directory)).appendingPathComponent("agy").path
-        if FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
-        }
+    guard let found = agyCandidates(in: path).first(where: FileManager.default.isExecutableFile(atPath:)) else {
+        throw AccountFailure(.agyLaunchFailed, "agy")
     }
-    throw AccountFailure(.agyLaunchFailed, "agy")
+    return found
+}
+
+// 只用来读 client secret 和版本号的 agy。被系统打开的菜单栏进程，PATH 只有
+// /usr/bin:/bin:/usr/sbin:/sbin（实测），所以 PATH 里没有时，再看上次记下的位置和几个常见的安装目录。
+// 启动 agy 让用户登录的那一步不走这里，仍然只认 PATH。
+func agyBinary(
+    path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
+    recorded: String?,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+) -> String? {
+    let usual = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"]
+    let remembered = [recorded].compactMap { $0 }.filter { $0.hasPrefix("/") }
+    let candidates = agyCandidates(in: path) + remembered + usual.map { $0 + "/agy" }
+    return candidates.first(where: FileManager.default.isExecutableFile(atPath:))
+}
+
+private func agyCandidates(in path: String) -> [String] {
+    path.split(separator: ":").filter { !$0.isEmpty }.map { directory in
+        URL(fileURLWithPath: String(directory)).appendingPathComponent("agy").path
+    }
 }
 
 private func interactiveShell() -> String {

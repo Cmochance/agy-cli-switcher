@@ -981,7 +981,7 @@ private final class ScriptedSecurityTool: SecurityToolRunning {
     }
 }
 
-private final class MemoryKeychain: KeychainStoring {
+final class MemoryKeychain: KeychainStoring {
     var blob: String
     var writes: [String] = []
     var reads = 0
@@ -1044,7 +1044,7 @@ private final class ExplodingKeychain: KeychainStoring {
     func checkWritable(_ blob: String) throws {}
 }
 
-private final class FixedProcesses: ProcessListing {
+final class FixedProcesses: ProcessListing {
     var pids: [Int] = []
 
     func runningAgyPIDs() -> [Int] {
@@ -1052,13 +1052,13 @@ private final class FixedProcesses: ProcessListing {
     }
 }
 
-private struct CommandResult {
+struct CommandResult {
     var code: Int32
     var output: [String]
     var errors: [String]
 }
 
-private final class ScriptedTerminal: LineReading {
+final class ScriptedTerminal: LineReading {
     var isInteractive: Bool
     var lines: [String]
 
@@ -1075,7 +1075,7 @@ private final class ScriptedTerminal: LineReading {
     }
 }
 
-private final class ScriptedLauncher: AgyLaunching {
+final class ScriptedLauncher: AgyLaunching {
     var started = 0
     var supply: (() -> Void)?
     var failure: AccountFailure?
@@ -1096,7 +1096,7 @@ private final class ScriptedLauncher: AgyLaunching {
     }
 }
 
-private final class ScriptedUsage: UsageFetching {
+final class ScriptedUsage: UsageFetching {
     var budget: TimeInterval = 1
     var snapshots: [String: UsageSnapshot]?
     var calls: [[String]] = []
@@ -1120,7 +1120,7 @@ private final class ScriptedUsage: UsageFetching {
     }
 }
 
-private final class ScriptedRefresher: QuotaRefreshStarting {
+final class ScriptedRefresher: QuotaRefreshStarting {
     var started = 0
     var workers = 0
 
@@ -1133,20 +1133,20 @@ private final class ScriptedRefresher: QuotaRefreshStarting {
     }
 }
 
-private func cells(_ line: String) -> [String] {
+func cells(_ line: String) -> [String] {
     line.components(separatedBy: "  ")
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
 }
 
-private func localTime(_ timestamp: String) -> String {
+func localTime(_ timestamp: String) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "MM-dd HH:mm"
     return formatter.string(from: ISO8601DateFormatter().date(from: timestamp)!)
 }
 
-private final class Fixture {
+final class Fixture {
     let home: URL
     let keychain: MemoryKeychain
     let processes = FixedProcesses()
@@ -1196,6 +1196,21 @@ private final class Fixture {
         try ToolProfile(home: home, now: now, preferredLanguages: ["zh-Hans"]).write(name: name, meta: meta)
     }
 
+    // 菜单栏面板用的入口，和 run 用同一套假的钥匙串和查询。面板没有终端。
+    var board: AccountBoard {
+        AccountBoard(services: CommandServices(
+            home: home,
+            keychain: keychain,
+            processes: processes,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            terminal: NoTerminal(),
+            launcher: launcher,
+            usage: usage,
+            refresher: refresher
+        ))
+    }
+
     func run(_ args: [String]) -> CommandResult {
         let capture = Capture()
         let code = AgyAccountCLI.run(
@@ -1216,12 +1231,12 @@ private final class Fixture {
     }
 }
 
-private final class Capture {
+final class Capture {
     var output: [String] = []
     var errors: [String] = []
 }
 
-private func makeBlob(email: String, refresh: String = "refresh-token", expiry: String = "2026-01-01T00:00:00Z") -> String {
+func makeBlob(email: String, refresh: String = "refresh-token", expiry: String = "2026-01-01T00:00:00Z") -> String {
     let object: [String: Any] = [
         "id_token_email": email,
         "auth_method": "consumer",
@@ -1266,7 +1281,7 @@ private func runCommand(
     return CommandResult(code: code, output: capture.output, errors: capture.errors)
 }
 
-private func mode(_ url: URL) throws -> Int {
+func mode(_ url: URL) throws -> Int {
     let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
     let value = attributes[.posixPermissions] as? NSNumber
     return (value?.intValue ?? -1) & 0o777

@@ -244,10 +244,14 @@ struct AccountCommands {
 
     // 后台那次查询没有终端可以报错，所以把结果记下来，在 list 里提示。
     private func reportFailedRefresh() {
-        let failed = failedRefresh()
-        if !failed.isEmpty {
-            stderr(text.line(.usageFailed, failed.joined(separator: ", ")))
+        if let notice = failedRefreshNotice() {
+            stderr(notice)
         }
+    }
+
+    func failedRefreshNotice() -> String? {
+        let failed = failedRefresh()
+        return failed.isEmpty ? nil : text.line(.usageFailed, failed.joined(separator: ", "))
     }
 
     private func failedRefresh() -> [String] {
@@ -335,22 +339,31 @@ struct AccountCommands {
         stdout(try profile.read(name).email)
     }
 
+    // 只读 ~/.agy-cs/ 里的记录，不联网，不读钥匙串。list 和菜单栏面板都从这里取。
+    func listing() throws -> [AccountRow] {
+        let activeEmail = profileEmail(profile.activeName())
+        let moment = parseTimestamp(profile.now()) ?? Date()
+        return try profile.names().map { name in
+            let meta = try profile.read(name)
+            return AccountRow(
+                name: name,
+                email: meta.email,
+                isCurrent: !activeEmail.isEmpty && meta.email == activeEmail,
+                usage: profile.readUsage(name, email: meta.email).map { snapshot in
+                    usageText(snapshot, now: moment, timeZone: .current) { text.line(.planUnpaid, $0) }
+                }
+            )
+        }
+    }
+
     private func list() throws {
-        let names = profile.names()
-        if names.isEmpty {
+        let accounts = try listing()
+        if accounts.isEmpty {
             stdout(text.line(.noSavedAccounts))
             return
         }
-        let activeEmail = profileEmail(profile.activeName())
-        let moment = parseTimestamp(profile.now()) ?? Date()
-        var rows: [[String]] = []
-        for name in names {
-            let meta = try profile.read(name)
-            let mark = !activeEmail.isEmpty && meta.email == activeEmail ? "*" : " "
-            let recorded = profile.readUsage(name, email: meta.email).map { snapshot in
-                usageCells(snapshot, now: moment, timeZone: .current) { text.line(.planUnpaid, $0) }
-            } ?? []
-            rows.append(["\(mark) \(name)", meta.email] + recorded)
+        let rows = accounts.map { account in
+            ["\(account.isCurrent ? "*" : " ") \(account.name)", account.email] + (account.usage?.cells ?? [])
         }
         alignedRows(rows).forEach(stdout)
     }

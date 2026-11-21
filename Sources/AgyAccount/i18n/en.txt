@@ -264,3 +264,63 @@ The characters before @ in %1 cannot be an account name. Run agy-cs save <name>.
 
 [agyLaunchFailed]
 Couldn't start agy in this terminal (%1).
+
+[panelNoAccounts]
+No accounts are saved yet. Choose "Add account" to sign in to one.
+
+[panelWorking]
+Working…
+
+[panelRefresh]
+Refresh quota
+
+[panelRefreshing]
+Looking up plans and quota…
+
+[panelRefreshed]
+Plans and quota are up to date.
+
+[panelAdd]
+Add account…
+
+[panelAddOpened]
+Sign-in opened in the terminal. When it finishes, open this panel again to see the new account.
+
+[panelAddFailed]
+Couldn't open the terminal. Run this in a terminal yourself: %1
+
+[panelSave]
+Save current login…
+
+[panelSavePrompt]
+Name for the current keychain login
+
+[panelRename]
+Rename…
+
+[panelRenamePrompt]
+New name for %1
+
+[panelRemove]
+Delete…
+
+[panelRemoveConfirm]
+Delete the saved copy %1  %2? The current keychain login stays.
+
+[panelRemoveLastCopy]
+%1 is the only saved copy of the recorded login %2. Delete it anyway?
+
+[panelRemoveNow]
+Delete
+
+[panelLanguage]
+Language
+
+[panelQuit]
+Quit
+
+[panelCancel]
+Cancel
+
+[panelConfirm]
+OK

@@ -1,0 +1,46 @@
+name: release
+
+# 推一个 v 开头的 tag 时，跑测试、打两种发布包，建一个 draft release 并把包传上去。
+# 这里只建 draft。发成正式版由人在 GitHub 上操作。
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Draft release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: the tag must match Packaging/Info.plist
+        run: |
+          set -euo pipefail
+          version="$(plutil -extract CFBundleShortVersionString raw Packaging/Info.plist)"
+          test "v$version" = "$GITHUB_REF_NAME"
+      - name: swift test
+        run: swift test --disable-sandbox
+      - name: make dist
+        run: make dist
+      - name: create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/agy-cs-macos-universal.tar.gz \
+            dist/Agy-Switcher.zip \
+            dist/SHA256SUMS.txt

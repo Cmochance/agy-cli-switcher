@@ -89,16 +89,20 @@ final class UsageTests: XCTestCase {
         let free = UsageSnapshot(planID: "free-tier", planName: "", buckets: [
             UsageBucket(id: "gemini-weekly", remaining: 1, resetTime: "2026-11-28T10:00:00Z"),
         ])
-        XCTAssertEqual(usageCells(pro, now: now, timeZone: utc), ["Pro", "5h 62% 11-21 15:35", "7d 99% 11-28 10:23", "Argon 100%"])
-        XCTAssertEqual(usageCells(free, now: now, timeZone: utc), ["Free", "5h —", "7d 100%", "Argon —"])
+        XCTAssertEqual(
+            usageText(pro, now: now, timeZone: utc),
+            UsageText(plan: "Pro", fiveHour: "62% 11-21 15:35", weekly: "99% 11-28 10:23", argon: "100%")
+        )
+        XCTAssertEqual(usageText(pro, now: now, timeZone: utc).cells, ["Pro", "5h 62% 11-21 15:35", "7d 99% 11-28 10:23", "Argon 100%"])
+        XCTAssertEqual(usageText(free, now: now, timeZone: utc).cells, ["Free", "5h —", "7d 100%", "Argon —"])
         var marked = pro
         marked.argonLocked = true
-        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro（非付费）")
+        XCTAssertEqual(usageText(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Pro（非付费）")
         marked.argonLocked = false
-        XCTAssertEqual(usageCells(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Pro")
+        XCTAssertEqual(usageText(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Pro")
         var starter = free
         starter.argonLocked = true
-        XCTAssertEqual(usageCells(starter, now: now, timeZone: utc) { "\($0)（非付费）" }.first, "Free")
+        XCTAssertEqual(usageText(starter, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Free")
         XCTAssertEqual(displayWidth("Pro（非付费）"), 13)
         XCTAssertEqual(alignedRows([["* a", "a@b.c", "Pro（非付费）", "5h 100%"], ["  b", "b@b.c", "Free", "5h —"]]), [
             "* a  a@b.c  Pro（非付费）  5h 100%",
@@ -167,7 +171,7 @@ final class UsageTests: XCTestCase {
         let cache = directory.appendingPathComponent("agy-client.json")
         var versionCalls = 0
         var signed = false
-        let client = AgyClient(cacheURL: cache, locate: { binary.path }, trusted: { _ in signed }, versionOf: { _ in
+        let client = AgyClient(cacheURL: cache, locate: { _ in binary.path }, trusted: { _ in signed }, versionOf: { _ in
             versionCalls += 1
             return "9.9.9"
         })
@@ -258,8 +262,62 @@ final class UsageTests: XCTestCase {
         XCTAssertTrue(usage.fetch(logins).isEmpty)
         XCTAssertTrue(usage.fetch([(name: "plain", blob: "plain")]).isEmpty)
         XCTAssertTrue(
-            CloudCodeUsage(http: http, client: AgyClient(cacheURL: cache, locate: { nil }, trusted: { _ in true }, versionOf: { _ in "1" })).fetch(logins).isEmpty
+            CloudCodeUsage(http: http, client: AgyClient(cacheURL: cache, locate: { _ in nil }, trusted: { _ in true }, versionOf: { _ in "1" })).fetch(logins).isEmpty
         )
+    }
+
+    func testClientRemembersWhereAgyIsAndLooksThereWhenPathHasNone() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let home = directory.appendingPathComponent("home", isDirectory: true)
+        let elsewhere = directory.appendingPathComponent("else where", isDirectory: true)
+        let usual = home.appendingPathComponent(".local/bin", isDirectory: true)
+        for folder in [elsewhere, usual] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func install(_ folder: URL) throws -> String {
+            let binary = folder.appendingPathComponent("agy")
+            try Data(("head" + fakeSecret("s") + "tail").utf8).write(to: binary)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+            return binary.path
+        }
+        let recorded = try install(elsewhere)
+        // 被系统打开的菜单栏进程只有这四个目录。
+        let bare = "/usr/bin:/bin:/usr/sbin:/sbin"
+        XCTAssertEqual(agyBinary(path: bare + ":" + elsewhere.path, recorded: nil, home: home), recorded)
+        XCTAssertEqual(agyBinary(path: bare, recorded: recorded, home: home), recorded)
+        let fallback = try install(usual)
+        XCTAssertEqual(agyBinary(path: bare, recorded: recorded, home: home), recorded)
+        XCTAssertEqual(agyBinary(path: bare, recorded: nil, home: home), fallback)
+        XCTAssertEqual(agyBinary(path: bare, recorded: elsewhere.path + "/missing", home: home), fallback)
+        XCTAssertEqual(agyBinary(path: bare, recorded: "agy", home: home), fallback)
+
+        let cache = directory.appendingPathComponent("agy-client.json")
+        var asked: [String?] = []
+        let client = AgyClient(cacheURL: cache, locate: { known in
+            asked.append(known)
+            return agyBinary(path: bare, recorded: known ?? recorded, home: home)
+        }, trusted: { _ in true }, versionOf: { _ in "1.2.3" })
+        let identity = try XCTUnwrap(client.resolve())
+        client.remember(identity, secretOffset: try XCTUnwrap(identity.secrets.first).offset)
+        let resolved = (recorded as NSString).resolvingSymlinksInPath
+        XCTAssertEqual(client.resolve(scan: false)?.path, resolved)
+        XCTAssertEqual(asked.count, 2)
+        XCTAssertNil(asked[0])
+        XCTAssertEqual(asked[1], resolved)
+        let saved = try String(contentsOf: cache, encoding: .utf8)
+        XCTAssertFalse(saved.contains(marker))
+
+        // 以前的记录里没有位置：下一次读到时补上。
+        func record() throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
+        }
+        var older = try record()
+        older["path"] = nil
+        try JSONSerialization.data(withJSONObject: older).write(to: cache)
+        XCTAssertEqual(client.resolve(scan: false)?.remembered, true)
+        XCTAssertEqual(try record()["path"] as? String, resolved)
+        XCTAssertEqual(try record()["secret_offset"] as? Int, identity.secrets.first?.offset)
     }
 
     func testSpawnerHandsOffWithoutWaitingForTheWorker() throws {

@@ -169,23 +169,35 @@ func bucketText(_ bucket: UsageBucket?, now: Date, timeZone: TimeZone) -> String
     return "\(percent)% \(formatter.string(from: reset))"
 }
 
+// 一个账号的套餐和三项额度，已经是要显示的文字。list 和菜单栏面板用同一份。
+public struct UsageText: Equatable {
+    public var plan: String
+    public var fiveHour: String
+    public var weekly: String
+    public var argon: String
+
+    var cells: [String] {
+        [plan, "5h " + fiveHour, "7d " + weekly, "Argon " + argon]
+    }
+}
+
 // unpaid 给套餐名加上“非付费”的标记：套餐不是免费档，但付费订阅才有的 Argon 锁着。
-func usageCells(
+func usageText(
     _ snapshot: UsageSnapshot,
     now: Date,
     timeZone: TimeZone,
     unpaid: (String) -> String = { $0 }
-) -> [String] {
+) -> UsageText {
     let label = planLabel(id: snapshot.planID, name: snapshot.planName)
     func text(_ match: (String) -> Bool) -> String {
         bucketText(snapshot.buckets.first { match($0.id) }, now: now, timeZone: timeZone)
     }
-    return [
-        snapshot.argonLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,
-        "5h " + text { $0 == "gemini-5h" },
-        "7d " + text { $0 == "gemini-weekly" },
-        "Argon " + text { $0.contains("argon") },
-    ]
+    return UsageText(
+        plan: snapshot.argonLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,
+        fiveHour: text { $0 == "gemini-5h" },
+        weekly: text { $0 == "gemini-weekly" },
+        argon: text { $0.contains("argon") }
+    )
 }
 
 // 没有任何一行带额度时，保持原来的两列写法，不补空格。

@@ -1,25 +1,68 @@
 import Darwin
 import Foundation
 
-public enum AgyAccountCLI {
-    public static func run(_ arguments: [String]) -> Int32 {
+// 一条指令要用到的外部东西。命令行和菜单栏面板各自配一份，指令本身是同一套。
+struct CommandServices {
+    var home: URL
+    var keychain: any KeychainStoring
+    var processes: any ProcessListing
+    var now: () -> String
+    var preferredLanguages: [String]
+    var terminal: any LineReading
+    var launcher: any AgyLaunching
+    var usage: any UsageFetching
+    var refresher: any QuotaRefreshStarting
+
+    static func system(terminal: any LineReading) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return run(
-            arguments,
+        return CommandServices(
             home: home,
             keychain: LoginKeychainStore(),
             processes: SystemProcessList(),
             now: AccountClock.utcTimestamp,
             preferredLanguages: Locale.preferredLanguages,
-            terminal: StandardTerminal(),
+            terminal: terminal,
             launcher: InteractiveAgy(),
             usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
-            refresher: SelfSpawner(),
+            refresher: SelfSpawner()
+        )
+    }
+
+    var profile: ToolProfile {
+        ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages)
+    }
+
+    func commands(
+        text: Localizer,
+        stdout: @escaping (String) -> Void,
+        stderr: @escaping (String) -> Void
+    ) -> AccountCommands {
+        AccountCommands(
+            files: AccountFiles(locations: AccountLocations(home: home), now: now),
+            profile: profile,
+            keychain: keychain,
+            processes: processes,
+            terminal: terminal,
+            launcher: launcher,
+            usage: usage,
+            refresher: refresher,
+            text: text,
+            stdout: stdout,
+            stderr: stderr
+        )
+    }
+}
+
+public enum AgyAccountCLI {
+    public static func run(_ arguments: [String]) -> Int32 {
+        execute(
+            arguments,
+            services: .system(terminal: StandardTerminal()),
             stdout: { print($0) },
             stderr: { message in
                 fputs(message + "\n", stderr)
             }
-        )
+        ).code
     }
 
     static func run(
@@ -36,36 +79,49 @@ public enum AgyAccountCLI {
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
-        let profile = ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages)
-        let text = Localizer(language: profile.resolvedLanguage())
-        let commands = AccountCommands(
-            files: AccountFiles(locations: AccountLocations(home: home), now: now),
-            profile: profile,
-            keychain: keychain,
-            processes: processes,
-            terminal: terminal,
-            launcher: launcher,
-            usage: usage,
-            refresher: refresher,
-            text: text,
+        execute(
+            arguments,
+            services: CommandServices(
+                home: home,
+                keychain: keychain,
+                processes: processes,
+                now: now,
+                preferredLanguages: preferredLanguages,
+                terminal: terminal,
+                launcher: launcher,
+                usage: usage,
+                refresher: refresher
+            ),
             stdout: stdout,
             stderr: stderr
-        )
+        ).code
+    }
+
+    // failure 是没做成时的那句话的键。面板靠它分辨“这是唯一的副本”这样要再问一次的情况。
+    static func execute(
+        _ arguments: [String],
+        services: CommandServices,
+        stdout: @escaping (String) -> Void,
+        stderr: @escaping (String) -> Void
+    ) -> (code: Int32, failure: TextKey?) {
+        let profile = services.profile
+        let text = Localizer(language: profile.resolvedLanguage())
+        let commands = services.commands(text: text, stdout: stdout, stderr: stderr)
         do {
             try profile.prepare()
             try commands.initializeIfNeeded()
             try commands.run(try parse(arguments))
-            return 0
+            return (0, nil)
         } catch let error as AccountFailure {
             stderr(text.line(error.key, argumentList: error.arguments))
-            return 1
+            return (1, error.key)
         } catch let error as UsageFailure {
             let spoken = usageLanguage(commandArguments: arguments, profile: profile, fallback: text)
             stderr(spoken.line(error.key, argumentList: error.arguments))
-            return 2
+            return (2, error.key)
         } catch {
             stderr(text.line(.operationFailed))
-            return 1
+            return (1, .operationFailed)
         }
     }
 }
@@ -193,7 +249,7 @@ private func usageLanguage(commandArguments: [String], profile: ToolProfile, fal
 }
 
 extension Localizer {
-    func line(_ key: TextKey, argumentList: [String]) -> String {
+    public func line(_ key: TextKey, argumentList: [String]) -> String {
         var copy = line(key)
         for index in stride(from: argumentList.count, through: 1, by: -1) {
             copy = copy.replacingOccurrences(of: "%\(index)", with: argumentList[index - 1])

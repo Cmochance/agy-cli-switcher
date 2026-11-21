@@ -10,9 +10,11 @@ struct ToolLocations {
     var clientFile: URL
     var usageStatusFile: URL
     var usageLockFile: URL
+    var addCommandFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
+        addCommandFile = root.appendingPathComponent("add-account.command")
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
         usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
         clientFile = root.appendingPathComponent("agy-client.json")
