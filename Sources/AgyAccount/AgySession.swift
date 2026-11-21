@@ -24,6 +24,7 @@ protocol AgyLaunching {
 struct StandardTerminal: LineReading {
     var isInteractive: Bool {
         isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+            && ownsForeground(foreground: tcgetpgrp(STDIN_FILENO), own: getpgrp())
     }
 
     func readLine() -> String? {
@@ -34,22 +35,24 @@ struct StandardTerminal: LineReading {
 struct InteractiveAgy: AgyLaunching {
     func runUntilLoggedIn(_ poll: () throws -> ObservedLogin?) throws -> LoginWatchResult {
         let binary = try agyExecutable()
-        // 前台交给 agy 后，本进程再 tcsetpgrp 会收到 SIGTTOU，shell 显示 suspended (tty output)。
-        // 忽略期间才能把终端收回来。defer 反序执行：先交还前台，再恢复原来的信号处理。
-        let savedStops = ignoreTerminalStopSignals()
-        defer { restoreTerminalStopSignals(savedStops) }
         let pid = try spawn(binary)
         let tty = STDIN_FILENO
         let ownGroup = getpgrp()
         let interactive = isatty(tty) != 0
         if interactive {
-            guard tcsetpgrp(tty, pid) == 0 else {
-                let detail = String(errno)
+            // 交出前台时不忽略 SIGTTOU：本进程在后台的话，这里会被停住，而不是把终端从 shell 手里拿走。
+            let owned = ownsForeground(foreground: tcgetpgrp(tty), own: ownGroup)
+            guard owned, tcsetpgrp(tty, pid) == 0 else {
+                let detail = String(owned ? errno : ENOTTY)
                 terminate(pid)
                 throw AccountFailure(.agyLaunchFailed, detail)
             }
             _ = kill(pid, SIGCONT)
         }
+        // 前台交给 agy 后，本进程再 tcsetpgrp 会收到 SIGTTOU，shell 显示 suspended (tty output)。
+        // 忽略期间才能把终端收回来。defer 反序执行：先交还前台，再恢复原来的信号处理。
+        let savedStops = ignoreTerminalStopSignals()
+        defer { restoreTerminalStopSignals(savedStops) }
         defer {
             if interactive {
                 _ = tcsetpgrp(tty, ownGroup)
@@ -70,13 +73,13 @@ struct InteractiveAgy: AgyLaunching {
             var status: Int32 = 0
             let waited = waitpid(pid, &status, WNOHANG | WUNTRACED)
             let waitError = errno
-            switch classifyWait(waited: waited, pid: pid, status: status, callErrno: waitError) {
-            case .running:
+            switch nextStep(after: classifyWait(waited: waited, pid: pid, status: status, callErrno: waitError)) {
+            case .keepWaiting:
                 break
-            case .stopped(let signal) where signal == SIGTSTP:
+            case .cancel:
                 terminate(pid)
                 return .exited
-            case .stopped:
+            case .resume:
                 _ = kill(-pid, SIGCONT)
             case .finished:
                 if let observed = try poll() {
@@ -167,6 +170,28 @@ func classifyWait(waited: pid_t, pid: pid_t, status: Int32, callErrno: Int32) ->
         return signal == SIGCONT ? .running : .stopped(signal)
     }
     return .finished
+}
+
+enum WaitStep: Equatable {
+    case keepWaiting
+    case resume
+    case cancel
+    case finished
+}
+
+func nextStep(after wait: ChildWait) -> WaitStep {
+    switch wait {
+    case .running:
+        return .keepWaiting
+    case .stopped(let signal):
+        return signal == SIGTSTP ? .cancel : .resume
+    case .finished:
+        return .finished
+    }
+}
+
+func ownsForeground(foreground: pid_t, own: pid_t) -> Bool {
+    foreground != -1 && foreground == own
 }
 
 private struct TerminalStopDisposition {

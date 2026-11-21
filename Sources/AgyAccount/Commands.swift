@@ -207,7 +207,7 @@ struct AccountCommands {
     }
 
     private func rename(from sourceName: String?, to targetName: String) throws {
-        let target = try checkName(targetName)
+        let target = try checkNewName(targetName)
         let source: String
         if let sourceName {
             source = try checkName(sourceName)
@@ -275,7 +275,7 @@ struct AccountCommands {
     }
 
     private func save(_ name: String) throws {
-        let checked = try checkName(name)
+        let checked = try checkNewName(name)
         let blob = try readKeychain()
         let meta = try decodeLogin(blob, source: .keychain)
         try files.writeSaved(name: checked, blob: blob, meta: meta)

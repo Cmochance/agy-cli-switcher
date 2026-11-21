@@ -133,6 +133,7 @@ enum TextKey: String, CaseIterable {
     case renameTooMany
     case renameFailed
     case nameTaken
+    case nameReserved
     case initializedSaved
     case initializedNoLogin
     case initializedNameRejected

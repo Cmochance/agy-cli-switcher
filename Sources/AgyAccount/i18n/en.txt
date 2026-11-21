@@ -232,6 +232,9 @@ Couldn't rename account %1.
 [nameTaken]
 The name %1 is already used by %2.
 
+[nameReserved]
+%1 is the word used by agy-cs switch %1, so it cannot be an account name. Choose another name. If the characters before @ in the email are exactly %1, log in with agy first, then run agy-cs save <name>.
+
 [initializedSaved]
 Initialized the current login: %1  %2
 

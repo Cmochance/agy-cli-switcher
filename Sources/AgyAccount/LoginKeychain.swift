@@ -30,15 +30,14 @@ struct LoginKeychainStore: KeychainStoring {
 
     func deleteBlob() throws {
         let status = SecItemDelete(query() as CFDictionary)
-        if status == errSecSuccess || status == errSecItemNotFound {
+        switch classifyDelete(status) {
+        case .done:
             return
-        }
-        // /usr/bin/security 创建的项，SecItemDelete 返回 errSecInvalidOwnerEdit (-25244)，项还在。
-        if status == errSecInvalidOwnerEdit {
+        case .byReference:
             try deleteItemReference()
-            return
+        case .failed:
+            throw statusError(status)
         }
-        throw statusError(status)
     }
 
     private func deleteItemReference() throws {
@@ -53,7 +52,8 @@ struct LoginKeychainStore: KeychainStoring {
         guard found == errSecSuccess, let result else {
             throw statusError(found)
         }
-        let deleted = SecKeychainItemDelete(result as! SecKeychainItem)
+        let deleter: any ItemReferenceDeleting = LegacyItemDeleter()
+        let deleted = deleter.delete(result as! SecKeychainItem)
         if deleted == errSecSuccess || deleted == errSecItemNotFound {
             return
         }
@@ -124,6 +124,38 @@ struct LoginKeychainStore: KeychainStoring {
         default:
             return AccountFailure(.keychainFailed, String(status))
         }
+    }
+}
+
+enum DeleteStep: Equatable {
+    case done
+    case byReference
+    case failed
+}
+
+// /usr/bin/security 创建的项，SecItemDelete 返回 errSecInvalidOwnerEdit (-25244)，项还在。
+// 带 kSecValueRef 或 kSecMatchItemList 再调 SecItemDelete 也是 -25244（实测），只能按引用删除。
+func classifyDelete(_ status: OSStatus) -> DeleteStep {
+    switch status {
+    case errSecSuccess, errSecItemNotFound:
+        return .done
+    case errSecInvalidOwnerEdit:
+        return .byReference
+    default:
+        return .failed
+    }
+}
+
+private protocol ItemReferenceDeleting {
+    func delete(_ item: SecKeychainItem) -> OSStatus
+}
+
+// SecKeychainItemDelete 标了 deprecated，但没有能删掉这一项的替代接口。
+// 经协议调用，编译时不再对每次构建报这条 warning。
+private struct LegacyItemDeleter: ItemReferenceDeleting {
+    @available(macOS, deprecated: 10.10)
+    func delete(_ item: SecKeychainItem) -> OSStatus {
+        SecKeychainItemDelete(item)
     }
 }
 

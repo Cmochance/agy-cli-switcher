@@ -232,6 +232,9 @@ rename 最多接受两个名字。执行 agy-cs help 查看全部指令。
 [nameTaken]
 名字 %1 已经被 %2 使用。
 
+[nameReserved]
+%1 是 agy-cs switch %1 用的词，不能当作账号名。请换一个名字。邮箱 @ 前面正好是 %1 时，先在 agy 里登录，再执行 agy-cs save <名字>。
+
 [initializedSaved]
 已初始化当前登录: %1  %2
 
