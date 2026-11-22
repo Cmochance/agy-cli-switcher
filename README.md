@@ -44,12 +44,11 @@
 tmp="$(mktemp -d)" && \
   curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/Agy-Switcher-v0.2.1-macOS-universal.dmg && \
   hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
-  ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app" && \
-  hdiutil detach -quiet "$tmp/mnt" && \
+  { ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app"; copied=$?; hdiutil detach -quiet "$tmp/mnt"; [ "$copied" -eq 0 ]; } && \
   open "/Applications/Agy Switcher.app"
 ```
 
-`mktemp -d` 建的目录只有你自己能进，前一步没成功后面就不执行。
+`mktemp -d` 建的目录只有你自己能进，前一步没成功后面就不执行。拷贝不管成没成功，磁盘映像都会卸载。
 
 更新时先退出 Agy Switcher 并删掉旧的 `Agy Switcher.app`，再装新的。
 

@@ -44,12 +44,11 @@ You can also download it in the terminal. A file downloaded this way has no `com
 tmp="$(mktemp -d)" && \
   curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/Agy-Switcher-v0.2.1-macOS-universal.dmg && \
   hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
-  ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app" && \
-  hdiutil detach -quiet "$tmp/mnt" && \
+  { ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app"; copied=$?; hdiutil detach -quiet "$tmp/mnt"; [ "$copied" -eq 0 ]; } && \
   open "/Applications/Agy Switcher.app"
 ```
 
-The directory made by `mktemp -d` can only be entered by you, and each step runs only if the one before it succeeded.
+The directory made by `mktemp -d` can only be entered by you, and each step runs only if the one before it succeeded. The disk image is detached whether or not the copy succeeded.
 
 To update, quit Agy Switcher and delete the old `Agy Switcher.app` first, then install the new one.
 
