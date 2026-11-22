@@ -75,9 +75,17 @@ final class CatalogTests: XCTestCase {
                 XCTAssertTrue(document.contains(token), token)
             }
         }
+        // 发布包的名字带版本号，README 里的下载链接每版跟着改。
+        let plist = try XCTUnwrap(
+            NSDictionary(contentsOf: repoRoot.appendingPathComponent("Packaging/Info.plist")) as? [String: Any]
+        )
+        let version = try XCTUnwrap(plist["CFBundleShortVersionString"] as? String)
+        let downloads = "https://github.com/Cmochance/agy-cli-switcher/releases/download/v\(version)/"
         for document in [readme, english] {
             for token in [
-                "Agy Switcher", "Agy-Switcher.zip", "agy-cs-macos-universal.tar.gz", "SHA256SUMS.txt",
+                "Agy Switcher", downloads + "Agy-Switcher-v\(version)-macOS-universal.dmg",
+                downloads + "agy-cs-v\(version)-macOS-universal.tar.gz",
+                "Agy-Switcher-v\(version)-macOS-universal.dmg.sha256", "hdiutil attach",
                 "make app", "make dist", "com.apple.quarantine", "Contents/MacOS/agy-cs"
             ] {
                 XCTAssertTrue(document.contains(token), token)
@@ -91,7 +99,8 @@ final class CatalogTests: XCTestCase {
         for token in [
             "rm -rf \"$(2)\"", "Packaging/Info.plist", "Packaging/AppIcon.icns", "Contents/MacOS/agy-cs",
             "for arch in arm64 x86_64", "--arch $$arch", "lipo -create",
-            "agy-cs-macos-universal.tar.gz", "Agy-Switcher.zip", "SHA256SUMS.txt"
+            "Agy-Switcher-v$(VERSION)-macOS-universal.dmg", "agy-cs-v$(VERSION)-macOS-universal.tar.gz",
+            "hdiutil create", "ln -s /Applications", "$$file.sha256"
         ] {
             XCTAssertTrue(makefile.contains(token), token)
         }
@@ -152,7 +161,7 @@ final class CatalogTests: XCTestCase {
         let release = try String(contentsOf: workflows.appendingPathComponent("release.yml"), encoding: .utf8)
         for token in [
             "tags:", "swift test --disable-sandbox", "make dist", "gh release create", "--draft",
-            "dist/agy-cs-macos-universal.tar.gz", "dist/Agy-Switcher.zip", "dist/SHA256SUMS.txt"
+            "dist/*.dmg", "dist/*.dmg.sha256", "dist/*.tar.gz", "dist/*.tar.gz.sha256"
         ] {
             XCTAssertTrue(release.contains(token), token)
         }

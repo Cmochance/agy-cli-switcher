@@ -35,19 +35,20 @@
 
 ### 菜单栏工具 Agy Switcher
 
-1. 在 [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest) 下载 `Agy-Switcher.zip`，解开后把 `Agy Switcher.app` 拖进“应用程序”
+1. 在 [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest) 下载 `Agy-Switcher-v0.2.1-macOS-universal.dmg`，打开后把 `Agy Switcher.app` 拖到旁边的“应用程序”上
 2. 第一次打开时系统会拦住它，因为它没有经过 Apple 公证。到“系统设置 → 隐私与安全性”里点“仍要打开”
 
 也可以在终端里下载。这样下载的文件不带 `com.apple.quarantine` 标记，不用去系统设置里放行：
 
 ```bash
 tmp="$(mktemp -d)" && \
-  curl -fL -o "$tmp/Agy-Switcher.zip" https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip && \
-  ditto -x -k "$tmp/Agy-Switcher.zip" /Applications && \
+  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/Agy-Switcher-v0.2.1-macOS-universal.dmg && \
+  hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
+  { ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app"; copied=$?; hdiutil detach -quiet "$tmp/mnt"; [ "$copied" -eq 0 ]; } && \
   open "/Applications/Agy Switcher.app"
 ```
 
-`mktemp -d` 建的目录只有你自己能进，前一步没成功后面就不执行。
+`mktemp -d` 建的目录只有你自己能进，前一步没成功后面就不执行。拷贝不管成没成功，磁盘映像都会卸载。
 
 更新时先退出 Agy Switcher 并删掉旧的 `Agy Switcher.app`，再装新的。
 
@@ -57,7 +58,7 @@ tmp="$(mktemp -d)" && \
 
 ```bash
 mkdir -p ~/.local/bin
-curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/agy-cs-v0.2.1-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 已经装了 Agy Switcher 的话不用再下载，包里就是同一个程序：
@@ -83,7 +84,7 @@ make install
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-下载的两个文件可以用同一页上的 `SHA256SUMS.txt` 核对：`shasum -a 256 -c SHA256SUMS.txt`。
+每个下载的文件在同一页上都有一个同名加 `.sha256` 的文件。两个放在一起就可以核对，比如 `shasum -a 256 -c Agy-Switcher-v0.2.1-macOS-universal.dmg.sha256`。
 
 ## 快速开始
 
@@ -162,7 +163,7 @@ export PATH="$HOME/.local/bin:$PATH"
 make test       # swift test --disable-sandbox
 make install    # 重新编译并更新 ~/.local/bin/agy-cs
 make app        # 生成 build/Agy Switcher.app，用 open "build/Agy Switcher.app" 打开
-make dist       # 生成 dist/ 里的两个发布包和 SHA256SUMS.txt
+make dist       # 生成 dist/ 里的两个发布包和各自的 .sha256
 ```
 
 `make test` 执行 `swift test --disable-sandbox`。
