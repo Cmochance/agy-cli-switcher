@@ -102,6 +102,7 @@ Click the icon in the menu bar to open the panel.
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
 - The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
+- Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results. It makes no request and does not read the keychain
 
 ## Commands

@@ -597,6 +597,27 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob"])
     }
 
+    // 图标的右键菜单只有退出这一项，用的是当前语言；右键和 control 加左键打开它，左键仍然开关面板。
+    @MainActor
+    func testStatusItemMenuOnlyQuitsAndOpensOnSecondaryClick() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["language", "en"]).code, 0)
+        _ = NSApplication.shared
+        let controller = MenuBarController { shown in
+            PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0, shown: shown, open: { _ in true })
+        }
+        let menu = controller.makeMenu()
+        XCTAssertEqual(menu.items.map(\.title), ["Quit"])
+        XCTAssertTrue(menu.items[0].target === controller)
+        XCTAssertNotNil(menu.items[0].action)
+
+        XCTAssertTrue(MenuBarController.opensMenu(.rightMouseUp, modifiers: []))
+        XCTAssertTrue(MenuBarController.opensMenu(.leftMouseUp, modifiers: [.control]))
+        XCTAssertFalse(MenuBarController.opensMenu(.leftMouseUp, modifiers: []))
+        XCTAssertFalse(MenuBarController.opensMenu(.leftMouseUp, modifiers: [.command]))
+    }
+
     // 面板的大小跟着内容走：多出几行提示时变高，提示没了、面板关着的时候也要变回去，
     // 不然再打开时内容上下各空出一条。
     @MainActor
