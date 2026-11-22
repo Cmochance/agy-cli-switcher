@@ -24,6 +24,11 @@ struct AccountLocations {
     var activeURL: URL {
         accountsDirectory.appendingPathComponent("active")
     }
+
+    // 新增账号期间，没有保存副本的那个登录临时放在这里。名字不以 .token 结尾，不会被当成一个已保存的账号。
+    var rollbackURL: URL {
+        accountsDirectory.appendingPathComponent(".add-rollback")
+    }
 }
 
 struct AccountFiles {
@@ -60,6 +65,19 @@ struct AccountFiles {
         }
         let blob = stripNewlines(try readText(url))
         return (blob, try decodeLogin(blob, source: .saved))
+    }
+
+    func writeRollback(_ blob: String) throws {
+        try ensureDirectory()
+        try AtomicFile.write(locations.rollbackURL, blob + "\n")
+    }
+
+    func readRollback() -> String? {
+        (try? readText(locations.rollbackURL)).map(stripNewlines)
+    }
+
+    func removeRollback() {
+        try? manager.removeItem(at: locations.rollbackURL)
     }
 
     func writeSaved(name: String, blob: String, meta: LoginMeta) throws {

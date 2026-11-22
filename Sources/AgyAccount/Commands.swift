@@ -162,18 +162,14 @@ struct AccountCommands {
     private func addAccount() throws {
         let (snapshot, name, observed): (ObservedLogin?, String, ObservedLogin) = try locked {
             let snapshot = try captureLogin()
-            // 用户带着 --force 删掉过的登录，登录期间也先存一份（进程中途被杀掉时还找得回来），做完或者回滚之后再删掉。
-            var temporary: String?
             if let snapshot {
                 try keychain.checkWritable(snapshot.blob)
-                let dismissed = profile.dismissedEmail() == snapshot.meta.email
-                let created = try keepSnapshot(snapshot)
-                temporary = dismissed ? created : nil
-            }
-            func dropTemporary() {
-                if let temporary {
-                    try? files.removeSaved(temporary)
-                    try? profile.remove(temporary)
+                // 用户带着 --force 删掉过的登录不存回账号名单，但登录期间要留一份在 rollbackURL：
+                // 进程中途被杀掉时，下一条指令从那里把它写回钥匙串。新登录存好或者原登录写回去之后删掉。
+                if profile.dismissedEmail() == snapshot.meta.email, profile.slots(forEmail: snapshot.meta.email).isEmpty {
+                    try files.writeRollback(snapshot.blob)
+                } else {
+                    try keepSnapshot(snapshot)
                 }
             }
             try keychain.deleteBlob()
@@ -187,18 +183,12 @@ struct AccountCommands {
                 }
                 let name = try availableDefaultName(login.meta.email)
                 try storeLogin(name: name, blob: login.blob, meta: login.meta)
-                // 重新登录的还是同一个账号时，新存的这一份就在那个名字下面，不删。
-                if temporary != name {
-                    dropTemporary()
-                }
+                files.removeRollback()
                 return (snapshot, name, login)
             } catch {
                 if let snapshot {
                     try keychain.writeBlob(snapshot.blob)
-                    if temporary != nil {
-                        dropTemporary()
-                        profile.setDismissed(snapshot.meta.email)
-                    }
+                    files.removeRollback()
                     if (error as? AccountFailure)?.key != .loginCancelled {
                         stderr(text.line(.loginRestored))
                     }
@@ -286,8 +276,7 @@ struct AccountCommands {
         return profile.failedUsage().filter(names.contains)
     }
 
-    // 返回这一次新建的副本的名字；原来就有副本时返回 nil。
-    private func keepSnapshot(_ snapshot: ObservedLogin) throws -> String? {
+    private func keepSnapshot(_ snapshot: ObservedLogin) throws {
         let recorded = profile.slots(forEmail: snapshot.meta.email)
         var backedUp = false
         for name in recorded {
@@ -308,11 +297,8 @@ struct AccountCommands {
             backedUp = true
         }
         if !backedUp {
-            let name = try availableDefaultName(snapshot.meta.email)
-            try storeLogin(name: name, blob: snapshot.blob, meta: snapshot.meta)
-            return name
+            try saveUnsaved(snapshot)
         }
-        return nil
     }
 
     private func rename(from sourceName: String?, to targetName: String) throws {
@@ -407,6 +393,14 @@ struct AccountCommands {
         var result = CurrentLogin()
         let login: ObservedLogin
         do {
+            if files.readRollback() != nil {
+                if holdingLock {
+                    recoverInterruptedAdd()
+                } else if let descriptor = profile.lockState(wait: 0) {
+                    recoverInterruptedAdd()
+                    close(descriptor)
+                }
+            }
             let blob = try keychain.readBlob()
             login = ObservedLogin(blob: blob, meta: try decodeLogin(blob, source: .keychain))
         } catch let error as AccountFailure where error.key == .keychainMissing {
@@ -487,7 +481,26 @@ struct AccountCommands {
             throw AccountFailure(.stateBusy)
         }
         defer { close(descriptor) }
+        recoverInterruptedAdd()
         return try body()
+    }
+
+    // 上一次新增账号做到一半进程就没了：钥匙串那一项已经移开，原来的登录还留在 rollbackURL。
+    // 拿着锁的时候调用（没有别的新增账号正在进行）。钥匙串还空着就把它写回去；已经有登录了就只把这份没用的东西删掉。
+    private func recoverInterruptedAdd() {
+        guard let blob = files.readRollback() else {
+            return
+        }
+        do {
+            _ = try keychain.readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            guard (try? decodeLogin(blob, source: .saved)) != nil, (try? keychain.writeBlob(blob)) != nil else {
+                return
+            }
+        } catch {
+            return
+        }
+        files.removeRollback()
     }
 
     // 读 ~/.agy-cs/ 里的记录和钥匙串里的邮箱，不联网。list 和菜单栏面板都从这里取。

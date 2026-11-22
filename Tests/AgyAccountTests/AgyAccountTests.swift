@@ -721,14 +721,18 @@ final class AgyAccountTests: XCTestCase {
         blocked.terminal.lines = ["2"]
         let refused = blocked.run(["switch"])
         XCTAssertEqual(refused.code, 1)
-        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("名字 alice 已经被 bob@example.com 使用"))
+        // 名字 alice 下面的副本是别人的：不动它，当前登录另存成 alice-2，新增账号照常进行；没登录成就把原来的登录写回去。
         XCTAssertEqual(
             stripNewlines(try String(contentsOf: blocked.locations.tokenURL("alice"), encoding: .utf8)),
             bob
         )
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: blocked.locations.tokenURL("alice-2"), encoding: .utf8)),
+            alice
+        )
         XCTAssertEqual(blocked.keychain.blob, alice)
         XCTAssertFalse(blocked.keychain.missing)
-        XCTAssertTrue(blocked.keychain.writes.isEmpty)
+        XCTAssertEqual(blocked.keychain.writes, [alice])
     }
 
     func testRenameMovesCatalogWithoutReadingKeychain() throws {

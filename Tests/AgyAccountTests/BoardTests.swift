@@ -717,17 +717,36 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.refresher.started, 0)
 
         // 开始新增账号又没登录成：原来的登录写回钥匙串，删掉的副本不会回来。
-        // 登录期间它先存着一份，进程中途被杀掉时还找得回来。
+        // 登录期间它在账号名单之外留着一份；没登录成就写回钥匙串，那一份删掉，删掉的副本不会回来。
         fixture.terminal.isInteractive = true
-        var kept = false
+        var kept: String?
         fixture.launcher.supply = {
-            kept = FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path)
+            kept = try? String(contentsOf: fixture.locations.rollbackURL, encoding: .utf8)
         }
         XCTAssertEqual(fixture.run(["switch", "add"]).code, 1)
-        XCTAssertTrue(kept)
+        XCTAssertEqual(kept.map(stripNewlines), makeBlob(email: "alice@example.com", refresh: "a"))
         XCTAssertFalse(fixture.keychain.missing)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.rollbackURL.path))
         XCTAssertEqual(fixture.board.load().rows, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
+
+        // 进程在登录中途没了：钥匙串空着，那一份还在。下一条指令把它写回钥匙串。
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        try Data((alice + "\n").utf8).write(to: fixture.locations.rollbackURL)
+        fixture.keychain.missing = true
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+        XCTAssertEqual(fixture.keychain.writes, [alice, alice])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.rollbackURL.path))
+        XCTAssertEqual(fixture.board.load().rows, [])
+
+        // 名字相同、邮箱不同的新登录照样能存；存好之后那一份删掉，原来的登录不留。
+        fixture.launcher.supply = { fixture.keychain.blob = makeBlob(email: "alice@work.example", refresh: "w"); fixture.keychain.missing = false }
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 0)
+        XCTAssertEqual(fixture.run(["list"]).output, ["* alice  alice@work.example"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.rollbackURL.path))
+        XCTAssertEqual(fixture.run(["rm", "alice", "--force"]).code, 0)
+        fixture.launcher.supply = nil
+        fixture.keychain.blob = alice
 
         fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
         XCTAssertEqual(fixture.run(["list"]).output, ["* bob  bob@example.com"])
