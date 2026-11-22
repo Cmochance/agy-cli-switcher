@@ -98,29 +98,84 @@ final class ColabTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let binDir = root.appendingPathComponent("bin", isDirectory: true)
         let venvBin = root.appendingPathComponent("venv/bin", isDirectory: true)
+        let localBin = root.appendingPathComponent(".local/bin", isDirectory: true)
+        let unsafeBin = root.appendingPathComponent("unsafe", isDirectory: true)
         try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: venvBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: localBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unsafeBin, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: unsafeBin.path)
 
         let fakePython = venvBin.appendingPathComponent("python3")
         try "#!/bin/sh\nexit 0\n".write(to: fakePython, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakePython.path)
 
         let directColab = binDir.appendingPathComponent("colab")
-        try "#!\(fakePython.path)\nprint('hi')\n".write(to: directColab, atomically: true, encoding: .utf8)
+        try "#!\(fakePython.path)\nfrom colab_cli.cli import main\n".write(to: directColab, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directColab.path)
 
         let found = colabBinary(path: binDir.path, recorded: nil, home: root)
         XCTAssertEqual(found, directColab.path)
         XCTAssertEqual(colabPythonExecutable(for: directColab.path, path: binDir.path, home: root), fakePython.path)
 
-        // env shebang resolution
+        // env shebang resolution (via PATH and via trusted ~/.local/bin before system python3)
+        let venvPythonCustom = venvBin.appendingPathComponent("python-venv-test")
+        try "#!/bin/sh\nexit 0\n".write(to: venvPythonCustom, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: venvPythonCustom.path)
+
         let envColab = binDir.appendingPathComponent("colab-env")
-        try "#!/usr/bin/env python3\n".write(to: envColab, atomically: true, encoding: .utf8)
+        try "#!/usr/bin/env python-venv-test\nfrom colab_cli.cli import main\n".write(to: envColab, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: envColab.path)
         XCTAssertEqual(
             colabPythonExecutable(for: envColab.path, path: venvBin.path, home: root),
-            fakePython.path
+            venvPythonCustom.path
         )
+
+        let localPython = localBin.appendingPathComponent("python3")
+        try "#!/bin/sh\nexit 0\n".write(to: localPython, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: localPython.path)
+        let envColabStd = binDir.appendingPathComponent("colab-env-std")
+        try "#!/usr/bin/env python3\nfrom colab_cli.cli import main\n".write(to: envColabStd, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: envColabStd.path)
+        XCTAssertEqual(
+            colabPythonExecutable(for: envColabStd.path, path: venvBin.path, home: root),
+            localPython.path
+        )
+
+        // World-writable directory is rejected (Fix #7).
+        let worldColab = unsafeBin.appendingPathComponent("colab")
+        try "#!\(fakePython.path)\nfrom colab_cli.cli import main\n".write(to: worldColab, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: worldColab.path)
+        XCTAssertNil(colabBinary(path: unsafeBin.path, recorded: nil, home: root))
+
+        // Launcher without colab_cli import or pointing to non-python interpreter is rejected (Fix #7).
+        let decoyDir = root.appendingPathComponent("decoy", isDirectory: true)
+        try FileManager.default.createDirectory(at: decoyDir, withIntermediateDirectories: true)
+        let notColab = decoyDir.appendingPathComponent("colab")
+        try "#!\(fakePython.path)\nprint('decoy')\n".write(to: notColab, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: notColab.path)
+        XCTAssertNil(colabBinary(path: decoyDir.path, recorded: nil, home: root))
+
+        let badInterp = decoyDir.appendingPathComponent("sh")
+        try "#!/bin/sh\nexit 0\n".write(to: badInterp, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: badInterp.path)
+        let badShebangColab = decoyDir.appendingPathComponent("colab-bad")
+        try "#!\(badInterp.path)\nfrom colab_cli.cli import main\n".write(to: badShebangColab, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: badShebangColab.path)
+        XCTAssertNil(colabPythonExecutable(for: badShebangColab.path, path: decoyDir.path, home: root))
+
+        // Recorded virtualenv path works even with empty PATH (Fix #6).
+        let cacheURL = root.appendingPathComponent("colab-client.json")
+        let installed = resolveColabInstallation(cacheURL: cacheURL, path: binDir.path, home: root)
+        XCTAssertEqual(installed, ColabInstallation(colabPath: directColab.path, pythonPath: fakePython.path))
+        let fromCacheOnly = resolveColabInstallation(cacheURL: cacheURL, path: "", home: root)
+        XCTAssertEqual(fromCacheOnly, ColabInstallation(colabPath: directColab.path, pythonPath: fakePython.path))
+
+        // Standard ~/.local/bin takes precedence over unrecorded PATH entries (Fix #7).
+        let trustedLocalColab = localBin.appendingPathComponent("colab")
+        try "#!\(fakePython.path)\nfrom colab_cli.cli import main\n".write(to: trustedLocalColab, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: trustedLocalColab.path)
+        XCTAssertEqual(colabBinary(path: binDir.path, recorded: nil, home: root), trustedLocalColab.path)
     }
 
     func testColabTokenParsingAndPartialScopeOAuthAndEmailResolution() throws {
@@ -325,6 +380,237 @@ final class ColabTests: XCTestCase {
         // Antigravity remains isolated and untouched.
         XCTAssertEqual(fixture.run(["current"]).output, ["agy@example.com"])
         XCTAssertEqual(fixture.run(["ls"]).output.count, 1)
+    }
+
+    func testFirstSwitchFromUnsavedColabBacksUpNewlyAutoSavedSessions() throws {
+        let bob = makeColabBlob(refresh: "r-bob")
+        let unsaved = makeColabBlob(refresh: "r-unsaved")
+
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "r-agy"))
+        defer { fixture.cleanup() }
+        let colabKeychain = MemoryKeychain(bob)
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-bob": "bob@example.com",
+                "r-unsaved": "unsaved@example.com",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+
+        XCTAssertEqual(fixture.run(["colab", "save", "bob"]).code, 0)
+
+        // User signs into a brand new account externally with active Colab sessions.
+        colabKeychain.blob = unsaved
+        let locations = AccountLocations(home: fixture.home, provider: .colab)
+        try FileManager.default.createDirectory(at: locations.colabSessionsFile!.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let liveSessions = "{\"s1\":{\"endpoint\":\"gpu-unsaved\"}}\n"
+        try Data(liveSessions.utf8).write(to: locations.colabSessionsFile!)
+
+        // Switching away auto-saves `unsaved` AND backs up its live sessions under `unsaved`.
+        XCTAssertEqual(fixture.run(["colab", "switch", "bob"]).code, 0)
+        XCTAssertEqual(
+            try String(contentsOf: locations.sessionsBackupURL("unsaved"), encoding: .utf8),
+            liveSessions
+        )
+        XCTAssertEqual(try String(contentsOf: locations.colabSessionsFile!, encoding: .utf8), "{}\n")
+
+        // Switching back to `unsaved` restores its sessions.
+        XCTAssertEqual(fixture.run(["colab", "switch", "unsaved"]).code, 0)
+        XCTAssertEqual(try String(contentsOf: locations.colabSessionsFile!, encoding: .utf8), liveSessions)
+    }
+
+    func testColabSwitchAbortsBeforeMutatingKeychainOrSessionsWhenBackupFails() throws {
+        let alice = makeColabBlob(refresh: "r-alice")
+        let bob = makeColabBlob(refresh: "r-bob")
+
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "r-agy"))
+        defer { fixture.cleanup() }
+        let colabKeychain = MemoryKeychain(alice)
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-alice": "alice@example.com",
+                "r-bob": "bob@example.com",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "alice"]).code, 0)
+        colabKeychain.blob = bob
+        XCTAssertEqual(fixture.run(["colab", "save", "bob"]).code, 0)
+        XCTAssertEqual(fixture.run(["colab", "switch", "alice"]).code, 0)
+
+        let locations = AccountLocations(home: fixture.home, provider: .colab)
+        let priorBackup = "{\"old\":\"keep\"}\n"
+        let liveSessions = "{\"new\":\"do-not-lose\"}\n"
+        let liveAttached = "{\"att\":\"do-not-lose\"}\n"
+        try Data(priorBackup.utf8).write(to: locations.sessionsBackupURL("alice"))
+        try Data(liveSessions.utf8).write(to: locations.colabSessionsFile!)
+        try Data(liveAttached.utf8).write(to: locations.colabAttachedSessionsFile!)
+
+        // Unreadable live session file preserves prior backup, live files, and keychain.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locations.colabSessionsFile!.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: locations.colabSessionsFile!.path)
+            try? FileManager.default.removeItem(at: locations.attachedSessionsBackupURL("alice"))
+        }
+        let failedRead = fixture.run(["colab", "switch", "bob"])
+        XCTAssertNotEqual(failedRead.code, 0)
+        XCTAssertEqual(colabKeychain.blob, alice)
+        XCTAssertEqual(try String(contentsOf: locations.sessionsBackupURL("alice"), encoding: .utf8), priorBackup)
+        XCTAssertEqual(try String(contentsOf: locations.colabAttachedSessionsFile!, encoding: .utf8), liveAttached)
+
+        // Restore readable live file, then make attached backup destination a non-empty directory so AtomicFile rename fails.
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: locations.colabSessionsFile!.path)
+        let blockingDir = locations.attachedSessionsBackupURL("alice")
+        try FileManager.default.createDirectory(at: blockingDir, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: blockingDir.appendingPathComponent("inside"))
+
+        let failedWrite = fixture.run(["colab", "switch", "bob"])
+        XCTAssertNotEqual(failedWrite.code, 0)
+        XCTAssertEqual(colabKeychain.blob, alice)
+        XCTAssertEqual(try String(contentsOf: locations.colabSessionsFile!, encoding: .utf8), liveSessions)
+        XCTAssertEqual(try String(contentsOf: locations.colabAttachedSessionsFile!, encoding: .utf8), liveAttached)
+    }
+
+    func testColabSaveForceChangingEmailClearsOldSessionsAndSameEmailKeepsThem() throws {
+        let alice = makeColabBlob(refresh: "r-alice")
+        let bob = makeColabBlob(refresh: "r-bob")
+        let aliceRefreshed = makeColabBlob(token: "ya29.new", refresh: "r-alice")
+
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "r-agy"))
+        defer { fixture.cleanup() }
+        let colabKeychain = MemoryKeychain(alice)
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-alice": "alice@example.com",
+                "r-bob": "bob@example.com",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "work"]).code, 0)
+
+        let locations = AccountLocations(home: fixture.home, provider: .colab)
+        try Data("{\"alice\":true}\n".utf8).write(to: locations.sessionsBackupURL("work"))
+        try Data("{\"aliceAtt\":true}\n".utf8).write(to: locations.attachedSessionsBackupURL("work"))
+
+        // Re-saving same email keeps auxiliary session backups.
+        colabKeychain.blob = aliceRefreshed
+        XCTAssertEqual(fixture.run(["colab", "save", "work", "--force"]).code, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: locations.sessionsBackupURL("work").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: locations.attachedSessionsBackupURL("work").path))
+
+        // Replacing with different email clears previous email's session backups.
+        colabKeychain.blob = bob
+        XCTAssertEqual(fixture.run(["colab", "save", "work", "--force"]).code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: locations.sessionsBackupURL("work").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: locations.attachedSessionsBackupURL("work").path))
+    }
+
+    func testColabAddMissingEmailRestoresPreviousLoginAndSurfacesError() throws {
+        let alice = makeColabBlob(refresh: "r-alice")
+        let noEmail = makeColabBlob(refresh: "r-noemail", expiry: "2020-01-01T00:00:00Z")
+
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "r-agy"))
+        defer { fixture.cleanup() }
+        fixture.terminal.isInteractive = true
+        let colabKeychain = MemoryKeychain(alice)
+        let colabLauncher = ScriptedLauncher()
+        colabLauncher.launchesAfterSwitch = false
+        let missingEmailHTTP = StubColabHTTP { request in
+            if request.url.path == "/token" {
+                return HTTPResponse(status: 200, body: Data("{\"access_token\":\"tok\"}".utf8))
+            }
+            if request.url.path == "/tokeninfo" {
+                return HTTPResponse(status: 200, body: Data("{\"azp\":\"client\"}".utf8))
+            }
+            return nil
+        }
+        let resolver = GoogleColabEmailResolver(http: missingEmailHTTP, now: { Date(timeIntervalSince1970: 1_800_000_000) })
+        // First initialize alice via save using static resolver, then replace with missing-email resolver for add.
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["r-alice": "alice@example.com"])),
+            launcher: colabLauncher,
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "alice"]).code, 0)
+
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: resolver),
+            launcher: colabLauncher,
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        colabLauncher.supply = {
+            colabKeychain.blob = noEmail
+            colabKeychain.missing = false
+        }
+        let result = fixture.run(["colab", "switch", "add"])
+        XCTAssertEqual(result.code, 1)
+        XCTAssertEqual(colabKeychain.blob, alice)
+        XCTAssertTrue(result.errors.joined(separator: "\n").contains("未包含邮箱"))
+    }
+
+    func testColabAddCompletesSessionSwapInsideStateLock() throws {
+        let alice = makeColabBlob(refresh: "r-alice")
+        let bob = makeColabBlob(refresh: "r-bob")
+
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "r-agy"))
+        defer { fixture.cleanup() }
+        fixture.terminal.isInteractive = true
+        let colabKeychain = MemoryKeychain(alice)
+        let colabLauncher = ScriptedLauncher()
+        colabLauncher.launchesAfterSwitch = false
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-alice": "alice@example.com",
+                "r-bob": "bob@example.com",
+            ])),
+            launcher: colabLauncher,
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "alice"]).code, 0)
+
+        let locations = AccountLocations(home: fixture.home, provider: .colab)
+        try FileManager.default.createDirectory(at: locations.colabSessionsFile!.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let aliceSessions = "{\"alice\":1}\n"
+        try Data(aliceSessions.utf8).write(to: locations.colabSessionsFile!)
+
+        let observedSwapBeforeUnlock = XCTestExpectation(description: "contending state lock sees completed session swap")
+        var sessionsAtLockAcquisition = ""
+        let colabProfile = ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: ["zh-Hans"], provider: .colab)
+
+        colabLauncher.supply = {
+            DispatchQueue.global().async {
+                guard let fd = colabProfile.lockState(wait: 5) else {
+                    XCTFail("Failed to acquire state.lock")
+                    return
+                }
+                defer { close(fd) }
+                sessionsAtLockAcquisition = (try? String(contentsOf: locations.colabSessionsFile!, encoding: .utf8)) ?? ""
+                observedSwapBeforeUnlock.fulfill()
+            }
+            Thread.sleep(forTimeInterval: 0.08)
+            colabKeychain.blob = bob
+            colabKeychain.missing = false
+        }
+
+        XCTAssertEqual(fixture.run(["colab", "switch", "add"]).code, 0)
+        wait(for: [observedSwapBeforeUnlock], timeout: 5)
+        XCTAssertEqual(sessionsAtLockAcquisition, "{}\n")
+        XCTAssertEqual(try String(contentsOf: locations.sessionsBackupURL("alice"), encoding: .utf8), aliceSessions)
     }
 
     // Opt-in real Python keyring round-trip against a probe item:

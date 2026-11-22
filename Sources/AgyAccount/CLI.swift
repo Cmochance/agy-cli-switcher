@@ -41,14 +41,15 @@ struct CommandServices {
                 provider: .antigravity
             )
         case .colab:
+            let colabClient = ToolLocations(home: home, provider: .colab).clientFile
             return CommandServices(
                 home: home,
-                keychain: ColabKeychainStore(cacheURL: ToolLocations(home: home, provider: .colab).clientFile),
+                keychain: ColabKeychainStore(cacheURL: colabClient),
                 processes: SystemProcessList(),
                 now: AccountClock.utcTimestamp,
                 preferredLanguages: Locale.preferredLanguages,
                 terminal: terminal,
-                launcher: InteractiveColab(),
+                launcher: InteractiveColab(cacheURL: colabClient),
                 usage: ColabUsageFetcher(),
                 refresher: SelfSpawner(prefix: ["colab"]),
                 provider: .colab
@@ -70,10 +71,11 @@ struct CommandServices {
             copy.provider = .antigravity
             return copy
         case .colab:
+            let colabClient = ToolLocations(home: home, provider: .colab).clientFile
             let overrides = colab ?? ProviderServices(
-                keychain: ColabKeychainStore(cacheURL: ToolLocations(home: home, provider: .colab).clientFile),
+                keychain: ColabKeychainStore(cacheURL: colabClient),
                 codec: ColabLoginCodec(),
-                launcher: InteractiveColab(),
+                launcher: InteractiveColab(cacheURL: colabClient),
                 usage: ColabUsageFetcher(),
                 refresher: SelfSpawner(prefix: ["colab"])
             )

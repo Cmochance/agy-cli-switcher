@@ -84,9 +84,14 @@ struct ProviderNotice: Equatable {
 }
 
 protocol ProviderStateSyncing {
+    func prepareSwitch(from previousNames: [String], to targetName: String, sameEmail: Bool) throws
     func afterSwitch(from previousNames: [String], to targetName: String, sameEmail: Bool) -> [ProviderNotice]
     func renameAuxiliary(from source: String, to target: String)
     func removeAuxiliary(_ name: String)
+}
+
+extension ProviderStateSyncing {
+    func prepareSwitch(from previousNames: [String], to targetName: String, sameEmail: Bool) throws {}
 }
 
 struct AntigravityStateSync: ProviderStateSyncing {

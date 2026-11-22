@@ -376,7 +376,7 @@ The keychain has no Colab login with service google-colab-cli and account oauth_
 The keychain did not allow reading the Colab login.
 
 [colabMissingEmail]
-Google did not return an email address for this Colab login (the granted scopes may omit email). Re-authenticate with colab or save it explicitly.
+Google did not return an email address for this Colab login (the granted scopes may omit email). Re-authenticate in colab with email access granted before adding it.
 
 [colabEmailFailed]
 Could not resolve the email address for this Colab login from Google. Check your network connection or log in again.

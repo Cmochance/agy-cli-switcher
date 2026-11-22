@@ -26,16 +26,29 @@ protocol ColabEmailResolving {
     func resolveEmail(for token: ColabTokenPayload) throws -> String
 }
 
-// 查找本机 colab CLI，顺序与 agyBinary 保持一致，避免受限于菜单栏 LaunchServices 的精简 PATH。
+struct ColabInstallation: Equatable {
+    var colabPath: String
+    var pythonPath: String
+}
+
+// 查找本机 colab CLI，优先已记录路径和标准受信任目录，再检查 PATH，避免盲信不可信的 PATH 前置项。
 func colabBinary(
     path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
     recorded: String?,
     home: URL = FileManager.default.homeDirectoryForCurrentUser
 ) -> String? {
-    let usual = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"]
     let remembered = [recorded].compactMap { $0 }.filter { $0.hasPrefix("/") }
-    let candidates = pathCandidates("colab", in: path) + remembered + usual.map { $0 + "/colab" }
-    return candidates.first(where: FileManager.default.isExecutableFile(atPath:))
+    let usual = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"].map { $0 + "/colab" }
+    let fromPath = pathCandidates("colab", in: path)
+    for candidate in remembered + usual + fromPath {
+        guard isColabLauncherScript(candidate),
+              colabPythonExecutable(for: candidate, path: path, home: home) != nil
+        else {
+            continue
+        }
+        return candidate
+    }
+    return nil
 }
 
 func colabPythonExecutable(
@@ -43,17 +56,13 @@ func colabPythonExecutable(
     path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
     home: URL = FileManager.default.homeDirectoryForCurrentUser
 ) -> String? {
-    guard let data = try? Data(contentsOf: URL(fileURLWithPath: colabPath)),
-          let firstLine = String(decoding: data.prefix(512), as: UTF8.self).split(whereSeparator: \.isNewline).first
+    guard isColabLauncherScript(colabPath),
+          let line = firstShebangLine(atPath: colabPath)
     else {
         return nil
     }
-    let line = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard line.hasPrefix("#!") else {
-        return nil
-    }
     let command = String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
-    if FileManager.default.isExecutableFile(atPath: command) {
+    if command.hasPrefix("/"), isTrustedPythonInterpreter(command) {
         return command
     }
     let parts = command.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -61,15 +70,136 @@ func colabPythonExecutable(
         return nil
     }
     if executable == "/usr/bin/env", parts.count >= 2 {
-        let extra = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
-        let candidates = pathCandidates(parts[1], in: path) + extra.map { $0 + "/\(parts[1])" }
-        return candidates.first(where: FileManager.default.isExecutableFile(atPath:))
+        let interpreter = parts[1]
+        guard !interpreter.contains("/"), interpreter.lowercased().hasPrefix("python") else {
+            return nil
+        }
+        let standard = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+            .map { $0 + "/\(interpreter)" }
+        let candidates = standard + pathCandidates(interpreter, in: path)
+        return candidates.first(where: isTrustedPythonInterpreter)
     }
-    return FileManager.default.isExecutableFile(atPath: executable) ? executable : nil
+    return isTrustedPythonInterpreter(executable) ? executable : nil
+}
+
+func resolveColabInstallation(
+    cacheURL: URL,
+    path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+) -> ColabInstallation? {
+    resolveColabInstallation(
+        cacheURL: cacheURL,
+        locateColab: { colabBinary(path: path, recorded: $0, home: home) },
+        resolvePython: { colabPythonExecutable(for: $0, path: path, home: home) }
+    )
+}
+
+func resolveColabInstallation(
+    cacheURL: URL,
+    locateColab: (String?) -> String?,
+    resolvePython: (String) -> String?
+) -> ColabInstallation? {
+    let cached = (try? Data(contentsOf: cacheURL))
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["path"] as? String
+    guard let colabPath = locateColab(cached), let pythonPath = resolvePython(colabPath) else {
+        return nil
+    }
+    let resolved = (colabPath as NSString).resolvingSymlinksInPath
+    if cached != resolved,
+       let data = try? JSONSerialization.data(withJSONObject: ["path": resolved], options: [.prettyPrinted, .sortedKeys])
+    {
+        try? AtomicFile.write(cacheURL, String(decoding: data, as: UTF8.self) + "\n")
+    }
+    return ColabInstallation(colabPath: colabPath, pythonPath: pythonPath)
+}
+
+func isColabLauncherScript(_ path: String) -> Bool {
+    guard isTrustedExecutablePath(path) else {
+        return false
+    }
+    let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    guard let handle = FileHandle(forReadingAtPath: resolved) else {
+        return false
+    }
+    defer { try? handle.close() }
+    let data = handle.readData(ofLength: 4096)
+    guard let text = String(data: data, encoding: .utf8) else {
+        return false
+    }
+    return text.hasPrefix("#!") && text.contains("colab_cli")
+}
+
+func isTrustedPythonInterpreter(_ path: String) -> Bool {
+    guard isTrustedExecutablePath(path) else {
+        return false
+    }
+    let name = URL(fileURLWithPath: path).resolvingSymlinksInPath().lastPathComponent.lowercased()
+    return name.hasPrefix("python")
+}
+
+func isTrustedExecutablePath(_ path: String) -> Bool {
+    guard path.hasPrefix("/") else {
+        return false
+    }
+    let uid = getuid()
+    let candidateParent = (path as NSString).deletingLastPathComponent
+    guard isTrustedDirectory(candidateParent, uid: uid) else {
+        return false
+    }
+    var linkInfo = stat()
+    guard lstat(path, &linkInfo) == 0 else {
+        return false
+    }
+    if (linkInfo.st_mode & S_IFMT) == S_IFLNK {
+        guard linkInfo.st_uid == uid || linkInfo.st_uid == 0 else {
+            return false
+        }
+    }
+    let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    let resolvedParent = (resolved as NSString).deletingLastPathComponent
+    guard isTrustedDirectory(resolvedParent, uid: uid) else {
+        return false
+    }
+    var fileInfo = stat()
+    guard stat(resolved, &fileInfo) == 0,
+          (fileInfo.st_mode & S_IFMT) == S_IFREG,
+          fileInfo.st_uid == uid || fileInfo.st_uid == 0,
+          (fileInfo.st_mode & S_IWOTH) == 0
+    else {
+        return false
+    }
+    return FileManager.default.isExecutableFile(atPath: resolved)
+}
+
+private func isTrustedDirectory(_ path: String, uid: uid_t) -> Bool {
+    var info = stat()
+    guard path.hasPrefix("/"),
+          stat(path, &info) == 0,
+          (info.st_mode & S_IFMT) == S_IFDIR,
+          info.st_uid == uid || info.st_uid == 0,
+          (info.st_mode & S_IWOTH) == 0
+    else {
+        return false
+    }
+    return true
+}
+
+private func firstShebangLine(atPath path: String) -> String? {
+    let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    guard let handle = FileHandle(forReadingAtPath: resolved) else {
+        return nil
+    }
+    defer { try? handle.close() }
+    let data = handle.readData(ofLength: 512)
+    guard let firstLine = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).first else {
+        return nil
+    }
+    let trimmed = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.hasPrefix("#!") ? trimmed : nil
 }
 
 private func pathCandidates(_ binary: String, in path: String) -> [String] {
-    path.split(separator: ":").filter { !$0.isEmpty }.map { directory in
+    path.split(separator: ":").filter { $0.hasPrefix("/") }.map { directory in
         URL(fileURLWithPath: String(directory)).appendingPathComponent(binary).path
     }
 }
@@ -153,21 +283,14 @@ struct PythonKeyringRunner: ColabKeyringRunning {
     }
 
     private func pythonExecutable() throws -> String {
-        let cached = (try? Data(contentsOf: cacheURL))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["path"] as? String
-        guard let colabPath = locateColab(cached) else {
+        guard let installed = resolveColabInstallation(
+            cacheURL: cacheURL,
+            locateColab: locateColab,
+            resolvePython: resolvePython
+        ) else {
             throw AccountFailure(.colabNotFound)
         }
-        let resolved = (colabPath as NSString).resolvingSymlinksInPath
-        if cached != resolved,
-           let data = try? JSONSerialization.data(withJSONObject: ["path": resolved], options: [.prettyPrinted, .sortedKeys])
-        {
-            try? AtomicFile.write(cacheURL, String(decoding: data, as: UTF8.self) + "\n")
-        }
-        guard let python = resolvePython(colabPath) else {
-            throw AccountFailure(.colabNotFound)
-        }
-        return python
+        return installed.pythonPath
     }
 }
 
@@ -420,6 +543,31 @@ struct ColabStateSync: ProviderStateSyncing {
     var locations: AccountLocations
     private let manager = FileManager.default
 
+    func prepareSwitch(from previousNames: [String], to targetName: String, sameEmail: Bool) throws {
+        guard !sameEmail, !previousNames.isEmpty else {
+            return
+        }
+        let sources: [(URL, (String) -> URL)] = [
+            locations.colabSessionsFile.map { ($0, { locations.sessionsBackupURL($0) }) },
+            locations.colabAttachedSessionsFile.map { ($0, { locations.attachedSessionsBackupURL($0) }) },
+        ].compactMap { $0 }
+
+        var staged: [(backups: [URL], content: String?)] = []
+        for (live, backupFor) in sources {
+            let content = try readOptionalLiveFile(live)
+            staged.append((previousNames.map(backupFor), content))
+        }
+        for item in staged {
+            for backup in item.backups {
+                if let content = item.content {
+                    try AtomicFile.write(backup, content)
+                } else {
+                    try? manager.removeItem(at: backup)
+                }
+            }
+        }
+    }
+
     func afterSwitch(from previousNames: [String], to targetName: String, sameEmail: Bool) -> [ProviderNotice] {
         guard !sameEmail else {
             return []
@@ -429,9 +577,6 @@ struct ColabStateSync: ProviderStateSyncing {
             notices.append(ProviderNotice(key: .colabActiveSessions))
         }
         let pairs = sessionPairs(for: previousNames, targetName: targetName)
-        for pair in pairs.previous {
-            backupFile(from: pair.live, to: pair.backup)
-        }
         for pair in pairs.target {
             restoreFile(from: pair.backup, to: pair.live)
         }
@@ -485,21 +630,32 @@ struct ColabStateSync: ProviderStateSyncing {
         return false
     }
 
-    private func backupFile(from live: URL, to backup: URL) {
-        guard manager.fileExists(atPath: live.path),
-              let content = try? String(contentsOf: live, encoding: .utf8)
-        else {
-            try? manager.removeItem(at: backup)
-            return
+    private func readOptionalLiveFile(_ live: URL) throws -> String? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: live)
+        } catch CocoaError.fileReadNoSuchFile, CocoaError.fileNoSuchFile {
+            return nil
+        } catch let error as NSError
+            where (error.domain == NSCocoaErrorDomain
+                && (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError))
+                || (error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT))
+        {
+            return nil
+        } catch {
+            throw AccountFailure(.readFailed, live.path)
         }
-        try? AtomicFile.write(backup, content)
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw AccountFailure(.readFailed, live.path)
+        }
+        return content
     }
 
     private func restoreFile(from backup: URL, to live: URL) {
-        if manager.fileExists(atPath: backup.path),
-           let content = try? String(contentsOf: backup, encoding: .utf8)
-        {
-            try? AtomicFile.write(live, content)
+        if manager.fileExists(atPath: backup.path) {
+            if let content = try? String(contentsOf: backup, encoding: .utf8) {
+                try? AtomicFile.write(live, content)
+            }
         } else if manager.fileExists(atPath: live.path) {
             try? AtomicFile.write(live, "{}\n")
         }

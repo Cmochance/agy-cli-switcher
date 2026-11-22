@@ -4,6 +4,8 @@ import Foundation
 // Colab CLI 没有单独的登录指令：移除钥匙串后在前台终端跑 `colab whoami`，
 // 会自动走完远程授权码登录并写入钥匙串，随后自动退出。
 struct InteractiveColab: AgyLaunching {
+    var cacheURL: URL = ToolLocations(home: FileManager.default.homeDirectoryForCurrentUser, provider: .colab).clientFile
+    var locate: ((URL) -> ColabInstallation?)? = nil
     var launchesAfterSwitch: Bool { false }
 
     func runUntilLoggedIn(_ poll: () throws -> ObservedLogin?) throws -> LoginWatchResult {
@@ -53,14 +55,11 @@ struct InteractiveColab: AgyLaunching {
     func startInCurrentTerminal() throws {}
 
     private func colabExecutable() throws -> String {
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        let candidates = path.split(separator: ":").filter { !$0.isEmpty }.map { directory in
-            URL(fileURLWithPath: String(directory)).appendingPathComponent("colab").path
-        }
-        guard let found = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
+        let installed = locate?(cacheURL) ?? resolveColabInstallation(cacheURL: cacheURL)
+        guard let installed else {
             throw AccountFailure(.colabLaunchFailed, "colab")
         }
-        return found
+        return installed.colabPath
     }
 
     private func spawnWhoami(_ binary: String) throws -> pid_t {

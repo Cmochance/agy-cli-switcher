@@ -376,7 +376,7 @@ move 需要一个名字和一个位置。例如 agy-cs move work 1 把 work 移�
 钥匙串不允许读取 Colab 登录。
 
 [colabMissingEmail]
-Google 没有返回这个 Colab 登录的邮箱（授权范围可能未包含邮箱），请先保存邮箱或用完整授权重新登录。
+Google 没有返回这个 Colab 登录的邮箱（授权范围可能未包含邮箱），请重新运行 colab 并勾选邮箱授权后再添加。
 
 [colabEmailFailed]
 无法从 Google 查询当前 Colab 登录对应的邮箱，请检查网络或重新登录。

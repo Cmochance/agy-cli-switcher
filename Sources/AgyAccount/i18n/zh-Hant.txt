@@ -376,7 +376,7 @@ move 需要一個名字和一個位置。例如 agy-cs move work 1 把 work 移�
 鑰匙圈不允許讀取 Colab 登入。
 
 [colabMissingEmail]
-Google 沒有傳回這個 Colab 登入的電子郵件（授權範圍可能未包含電子郵件），請先保存電子郵件或使用完整授權重新登入。
+Google 沒有傳回這個 Colab 登入的電子郵件（授權範圍可能未包含電子郵件），請重新執行 colab 並勾選電子郵件授權後再新增。
 
 [colabEmailFailed]
 無法向 Google 查詢目前 Colab 登入對應的電子郵件，請檢查網路或重新登入。
