@@ -204,6 +204,35 @@ final class CatalogTests: XCTestCase {
         }
     }
 
+    func testColabContractMatchesCode() throws {
+        let contractURL = repoRoot.appendingPathComponent("documents/COLAB_CONTRACT.md")
+        let contract = try String(contentsOf: contractURL, encoding: .utf8)
+        for token in [
+            "baseline_repo`: `googlecolab/google-colab-cli`",
+            "baseline_version`: `0.8.0`",
+            "baseline_tag`: `v0.8.0`",
+            "baseline_commit`:",
+            colabKeychainService,
+            colabKeychainAccount,
+            "sessions.json",
+            "sessions.attached.json",
+            "settings.json",
+            "public_api_supported",
+            "tunnel_api_supported",
+            ColabUsageFetcher.ccuInfoURL.path,
+            "X-Colab-Client-Agent",
+            "colab-cli",
+        ] {
+            XCTAssertTrue(contract.contains(token), "COLAB_CONTRACT.md missing \(token)")
+        }
+
+        let watchURL = repoRoot.appendingPathComponent(".github/workflows/colab-upstream-watch.yml")
+        let watch = try String(contentsOf: watchURL, encoding: .utf8)
+        XCTAssertTrue(watch.contains("documents/COLAB_CONTRACT.md"))
+        XCTAssertTrue(watch.contains("continue-on-error: true"))
+        XCTAssertTrue(watch.contains("contents: read"))
+    }
+
     private func placeholders(_ text: String) -> [String] {
         var found: [String] = []
         var index = text.startIndex

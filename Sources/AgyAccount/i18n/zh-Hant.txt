@@ -4,6 +4,7 @@
 用法
   agy-cs
   agy-cs <指令>
+  agy-cs colab <指令>
 
 指令
   current                      顯示已記錄的目前電子郵件，不開啟鑰匙圈
@@ -32,6 +33,7 @@ save、switch、next，以及上面這次初始化，才會讀取鑰匙圈。密
 switch、next 和新增帳號成功之後，會另起一個背景行程連網查詢每個帳號的方案和額度，記在 ~/.agy-cs/usage/。切換不等它，也不受它影響。
 list 只顯示這些記錄，不連網；過了重置時間的額度按 100% 顯示。refresh quota 立刻查一次，不讀鑰匙圈。
 不帶名字的 switch 和 switch add 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
+加上 colab 前綴可切換 google-colab-cli 帳號（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密鑰副本放在 ~/.config/colab-cli/accounts/，非密鑰記錄與額度快取放在 ~/.agy-cs/colab/。
 
 [operationFailed]
 沒能完成帳號操作。
@@ -360,3 +362,63 @@ move 需要一個名字和一個位置。例如 agy-cs move work 1 把 work 移�
 
 [moved]
 已把 %1 移到第 %2 位
+
+[colabNotFound]
+找不到 colab CLI 或對應的 Python keyring 模組。請先安裝 google-colab-cli 並確認 colab 在 PATH 中。
+
+[colabLoginFormat]
+鑰匙圈或副本中的 Colab 登入不是有效的 OAuth JSON，沒有使用它。
+
+[colabKeychainMissing]
+鑰匙圈裡沒有 service 為 google-colab-cli、account 為 oauth_token 的 Colab 登入。
+
+[colabKeychainDenied]
+鑰匙圈不允許讀取 Colab 登入。
+
+[colabMissingEmail]
+Google 沒有傳回這個 Colab 登入的電子郵件（授權範圍可能未包含電子郵件），請重新執行 colab 並勾選電子郵件授權後再新增。
+
+[colabEmailFailed]
+無法向 Google 查詢目前 Colab 登入對應的電子郵件，請檢查網路或重新登入。
+
+[colabActiveSessions]
+注意: 原帳號仍有執行中的 Colab 遠端工作階段（雲端繼續執行）；本機工作階段狀態已依帳號隔離。
+
+[colabNoSavedAccounts]
+還沒有已保存的 Colab 帳號。先在 colab 裡登入，再執行 agy-cs colab save <名字>。
+
+[colabNoCurrentAccount]
+沒有記錄中的目前 Colab 帳號。先在 colab 裡登入，再執行 agy-cs colab save <名字>。
+
+[colabCurrentNoLogin]
+現在沒有 Colab 登入。用 colab 登入後，這裡會自動存下來。
+
+[colabInitializedNoLogin]
+目前鑰匙圈裡沒有 Colab 登入，這次沒有保存帳號。用 colab 登入後再執行 agy-cs colab save <名字>。
+
+[colabLoginOpening]
+接下來會在這個終端機裡執行 colab whoami，請依提示完成遠端授權登入；完成後會自動保存並回到提示字元。
+
+[colabLaunchFailed]
+沒能在這個終端機裡啟動 colab (%1)。
+
+[colabPanelNoAccounts]
+還沒有保存的 Colab 帳號，點「新增帳號」去登入。
+
+[colabPanelRefreshing]
+正在查詢 Colab 算力與工作階段…
+
+[colabPanelRefreshed]
+Colab 算力與工作階段已更新。
+
+[colabRowBalance]
+餘額 %1
+
+[colabRowRate]
+消耗 %1
+
+[colabRowSessions]
+工作階段 %1
+
+[colabActiveBadge]
+%1 個作用中

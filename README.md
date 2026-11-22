@@ -13,17 +13,17 @@
   <a href="https://developer.apple.com/macos/"><img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white"></a>
 </p>
 
-**agy-cli-switcher** 在 macOS 上切换 Antigravity CLI（`agy`）的登录。有两种形式：终端里的命令 `agy-cs`，和菜单栏工具 Agy Switcher。两者是同一个程序，用同一份数据，可以只装一种，也可以都装。
+**agy-cli-switcher** 在 macOS 上切换 Antigravity CLI（`agy`）和 Google Colab CLI（`colab`）的登录。有两种形式：终端里的命令 `agy-cs`，和菜单栏工具 Agy Switcher。两者是同一个程序，用同一份数据，可以只装一种，也可以都装。
 
 当前版本 **v0.2.2**（详见 [Changelog](documents/CHANGELOG.md)）。
 
 ## 能做什么
 
-- 在多个 `agy` 登录之间切换，并记下名字、邮箱和当前项
-- Agy Switcher 在菜单栏里列出已保存的账号和额度，点一项完成切换
-- `agy-cs ls` 显示每个账号的套餐，以及 Gemini 5 小时、7 天和 Argon 额度的剩余量与重置时间
-- `agy-cs switch` 在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy`
-- `agy-cs switch add` 直接新增账号，不进入选择。先保住当前登录，再打开 `agy`
+- 在多个 `agy` 或 `colab`（加 `colab` 前缀，如 `agy-cs colab ls`）登录之间切换，并记下名字、邮箱和当前项
+- Agy Switcher 在菜单栏里列出已保存的账号和额度，点一项完成切换，底栏按钮可在 Antigravity 和 Colab 之间切换
+- `agy-cs ls` 显示 Antigravity 账号的套餐，以及 Gemini 5 小时、7 天和 Argon 额度的剩余量与重置时间；`agy-cs colab ls` 显示 Colab 账号的剩余 CU 算力、消耗速率和活跃会话数
+- `agy-cs switch` 在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy`（Colab 不额外重启进程）
+- `agy-cs switch add` 直接新增账号，不进入选择。先保住当前登录，再打开 `agy`（Colab 执行 `colab whoami` 完成远程授权）
 - `agy-cs switch <名字>` 只切换，不启动 `agy`
 - 当前账号以钥匙串里实际的登录为准。还开着的 `agy` 把自己的登录写回钥匙串时，显示会跟着变
 - 钥匙串里的登录还没保存过时自动保存，名字用邮箱 `@` 前面的字符；这个名字被别的账号占着就加 `-2`
@@ -97,12 +97,13 @@ export PATH="$HOME/.local/bin:$PATH"
 
 点菜单栏上的图标打开面板。
 
-- 每行是一个已保存的账号：邮箱、套餐，以及 5h、7d、Argon 额度。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾，并在邮箱后面带上名字
-- 点一行就切换过去，和 `agy-cs switch <名字>` 一样，只切换，不启动 `agy`
+- 每行是一个已保存的账号：Antigravity 显示邮箱、套餐和 5h、7d、Argon 额度；Colab 显示邮箱、CU 余额、消耗速率和活跃会话数。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾，并在邮箱后面带上名字
+- 底栏“新增账号…”右侧的按钮在 **Antigravity** 和 **Colab** 之间切换当前面板显示，选择会记在 `~/.agy-cs/provider`
+- 点一行就切换过去，和 `agy-cs switch <名字>`（或 `agy-cs colab switch <名字>`）一样，只切换，不启动 `agy`
 - 按住一行上下拖可以调整顺序，和 `agy-cs move <名字> <位置>` 一样
 - 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
-- “新增账号…”打开终端执行 `agy-cs switch add`，在那里登录。登录完再点开面板就能看到新账号
+- “新增账号…”打开终端执行 `agy-cs switch add` 或 `agy-cs colab switch add`，在那里登录。登录完再点开面板就能看到新账号
 - 每行右边的 `…` 里可以改名、删除。齿轮里可以保存当前登录、换语言、退出
 - 右键点菜单栏图标也可以退出
 - 打开面板只读记下来的结果和钥匙串里当前登录的邮箱，不联网
@@ -148,9 +149,11 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 位置 | 内容 |
 |---|---|
-| `~/.agy-cs/` | 名字、邮箱、顺序、语言，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里，里面只有一行启动 `agy-cs switch add` 的指令 |
+| `~/.agy-cs/` | Antigravity 的名字、邮箱、顺序、语言、provider 选择，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里 |
+| `~/.agy-cs/colab/` | Colab 的非密钥账号记录、排序、CU 额度缓存和锁 |
 | `~/.gemini/antigravity-cli/accounts/` | `agy` 自己的登录副本 |
-| 登录钥匙串里的一条 generic password，service 是 `gemini`，account 是 `antigravity` | 当前登录。切换时只替换这一条 |
+| `~/.config/colab-cli/accounts/` | Colab 账号副本与按账号隔离的 `sessions.json` / `sessions.attached.json` 备份（`history/` 和 `colab.log` 保持不动） |
+| 钥匙串里的 generic password | Antigravity 为 service `gemini` / account `antigravity`；Colab 为 service `google-colab-cli` / account `oauth_token`。切换时只替换对应条目 |
 
 目录权限是 `700`，文件权限是 `600`。
 

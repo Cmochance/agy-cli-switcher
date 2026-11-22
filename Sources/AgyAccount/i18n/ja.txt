@@ -4,6 +4,7 @@ Antigravity CLI のアカウントを切り替えます。
 使い方
   agy-cs
   agy-cs <コマンド>
+  agy-cs colab <コマンド>
 
 コマンド
   current                      記録されているメールアドレスを表示します。キーチェーンは開きません
@@ -32,6 +33,7 @@ save、switch、next、およびこの初回初期化だけがキーチェーン
 switch、next、アカウントの追加が成功すると、別のバックグラウンドプロセスが各アカウントのプランと利用枠を Google に問い合わせ、~/.agy-cs/usage/ に記録します。切り替えはそれを待たず、影響も受けません。
 list はその記録だけを表示し、通信しません。リセット時刻を過ぎた利用枠は 100% と表示します。refresh quota はすぐに問い合わせ、キーチェーンは読みません。
 名前なしの switch と switch add だけが、この端末で agy を起動します。新しいアカウントは現在のログインを先に保存してから agy を開きます。新しいメールアドレスが保存される前に終了したときは、元のログインを戻します。
+colab を前に付けると google-colab-cli のアカウントを切り替えられます（例: agy-cs colab ls、agy-cs colab switch <名前>、agy-cs colab refresh quota）。秘密のコピーは ~/.config/colab-cli/accounts/ に、秘密ではない記録と利用枠キャッシュは ~/.agy-cs/colab/ に保存します。
 
 [operationFailed]
 アカウント操作を完了できませんでした。
@@ -360,3 +362,63 @@ move には名前と位置が必要です。たとえば agy-cs move work 1 で 
 
 [moved]
 %1 を %2 番目に移しました
+
+[colabNotFound]
+colab CLI または対応する Python の keyring モジュールが見つかりません。google-colab-cli をインストールし、colab が PATH にあることを確認してください。
+
+[colabLoginFormat]
+キーチェーンまたは保存コピーの Colab ログインが有効な OAuth JSON ではないため、使用しませんでした。
+
+[colabKeychainMissing]
+キーチェーンに service が google-colab-cli、account が oauth_token の Colab ログインがありません。
+
+[colabKeychainDenied]
+キーチェーンで Colab ログインの読み取りが許可されませんでした。
+
+[colabMissingEmail]
+Google がこの Colab ログインのメールアドレスを返しませんでした（付与されたスコープにメールが含まれていない可能性があります）。colab でメール権限を許可して再認証してから追加してください。
+
+[colabEmailFailed]
+Google からこの Colab ログインのメールアドレスを取得できませんでした。ネットワーク接続を確認するか、再ログインしてください。
+
+[colabActiveSessions]
+注意: 前のアカウントには実行中の Colab リモートセッションがクラウド上に残っています。ローカルのセッション状態はアカウントごとに分離しました。
+
+[colabNoSavedAccounts]
+保存された Colab アカウントはまだありません。colab でログインしてから agy-cs colab save <名前> を実行してください。
+
+[colabNoCurrentAccount]
+記録されている現在の Colab アカウントがありません。colab でログインしてから agy-cs colab save <名前> を実行してください。
+
+[colabCurrentNoLogin]
+現在 Colab にログインしていません。colab でログインすると自動的に保存されます。
+
+[colabInitializedNoLogin]
+現在の Colab ログインが見つからなかったため保存しませんでした。ログイン後に agy-cs colab save <名前> を実行してください。
+
+[colabLoginOpening]
+この端末で colab whoami を実行します。画面の案内に従って認証を完了すると、ログインが自動保存されます。
+
+[colabLaunchFailed]
+この端末で colab を起動できませんでした (%1)。
+
+[colabPanelNoAccounts]
+保存された Colab アカウントはまだありません。「アカウントを追加」を選んでログインしてください。
+
+[colabPanelRefreshing]
+Colab のコンピューティングユニットとセッションを照会しています…
+
+[colabPanelRefreshed]
+Colab のコンピューティングユニットとセッションを更新しました。
+
+[colabRowBalance]
+残高 %1
+
+[colabRowRate]
+消費 %1
+
+[colabRowSessions]
+セッション %1
+
+[colabActiveBadge]
+%1 件稼働中

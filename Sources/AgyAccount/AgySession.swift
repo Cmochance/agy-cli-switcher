@@ -17,8 +17,13 @@ protocol LineReading {
 }
 
 protocol AgyLaunching {
+    var launchesAfterSwitch: Bool { get }
     func runUntilLoggedIn(_ poll: () throws -> ObservedLogin?) throws -> LoginWatchResult
     func startInCurrentTerminal() throws
+}
+
+extension AgyLaunching {
+    var launchesAfterSwitch: Bool { true }
 }
 
 struct StandardTerminal: LineReading {

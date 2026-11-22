@@ -30,6 +30,7 @@ public struct BoardState {
     public var failed: Bool
     public var text: Localizer
     public var language: String
+    public var provider: AccountProvider = .antigravity
 }
 
 public struct ActionOutcome {
@@ -58,14 +59,34 @@ public struct AccountBoard: @unchecked Sendable {
         self.services = services
     }
 
+    public func selectedProvider() -> AccountProvider {
+        services.profile.selectedProvider()
+    }
+
+    public func setSelectedProvider(_ provider: AccountProvider) throws {
+        try services.profile.setSelectedProvider(provider)
+    }
+
     // 只读 ~/.agy-cs/ 里的记录，不联网。还没初始化过时，和命令行一样读一次钥匙串。
     public func load() -> BoardState {
-        let profile = services.profile
+        load(provider: selectedProvider())
+    }
+
+    public func load(provider: AccountProvider) -> BoardState {
+        let scoped = services.forProvider(provider)
+        let profile = scoped.profile
         let text = Localizer(language: profile.resolvedLanguage())
         let said = Lines()
-        let commands = services.commands(text: text, stdout: said.add, stderr: said.add)
+        let commands = scoped.commands(text: text, stdout: said.add, stderr: said.add)
         func state(_ rows: [AccountRow], failed: Bool) -> BoardState {
-            BoardState(rows: rows, notices: said.all, failed: failed, text: text, language: text.language.rawValue)
+            BoardState(
+                rows: rows,
+                notices: said.all,
+                failed: failed,
+                text: text,
+                language: text.language.rawValue,
+                provider: provider
+            )
         }
         do {
             try profile.prepare()
@@ -76,7 +97,7 @@ public struct AccountBoard: @unchecked Sendable {
             }
             return state(rows, failed: false)
         } catch let error as AccountFailure {
-            said.add(text.line(error.key, argumentList: error.arguments))
+            said.add(text.line(providerTextKey(error.key, provider: provider), argumentList: error.arguments))
         } catch {
             said.add(text.line(.operationFailed))
         }
@@ -92,17 +113,17 @@ public struct AccountBoard: @unchecked Sendable {
         )
     }
 
-    // agy 的登录界面要一个终端，面板里登录不了。这里写一个两行的 .command 文件，由面板交给系统默认的终端程序打开。
-    // 文件里只有本程序自己的路径和固定的 switch add，登录和回滚仍是命令行那一套。
-    public func writeAddAccountCommand(executable: String) throws -> URL {
+    // agy / colab 的登录界面要一个终端，面板里登录不了。这里写一个两行的 .command 文件，由面板交给系统默认的终端程序打开。
+    // 文件里只有本程序自己的路径和固定的 switch add（或 colab switch add），登录和回滚仍是命令行那一套。
+    public func writeAddAccountCommand(executable: String, provider: AccountProvider = .antigravity) throws -> URL {
         let url = ToolLocations(home: services.home).addCommandFile
-        try AtomicFile.write(url, addAccountScript(executable: executable))
+        try AtomicFile.write(url, addAccountScript(executable: executable, provider: provider))
         try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: url.path)
         return url
     }
 
-    public func addAccountCommandLine(executable: String) -> String {
-        shellQuoted(executable) + " switch add"
+    public func addAccountCommandLine(executable: String, provider: AccountProvider = .antigravity) -> String {
+        shellQuoted(executable) + " " + (provider.cliPrefix + ["switch", "add"]).joined(separator: " ")
     }
 
     // 同一时间只让一个菜单栏工具运行：几份 app 用的是同一份记录和同一条钥匙串项。
@@ -128,8 +149,9 @@ public struct AccountBoard: @unchecked Sendable {
     }
 }
 
-func addAccountScript(executable: String) -> String {
-    "#!/bin/sh\nexec \(shellQuoted(executable)) switch add\n"
+func addAccountScript(executable: String, provider: AccountProvider = .antigravity) -> String {
+    let command = (provider.cliPrefix + ["switch", "add"]).joined(separator: " ")
+    return "#!/bin/sh\nexec \(shellQuoted(executable)) \(command)\n"
 }
 
 // 单引号里只有单引号自己需要处理，空格、$ 和换行都按原样。

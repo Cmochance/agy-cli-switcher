@@ -1,0 +1,101 @@
+name: colab-upstream-watch
+
+# Non-blocking upstream contract drift check against googlecolab/google-colab-cli.
+# Compares documents/COLAB_CONTRACT.md against the upstream release/main branch and writes a summary.
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'Sources/AgyAccount/Colab*.swift'
+      - 'Sources/AgyAccount/AccountProvider.swift'
+      - 'documents/COLAB_CONTRACT.md'
+      - 'Tests/AgyAccountTests/ColabTests.swift'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colab-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Colab upstream contract watch
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check upstream release and contract files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.request
+
+          with open("documents/COLAB_CONTRACT.md", encoding="utf-8") as f:
+              contract = f.read()
+
+          def field(name: str) -> str:
+              m = re.search(rf"- `{name}`:\s*`([^`]+)`", contract)
+              if not m:
+                  raise RuntimeError(f"Missing {name} in documents/COLAB_CONTRACT.md")
+              return m.group(1)
+
+          repo = field("baseline_repo")
+          version = field("baseline_version")
+          tag = field("baseline_tag")
+          commit = field("baseline_commit")
+
+          def fetch_json(url: str):
+              req = urllib.request.Request(url, headers={
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "agy-cli-switcher-watch",
+              })
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  return json.loads(resp.read().decode("utf-8"))
+
+          summary = [
+              "## Colab Upstream Contract Watch",
+              f"- Contract baseline: `{version}` (`{tag}` @ `{commit}`) on `{repo}`",
+          ]
+
+          try:
+              release = fetch_json(f"https://api.github.com/repos/{repo}/releases/latest")
+              latest_tag = release.get("tag_name", "unknown")
+              main_commit = fetch_json(f"https://api.github.com/repos/{repo}/commits/main")
+              latest_sha = main_commit.get("sha", "")[:7]
+              summary.append(f"- Upstream latest release: `{latest_tag}`; `main` HEAD: `{latest_sha}`")
+
+              compare = fetch_json(f"https://api.github.com/repos/{repo}/compare/{commit}...main")
+              ahead_by = compare.get("ahead_by", 0)
+              files = [item.get("filename", "") for item in compare.get("files", [])]
+              watched = [p for p in files if any(k in p for k in ("auth.py", "consumption.py", "client.py", "state.py", "commands/usage.py", "commands/session.py"))]
+
+              summary.append(f"- Upstream commits ahead of `{commit}`: `{ahead_by}`")
+              if latest_tag != tag or watched:
+                  summary.append("- Status: **drift detected** (non-blocking — review diff before updating baseline)")
+                  if watched:
+                      summary.append("- Watched upstream files changed:")
+                      for p in watched:
+                          summary.append(f"  - `{p}`")
+                  print(f"::warning::google-colab-cli drifted from {tag} ({commit}) -> release={latest_tag}, main={latest_sha}")
+              else:
+                  summary.append("- Status: **up to date** with tracked contract files")
+          except Exception as exc:
+              summary.append(f"- Status: could not reach GitHub API ({exc}); skipped")
+              print(f"::warning::Upstream watch check skipped: {exc}")
+
+          out = os.environ.get("GITHUB_STEP_SUMMARY")
+          if out:
+              with open(out, "a", encoding="utf-8") as s:
+                  s.write("\n".join(summary) + "\n")
+          print("\n".join(summary))
+          PY

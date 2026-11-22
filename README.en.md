@@ -13,17 +13,17 @@
   <a href="https://developer.apple.com/macos/"><img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white"></a>
 </p>
 
-**agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
+**agy-cli-switcher** switches Antigravity CLI (`agy`) and Google Colab CLI (`colab`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
 
 Current version **v0.2.2** (see [Changelog](documents/CHANGELOG.md)).
 
 ## What it does
 
-- Switch between `agy` logins, and keep the name, email, and active record
-- Agy Switcher lists the saved accounts and their quota in the menu bar. Click one to switch
-- `agy-cs ls` shows each account's plan, and how much of the Gemini 5-hour, 7-day and Argon quota is left and when it resets
-- `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal
-- `agy-cs switch add` adds an account directly, without the menu. The current login is kept, then `agy` opens
+- Switch between `agy` or `colab` (`agy-cs colab <command>`) logins, and keep the name, email, and active record
+- Agy Switcher lists the saved accounts and their quota in the menu bar. Click one to switch, or use the bottom-bar button to toggle between Antigravity and Colab
+- `agy-cs ls` shows each Antigravity account's plan and Gemini 5-hour, 7-day and Argon quota; `agy-cs colab ls` shows Colab CU balance, hourly burn rate, and active assignments
+- `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal (Colab exits cleanly without spawning a nested shell)
+- `agy-cs switch add` adds an account directly, without the menu. The current login is kept, then `agy` opens (or `colab whoami` runs for Colab remote auth)
 - `agy-cs switch <name>` only switches. It does not start `agy`
 - The current account is whatever login is actually in the keychain. When an `agy` that is still open writes its own login back, the display follows
 - A login in the keychain that has not been saved yet is saved automatically, under the characters before `@`; if another account holds that name, `-2` is added
@@ -97,12 +97,13 @@ Each download has a file of the same name plus `.sha256` on the same page. Put t
 
 Click the icon in the menu bar to open the panel.
 
-- Each row is one saved account: email, plan, and the 5h, 7d and Argon quota. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
-- Click a row to switch to it. This is the same as `agy-cs switch <name>`: it only switches and does not start `agy`
+- Each row is one saved account: Antigravity shows email, plan, and the 5h, 7d and Argon quota; Colab shows email, CU balance, hourly burn rate, and active assignments. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
+- The button to the right of "Add account…" switches the active panel provider between **Antigravity** and **Colab**, persisted in `~/.agy-cs/provider`
+- Click a row to switch to it. This is the same as `agy-cs switch <name>` (or `agy-cs colab switch <name>`): it only switches and does not start `agy`
 - Press a row and drag it up or down to change the order. This is the same as `agy-cs move <name> <position>`
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
-- "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
+- "Add account…" opens a terminal that runs `agy-cs switch add` or `agy-cs colab switch add`, where you sign in. Open the panel again afterwards to see the new account
 - The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
 - Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results and the email of the current login in the keychain. It makes no request
@@ -148,9 +149,11 @@ Click the icon in the menu bar to open the panel.
 
 | Location | Contents |
 |---|---|
-| `~/.agy-cs/` | Names, emails, the active record, the order, the language, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", is here too; it holds one line that starts `agy-cs switch add` |
+| `~/.agy-cs/` | Antigravity names, emails, the active record, the order, the language, `provider`, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", lives here too |
+| `~/.agy-cs/colab/` | Colab non-secret account records, order, CU usage cache, and locks |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
-| One generic password in the login keychain, service `gemini`, account `antigravity` | The current login. A switch replaces only this item |
+| `~/.config/colab-cli/accounts/` | Colab saved login copies and per-account `sessions.json` / `sessions.attached.json` backups (`history/` and `colab.log` stay untouched) |
+| Generic password items in the login keychain | Antigravity uses service `gemini`, account `antigravity`; Colab uses service `google-colab-cli`, account `oauth_token`. A switch replaces only the matching item |
 
 Directories are mode `700`. Files are mode `600`.
 
