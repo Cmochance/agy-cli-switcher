@@ -141,19 +141,32 @@ struct PanelView: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 8) {
-            Button {
-                model.refresh()
-            } label: {
-                Label(model.text(.panelRefresh), systemImage: "arrow.clockwise")
+        HStack(spacing: 6) {
+            Group {
+                Button {
+                    model.refresh()
+                } label: {
+                    Label(model.text(.panelRefresh), systemImage: "arrow.clockwise")
+                }
+                .disabled(model.state.rows.isEmpty)
+                Button {
+                    model.addAccount()
+                } label: {
+                    Label(model.text(.panelAdd), systemImage: "plus")
+                }
+                Button {
+                    model.toggleProvider()
+                } label: {
+                    Label(
+                        model.provider.displayName,
+                        systemImage: model.provider == .antigravity ? "sparkles" : "terminal"
+                    )
+                }
             }
-            .disabled(model.state.rows.isEmpty)
-            Button {
-                model.addAccount()
-            } label: {
-                Label(model.text(.panelAdd), systemImage: "plus")
-            }
-            Spacer()
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 4)
             Menu {
                 Button(model.text(.panelSave)) {
                     model.ask(.save)
@@ -223,24 +236,54 @@ private struct AccountRowView: View {
                             }
                             Spacer(minLength: 4)
                             if let usage = row.usage {
-                                Text(usage.plan)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 1)
-                                    .background(Capsule().fill(Color.primary.opacity(0.1)))
+                                if usage.isColab {
+                                    if usage.colabActiveCount > 0 {
+                                        Text(model.text(.colabActiveBadge, String(usage.colabActiveCount)))
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 1)
+                                            .foregroundStyle(.green)
+                                            .background(Capsule().fill(Color.green.opacity(0.15)))
+                                    }
+                                    Text(usage.colabBalance ?? "—")
+                                        .font(.caption.monospacedDigit())
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.primary.opacity(0.1)))
+                                } else {
+                                    Text(usage.plan)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.primary.opacity(0.1)))
+                                }
                             }
                         }
                         if let usage = row.usage {
-                            HStack(spacing: 12) {
-                                Text("5h \(usage.fiveHour)")
-                                Text("7d \(usage.weekly)")
-                                Text("Argon \(usage.argon)")
+                            if usage.isColab {
+                                HStack(spacing: 12) {
+                                    Text(model.text(.colabRowBalance, usage.colabBalance ?? "—"))
+                                    Text(model.text(.colabRowRate, usage.colabRate ?? "—"))
+                                    Text(model.text(.colabRowSessions, String(usage.colabActiveCount)))
+                                }
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                            } else {
+                                HStack(spacing: 12) {
+                                    Text("5h \(usage.fiveHour)")
+                                    Text("7d \(usage.weekly)")
+                                    Text("Argon \(usage.argon)")
+                                }
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                             }
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
                         }
                     }
                 }

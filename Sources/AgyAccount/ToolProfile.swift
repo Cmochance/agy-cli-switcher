@@ -1,7 +1,10 @@
 import Foundation
 
 struct ToolLocations {
+    var provider: AccountProvider
+    var globalRoot: URL
     var root: URL
+    var providerFile: URL
     var accountsDirectory: URL
     var languageFile: URL
     var activeFile: URL
@@ -16,21 +19,31 @@ struct ToolLocations {
     var stateLockFile: URL
     var dismissedFile: URL
 
-    init(home: URL) {
-        root = home.appendingPathComponent(".agy-cs", isDirectory: true)
-        addCommandFile = root.appendingPathComponent("add-account.command")
-        orderFile = root.appendingPathComponent("order")
-        appLockFile = root.appendingPathComponent("app.lock")
-        stateLockFile = root.appendingPathComponent("state.lock")
-        dismissedFile = root.appendingPathComponent("not-saved")
-        accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
-        usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
-        clientFile = root.appendingPathComponent("agy-client.json")
-        usageStatusFile = root.appendingPathComponent("usage-status.json")
-        usageLockFile = root.appendingPathComponent("usage.lock")
-        languageFile = root.appendingPathComponent("language")
-        activeFile = root.appendingPathComponent("active")
-        initializedFile = root.appendingPathComponent("initialized")
+    init(home: URL, provider: AccountProvider = .antigravity) {
+        self.provider = provider
+        let global = home.appendingPathComponent(".agy-cs", isDirectory: true)
+        globalRoot = global
+        providerFile = global.appendingPathComponent("provider")
+        languageFile = global.appendingPathComponent("language")
+        addCommandFile = global.appendingPathComponent("add-account.command")
+        appLockFile = global.appendingPathComponent("app.lock")
+
+        let scoped = provider == .antigravity
+            ? global
+            : global.appendingPathComponent(provider.rawValue, isDirectory: true)
+        root = scoped
+        orderFile = scoped.appendingPathComponent("order")
+        stateLockFile = scoped.appendingPathComponent("state.lock")
+        dismissedFile = scoped.appendingPathComponent("not-saved")
+        accountsDirectory = scoped.appendingPathComponent("accounts", isDirectory: true)
+        usageDirectory = scoped.appendingPathComponent("usage", isDirectory: true)
+        clientFile = global.appendingPathComponent(
+            provider == .antigravity ? "agy-client.json" : "colab-client.json"
+        )
+        usageStatusFile = scoped.appendingPathComponent("usage-status.json")
+        usageLockFile = scoped.appendingPathComponent("usage.lock")
+        activeFile = scoped.appendingPathComponent("active")
+        initializedFile = scoped.appendingPathComponent("initialized")
     }
 
     func profileURL(_ name: String) -> URL {
@@ -46,8 +59,22 @@ struct ToolProfile {
     var home: URL
     var now: () -> String
     var preferredLanguages: [String]
+    var provider: AccountProvider = .antigravity
     private let manager = FileManager.default
-    private var locations: ToolLocations { ToolLocations(home: home) }
+    private var locations: ToolLocations { ToolLocations(home: home, provider: provider) }
+
+    func selectedProvider() -> AccountProvider {
+        guard let text = try? readText(locations.providerFile) else {
+            return .antigravity
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AccountProvider(rawValue: trimmed) ?? .antigravity
+    }
+
+    func setSelectedProvider(_ selected: AccountProvider) throws {
+        try ensureGlobalRoot()
+        try AtomicFile.write(locations.providerFile, selected.rawValue + "\n")
+    }
 
     func prepare() throws {
         try ensureRoot()
@@ -170,6 +197,7 @@ struct ToolProfile {
     // 同一时间只让一个进程查询并写额度记录。进程结束时锁自动释放。
     // 锁被占着时最多等 wait 秒，等不到返回 nil。waited 表示等过别的进程。
     func lockUsage(wait: TimeInterval) -> (descriptor: Int32, waited: Bool)? {
+        try? ensureRoot()
         let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         let deadline = DispatchTime.now() + wait
         var waited = false
@@ -288,13 +316,19 @@ struct ToolProfile {
         return AppLanguage.parse(text)
     }
 
+    private func ensureGlobalRoot() throws {
+        try manager.createDirectory(at: locations.globalRoot, withIntermediateDirectories: true)
+        try setMode(locations.globalRoot, 0o700)
+    }
+
     private func ensureRoot() throws {
+        try ensureGlobalRoot()
         try manager.createDirectory(at: locations.root, withIntermediateDirectories: true)
         try setMode(locations.root, 0o700)
     }
 
     private func importPublicRecords() throws -> Set<String> {
-        let source = AccountLocations(home: home).accountsDirectory
+        let source = AccountLocations(home: home, provider: provider).accountsDirectory
         guard let urls = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) else {
             return []
         }
@@ -316,7 +350,7 @@ struct ToolProfile {
     }
 
     private func geminiActiveName() -> String {
-        let url = AccountLocations(home: home).activeURL
+        let url = AccountLocations(home: home, provider: provider).activeURL
         guard let text = try? readText(url) else {
             return ""
         }

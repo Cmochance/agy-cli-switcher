@@ -2,13 +2,32 @@ import Darwin
 import Foundation
 
 struct AccountLocations {
+    var provider: AccountProvider
     var accountsDirectory: URL
     var quotaCache: URL
+    var colabSessionsFile: URL?
+    var colabAttachedSessionsFile: URL?
+    var colabSettingsFile: URL?
 
-    init(home: URL) {
-        let base = home
-            .appendingPathComponent(".gemini", isDirectory: true)
-            .appendingPathComponent("antigravity-cli", isDirectory: true)
+    init(home: URL, provider: AccountProvider = .antigravity) {
+        self.provider = provider
+        let base: URL
+        switch provider {
+        case .antigravity:
+            base = home
+                .appendingPathComponent(".gemini", isDirectory: true)
+                .appendingPathComponent("antigravity-cli", isDirectory: true)
+            colabSessionsFile = nil
+            colabAttachedSessionsFile = nil
+            colabSettingsFile = nil
+        case .colab:
+            base = home
+                .appendingPathComponent(".config", isDirectory: true)
+                .appendingPathComponent("colab-cli", isDirectory: true)
+            colabSessionsFile = base.appendingPathComponent("sessions.json")
+            colabAttachedSessionsFile = base.appendingPathComponent("sessions.attached.json")
+            colabSettingsFile = base.appendingPathComponent("settings.json")
+        }
         accountsDirectory = base.appendingPathComponent("accounts", isDirectory: true)
         quotaCache = base.appendingPathComponent(".quota_cache.json")
     }
@@ -19,6 +38,14 @@ struct AccountLocations {
 
     func metaURL(_ name: String) -> URL {
         accountsDirectory.appendingPathComponent("\(name).meta.json")
+    }
+
+    func sessionsBackupURL(_ name: String) -> URL {
+        accountsDirectory.appendingPathComponent("\(name).sessions.json")
+    }
+
+    func attachedSessionsBackupURL(_ name: String) -> URL {
+        accountsDirectory.appendingPathComponent("\(name).sessions.attached.json")
     }
 
     var activeURL: URL {
@@ -34,6 +61,7 @@ struct AccountLocations {
 struct AccountFiles {
     var locations: AccountLocations
     var now: () -> String
+    var codec: any LoginDecoding = AntigravityLoginCodec()
     private let manager = FileManager.default
 
     func savedNames() -> [String] {
@@ -64,7 +92,36 @@ struct AccountFiles {
             throw AccountFailure(.accountMissing, name, existing.joined(separator: ", "))
         }
         let blob = stripNewlines(try readText(url))
-        return (blob, try decodeLogin(blob, source: .saved))
+        let sidecarEmail = readSidecarEmail(locations.metaURL(name))
+        return (blob, try codec.decodeSaved(blob, sidecarEmail: sidecarEmail))
+    }
+
+    func emailMatchingRefreshToken(_ refreshToken: String) -> String? {
+        guard !refreshToken.isEmpty else {
+            return nil
+        }
+        for name in savedNames() {
+            guard let blob = try? stripNewlines(readText(locations.tokenURL(name))),
+                  codec.refreshToken(in: blob) == refreshToken,
+                  let email = readSidecarEmail(locations.metaURL(name)),
+                  email.contains("@")
+            else {
+                continue
+            }
+            return email
+        }
+        return nil
+    }
+
+    private func readSidecarEmail(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let email = object["email"] as? String,
+              email.contains("@")
+        else {
+            return nil
+        }
+        return email
     }
 
     func writeRollback(_ blob: String) throws {

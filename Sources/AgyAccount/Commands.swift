@@ -28,9 +28,20 @@ struct AccountCommands {
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
     var stateWait: TimeInterval = 5
+    var provider: AccountProvider = .antigravity
+    var codec: any LoginDecoding = AntigravityLoginCodec()
+    var stateSync: any ProviderStateSyncing
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
+
+    private func spoken(_ key: TextKey, _ arguments: String...) -> String {
+        spoken(key, argumentList: arguments)
+    }
+
+    private func spoken(_ key: TextKey, argumentList: [String]) -> String {
+        text.line(providerTextKey(key, provider: provider), argumentList: argumentList)
+    }
 
     func initializeIfNeeded() throws {
         if profile.isInitialized() {
@@ -41,14 +52,14 @@ struct AccountCommands {
             return
         }
         let blob: String
+        let meta: LoginMeta
         do {
-            blob = try readKeychain()
+            (blob, meta) = try readKeychainLogin()
         } catch let error as AccountFailure where error.key == .keychainMissing {
             try profile.markInitialized()
-            stderr(text.line(.initializedNoLogin))
+            stderr(spoken(.initializedNoLogin))
             return
         }
-        let meta = try decodeLogin(blob, source: .keychain)
         let name: String
         do {
             name = try defaultAccountName(email: meta.email)
@@ -145,7 +156,7 @@ struct AccountCommands {
                 continue
             }
             try locked { try switchTo(others[index]) }
-            try launchAgy()
+            try launchToolIfNeeded()
             return
         }
     }
@@ -160,8 +171,9 @@ struct AccountCommands {
     // 从移开钥匙串那一项到新登录存好（或者原来的登录写回去）一直拿着锁：这段时间钥匙串是空的或者是还没存的新登录，
     // 别的进程不能切换，面板的自动保存也不能抢在前面把新登录存掉。重新启动 agy 之前放开。
     private func addAccount() throws {
-        let (snapshot, name, observed): (ObservedLogin?, String, ObservedLogin) = try locked {
+        let (snapshot, previousNames, name, observed): (ObservedLogin?, [String], String, ObservedLogin) = try locked {
             let snapshot = try captureLogin()
+            var previousNames: [String] = []
             if let snapshot {
                 try keychain.checkWritable(snapshot.blob)
                 // 用户带着 --force 删掉过的登录不存回账号名单，但登录期间要留一份在 rollbackURL：
@@ -170,11 +182,12 @@ struct AccountCommands {
                     try files.writeRollback(snapshot.blob)
                 } else {
                     try keepSnapshot(snapshot)
+                    previousNames = profile.slots(forEmail: snapshot.meta.email)
                 }
             }
             try keychain.deleteBlob()
             do {
-                stdout(text.line(.loginOpening))
+                stdout(spoken(.loginOpening))
                 let outcome = try launcher.runUntilLoggedIn {
                     try self.observeLogin()
                 }
@@ -184,7 +197,7 @@ struct AccountCommands {
                 let name = try availableDefaultName(login.meta.email)
                 try storeLogin(name: name, blob: login.blob, meta: login.meta)
                 files.removeRollback()
-                return (snapshot, name, login)
+                return (snapshot, previousNames, name, login)
             } catch {
                 if let snapshot {
                     try keychain.writeBlob(snapshot.blob)
@@ -196,15 +209,18 @@ struct AccountCommands {
                 throw error
             }
         }
-        if let snapshot, snapshot.meta.email != observed.meta.email {
-            if let quota = files.clearQuotaCache() {
-                stderr(text.line(.quotaFailed, quota.path, quota.detail))
-            }
+        if let snapshot {
+            let notices = stateSync.afterSwitch(
+                from: previousNames,
+                to: name,
+                sameEmail: snapshot.meta.email == observed.meta.email
+            )
+            emitProviderNotices(notices)
         }
         stdout(text.line(.saved, name, observed.meta.email))
-        reportOtherAgy()
+        reportOtherAgyIfNeeded()
         refresher.startDetached()
-        try launchAgy()
+        try launchToolIfNeeded()
     }
 
     // 联网查询所有已保存账号的套餐和额度。只用保存的副本，不读钥匙串。
@@ -341,6 +357,7 @@ struct AccountCommands {
         }
         try profile.deleteRecord(source)
         profile.moveUsage(from: source, to: target)
+        stateSync.renameAuxiliary(from: source, to: target)
         try? profile.setOrder(sequence)
         if profileWasActive {
             try profile.setActive(target)
@@ -401,13 +418,18 @@ struct AccountCommands {
                     close(descriptor)
                 }
             }
-            let blob = try keychain.readBlob()
-            login = ObservedLogin(blob: blob, meta: try decodeLogin(blob, source: .keychain))
+            let read = try readKeychainLogin()
+            login = ObservedLogin(blob: read.blob, meta: read.meta)
         } catch let error as AccountFailure where error.key == .keychainMissing {
             result.missing = true
             if announcing {
-                result.notices.append(text.line(.currentNoLogin))
+                result.notices.append(spoken(.currentNoLogin))
             }
+            return result
+        } catch let error as AccountFailure where error.key == .colabMissingEmail || error.key == .colabEmailFailed {
+            result.name = profile.activeName()
+            result.email = profileEmail(result.name)
+            result.notices.append(spoken(error.key, argumentList: error.arguments))
             return result
         } catch {
             result.name = profile.activeName()
@@ -494,7 +516,7 @@ struct AccountCommands {
         do {
             _ = try keychain.readBlob()
         } catch let error as AccountFailure where error.key == .keychainMissing {
-            guard (try? decodeLogin(blob, source: .saved)) != nil, (try? keychain.writeBlob(blob)) != nil else {
+            guard codec.canRecover(blob), (try? keychain.writeBlob(blob)) != nil else {
                 return
             }
         } catch {
@@ -533,7 +555,7 @@ struct AccountCommands {
     private func list() throws {
         let accounts = try listing()
         if accounts.isEmpty {
-            stdout(text.line(.noSavedAccounts))
+            stdout(spoken(.noSavedAccounts))
             return
         }
         let rows = accounts.map { account in
@@ -546,8 +568,7 @@ struct AccountCommands {
     // expecting 是面板上这个名字下面显示的邮箱：带着它时，--force 只替换这个邮箱存的那一份。
     private func save(_ name: String, force: Bool, expecting: String?) throws {
         let checked = try checkNewName(name)
-        let blob = try readKeychain()
-        let meta = try decodeLogin(blob, source: .keychain)
+        let (blob, meta) = try readKeychainLogin()
         if !force || expecting != nil {
             let replaceable = force ? [expecting].compactMap { $0 } : []
             do {
@@ -567,8 +588,7 @@ struct AccountCommands {
     private func switchTo(_ name: String) throws {
         let checked = try checkName(name)
         let target = try files.readSaved(checked)
-        let currentBlob = try readKeychain()
-        let current = try decodeLogin(currentBlob, source: .keychain)
+        let (currentBlob, current) = try readKeychainLogin()
         if current.email == target.meta.email {
             let updated = try persistCurrentRefresh(blob: currentBlob, meta: current)
             try files.setActive(checked)
@@ -579,8 +599,9 @@ struct AccountCommands {
             }
             return
         }
+        let previousNames = profile.slots(forEmail: current.email)
         // 当前登录还没保存过就先存下来再切走。用户带着 --force 删掉的那一个不再存。
-        if profile.slots(forEmail: current.email).isEmpty, profile.dismissedEmail() != current.email {
+        if previousNames.isEmpty, profile.dismissedEmail() != current.email {
             do {
                 try saveUnsaved(ObservedLogin(blob: currentBlob, meta: current))
             } catch {
@@ -589,17 +610,18 @@ struct AccountCommands {
         }
         let updated = try persistCurrentRefresh(blob: currentBlob, meta: current)
         try keychain.writeBlob(target.blob)
-        if let quota = files.clearQuotaCache() {
-            stderr(text.line(.quotaFailed, quota.path, quota.detail))
-        }
         try files.setActive(checked)
         try profile.setActive(checked)
+        let notices = stateSync.afterSwitch(from: previousNames, to: checked, sameEmail: false)
+        emitProviderNotices(notices)
         stdout(text.line(.switched, checked, target.meta.email))
         if !updated.isEmpty {
             stdout(text.line(.refreshedBeforeSwitch, updated.joined(separator: ", ")))
         }
-        reportOtherAgy()
-        stdout(text.line(.reopenAgy))
+        if provider == .antigravity {
+            reportOtherAgy()
+            stdout(text.line(.reopenAgy))
+        }
         refresher.startDetached()
     }
 
@@ -608,7 +630,7 @@ struct AccountCommands {
         guard names.count >= 2 else {
             throw AccountFailure(.needTwoAccounts)
         }
-        let current = try decodeLogin(try readKeychain(), source: .keychain)
+        let (_, current) = try readKeychainLogin()
         let matched = profile.slots(forEmail: current.email)
         guard !matched.isEmpty else {
             throw AccountFailure(.currentNotInSaved, current.email)
@@ -671,6 +693,7 @@ struct AccountCommands {
             try files.removeSaved(checked)
         }
         try profile.remove(checked)
+        stateSync.removeAuxiliary(checked)
         stdout(text.line(.removed, checked, meta.email))
         stdout(text.line(.keychainUnchanged))
     }
@@ -707,9 +730,19 @@ struct AccountCommands {
         return (try? profile.read(name).email) ?? ""
     }
 
-    private func launchAgy() throws {
+    private func launchToolIfNeeded() throws {
+        guard launcher.launchesAfterSwitch else {
+            return
+        }
         stdout(text.line(.startingAgy))
         try launcher.startInCurrentTerminal()
+    }
+
+    private func reportOtherAgyIfNeeded() {
+        guard provider == .antigravity else {
+            return
+        }
+        reportOtherAgy()
     }
 
     private func reportOtherAgy() {
@@ -719,10 +752,22 @@ struct AccountCommands {
         }
     }
 
+    private func emitProviderNotices(_ notices: [ProviderNotice]) {
+        for notice in notices {
+            let mapped = providerTextKey(notice.key, provider: provider)
+            let line = text.line(mapped, argumentList: notice.arguments)
+            if mapped == .quotaFailed {
+                stderr(line)
+            } else {
+                stdout(line)
+            }
+        }
+    }
+
     private func captureLogin() throws -> ObservedLogin? {
         do {
-            let blob = try readKeychain()
-            return ObservedLogin(blob: blob, meta: try decodeLogin(blob, source: .keychain))
+            let (blob, meta) = try readKeychainLogin()
+            return ObservedLogin(blob: blob, meta: meta)
         } catch let error as AccountFailure where error.key == .keychainMissing {
             return nil
         }
@@ -735,7 +780,7 @@ struct AccountCommands {
         } catch let error as AccountFailure where error.key == .keychainMissing {
             return nil
         }
-        guard let meta = try? decodeLogin(blob, source: .keychain) else {
+        guard let meta = try? decodeKeychainBlob(blob) else {
             return nil
         }
         return ObservedLogin(blob: blob, meta: meta)
@@ -780,10 +825,19 @@ struct AccountCommands {
         return AccountFailure(.accountMissing, name, existing.joined(separator: ", "))
     }
 
-    private func readKeychain() throws -> String {
+    private func readKeychainLogin() throws -> (blob: String, meta: LoginMeta) {
         let blob = try keychain.readBlob()
-        _ = try decodeLogin(blob, source: .keychain)
-        return blob
+        let meta = try decodeKeychainBlob(blob)
+        return (blob, meta)
+    }
+
+    private func decodeKeychainBlob(_ blob: String) throws -> LoginMeta {
+        try codec.decodeKeychain(blob) { [files, codec] candidateBlob in
+            guard let refreshToken = codec.refreshToken(in: candidateBlob) else {
+                return nil
+            }
+            return files.emailMatchingRefreshToken(refreshToken)
+        }
     }
 
     private func persistCurrentRefresh(blob: String, meta: LoginMeta) throws -> [String] {

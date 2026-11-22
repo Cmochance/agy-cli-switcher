@@ -6,6 +6,12 @@ struct UsageBucket: Equatable {
     var resetTime: String
 }
 
+struct ColabUsageData: Equatable {
+    var balance: Double
+    var rateHourly: Double
+    var activeAssignments: Int
+}
+
 struct UsageSnapshot: Equatable {
     var planID: String
     var planName: String
@@ -14,6 +20,7 @@ struct UsageSnapshot: Equatable {
     var argonLocked: Bool? = nil
     // 这个账号在 Cloud Code 那边的 project。下次查询用它提前发额度请求。
     var project = ""
+    var colab: ColabUsageData? = nil
 }
 
 struct UsagePlan {
@@ -100,6 +107,11 @@ func encodeUsage(_ snapshot: UsageSnapshot, email: String, fetchedAt: String) ->
     if let locked = snapshot.argonLocked {
         object["argon_locked"] = locked
     }
+    if let colab = snapshot.colab {
+        object["colab_balance"] = colab.balance
+        object["colab_rate_hourly"] = colab.rateHourly
+        object["colab_active_assignments"] = colab.activeAssignments
+    }
     let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     return String(decoding: data, as: UTF8.self) + "\n"
 }
@@ -116,12 +128,20 @@ func decodeUsage(_ data: Data, email: String) -> UsageSnapshot? {
         }
         return UsageBucket(id: plain(id), remaining: min(1, max(0, remaining)), resetTime: plain(entry["reset_time"] as? String ?? ""))
     }
+    var colab: ColabUsageData?
+    if let balance = (object["colab_balance"] as? NSNumber)?.doubleValue,
+       let rate = (object["colab_rate_hourly"] as? NSNumber)?.doubleValue,
+       let active = (object["colab_active_assignments"] as? NSNumber)?.intValue
+    {
+        colab = ColabUsageData(balance: balance, rateHourly: rate, activeAssignments: max(0, active))
+    }
     return UsageSnapshot(
         planID: plain(object["plan_id"] as? String ?? ""),
         planName: plain(object["plan_name"] as? String ?? ""),
         buckets: buckets,
         argonLocked: object["argon_locked"] as? Bool,
-        project: plain(object["project"] as? String ?? "")
+        project: plain(object["project"] as? String ?? ""),
+        colab: colab
     )
 }
 
@@ -175,9 +195,39 @@ public struct UsageText: Equatable {
     public var fiveHour: String
     public var weekly: String
     public var argon: String
+    public var colabBalance: String?
+    public var colabRate: String?
+    public var colabActive: String?
+    public var colabActiveCount: Int
+    public var isColab: Bool
+
+    public init(
+        plan: String,
+        fiveHour: String,
+        weekly: String,
+        argon: String,
+        colabBalance: String? = nil,
+        colabRate: String? = nil,
+        colabActive: String? = nil,
+        colabActiveCount: Int = 0,
+        isColab: Bool = false
+    ) {
+        self.plan = plan
+        self.fiveHour = fiveHour
+        self.weekly = weekly
+        self.argon = argon
+        self.colabBalance = colabBalance
+        self.colabRate = colabRate
+        self.colabActive = colabActive
+        self.colabActiveCount = colabActiveCount
+        self.isColab = isColab
+    }
 
     var cells: [String] {
-        [plan, "5h " + fiveHour, "7d " + weekly, "Argon " + argon]
+        if isColab {
+            return [colabBalance ?? "—", colabRate ?? "—", colabActive ?? "—"]
+        }
+        return [plan, "5h " + fiveHour, "7d " + weekly, "Argon " + argon]
     }
 }
 
@@ -188,6 +238,22 @@ func usageText(
     timeZone: TimeZone,
     unpaid: (String) -> String = { $0 }
 ) -> UsageText {
+    if let colab = snapshot.colab {
+        let balance = String(format: "%.2f CU", colab.balance)
+        let rate = String(format: "%.2f/hr", colab.rateHourly)
+        let active = "\(colab.activeAssignments) active"
+        return UsageText(
+            plan: balance,
+            fiveHour: rate,
+            weekly: "\(colab.activeAssignments)",
+            argon: "",
+            colabBalance: balance,
+            colabRate: rate,
+            colabActive: active,
+            colabActiveCount: colab.activeAssignments,
+            isColab: true
+        )
+    }
     let label = planLabel(id: snapshot.planID, name: snapshot.planName)
     func text(_ match: (String) -> Bool) -> String {
         bucketText(snapshot.buckets.first { match($0.id) }, now: now, timeZone: timeZone)

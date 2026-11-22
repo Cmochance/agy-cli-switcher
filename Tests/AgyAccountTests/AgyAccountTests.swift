@@ -1094,6 +1094,7 @@ final class ScriptedTerminal: LineReading {
 
 final class ScriptedLauncher: AgyLaunching {
     var started = 0
+    var launchesAfterSwitch = true
     var supply: (() -> Void)?
     var failure: AccountFailure?
 
@@ -1172,6 +1173,7 @@ final class Fixture {
     let usage = ScriptedUsage()
     let refresher = ScriptedRefresher()
     var stateWait: TimeInterval = 5
+    var colab: ProviderServices?
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -1226,7 +1228,8 @@ final class Fixture {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
-            stateWait: stateWait
+            stateWait: stateWait,
+            colab: colab
         ))
     }
 
@@ -1243,6 +1246,7 @@ final class Fixture {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
+            colab: colab,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }
         )

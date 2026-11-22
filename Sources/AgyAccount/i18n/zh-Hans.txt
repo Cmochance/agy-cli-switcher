@@ -4,6 +4,7 @@
 用法
   agy-cs
   agy-cs <指令>
+  agy-cs colab <指令>
 
 指令
   current                      显示已记录的当前邮箱，不打开钥匙串
@@ -32,6 +33,7 @@ save、switch、next，以及上面这次初始化，才会读取钥匙串。密
 switch、next 和新增账号成功之后，会另起一个后台进程联网查询每个账号的套餐和额度，记在 ~/.agy-cs/usage/。切换不等它，也不受它影响。
 list 只显示这些记录，不联网；过了重置时间的额度按 100% 显示。refresh quota 立刻查一次，不读钥匙串。
 不带名字的 switch 和 switch add 才会在当前终端启动 agy。新增账号会先保住当前登录，再打开 agy；没有换成新邮箱就退出时，会恢复原来的登录。
+加上 colab 前缀可切换 google-colab-cli 账号（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密钥副本放在 ~/.config/colab-cli/accounts/，非密钥记录与额度缓存放在 ~/.agy-cs/colab/。
 
 [operationFailed]
 没能完成账号操作。
@@ -360,3 +362,63 @@ move 需要一个名字和一个位置。例如 agy-cs move work 1 把 work 移�
 
 [moved]
 已把 %1 移到第 %2 位
+
+[colabNotFound]
+没有找到 colab CLI 或对应的 Python keyring 模块。请先安装 google-colab-cli 并确认 colab 在 PATH 中。
+
+[colabLoginFormat]
+钥匙串或副本中的 Colab 登录不是有效的 OAuth JSON，没有使用它。
+
+[colabKeychainMissing]
+钥匙串里没有 service 为 google-colab-cli、account 为 oauth_token 的 Colab 登录。
+
+[colabKeychainDenied]
+钥匙串不允许读取 Colab 登录。
+
+[colabMissingEmail]
+Google 没有返回这个 Colab 登录的邮箱（授权范围可能未包含邮箱），请先保存邮箱或用完整授权重新登录。
+
+[colabEmailFailed]
+无法从 Google 查询当前 Colab 登录对应的邮箱，请检查网络或重新登录。
+
+[colabActiveSessions]
+注意: 原账号仍有运行中的 Colab 远端会话（云端继续运行）；本地会话状态已按账号隔离。
+
+[colabNoSavedAccounts]
+还没有已保存的 Colab 账号。先在 colab 里登录，再执行 agy-cs colab save <名字>。
+
+[colabNoCurrentAccount]
+没有记录中的当前 Colab 账号。先在 colab 里登录，再执行 agy-cs colab save <名字>。
+
+[colabCurrentNoLogin]
+现在没有 Colab 登录。用 colab 登录后，这里会自动存下来。
+
+[colabInitializedNoLogin]
+当前钥匙串里没有 Colab 登录，这次没有保存账号。用 colab 登录后再执行 agy-cs colab save <名字>。
+
+[colabLoginOpening]
+接下来会在这个终端里运行 colab whoami，请按提示完成远程授权登录；完成后会自动保存并回到提示符。
+
+[colabLaunchFailed]
+没能在这个终端里启动 colab (%1)。
+
+[colabPanelNoAccounts]
+还没有保存的 Colab 账号，点“新增账号”去登录。
+
+[colabPanelRefreshing]
+正在查询 Colab 算力与会话…
+
+[colabPanelRefreshed]
+Colab 算力与会话已更新。
+
+[colabRowBalance]
+余额 %1
+
+[colabRowRate]
+消耗 %1
+
+[colabRowSessions]
+会话 %1
+
+[colabActiveBadge]
+%1 个活跃

@@ -1,6 +1,14 @@
 import Darwin
 import Foundation
 
+struct ProviderServices {
+    var keychain: any KeychainStoring
+    var codec: any LoginDecoding
+    var launcher: any AgyLaunching
+    var usage: any UsageFetching
+    var refresher: any QuotaRefreshStarting
+}
+
 // 一条指令要用到的外部东西。命令行和菜单栏面板各自配一份，指令本身是同一套。
 struct CommandServices {
     var home: URL
@@ -13,24 +21,77 @@ struct CommandServices {
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
     var stateWait: TimeInterval = 5
+    var provider: AccountProvider = .antigravity
+    var colab: ProviderServices? = nil
 
-    static func system(terminal: any LineReading) -> CommandServices {
+    static func system(terminal: any LineReading, provider: AccountProvider = .antigravity) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return CommandServices(
-            home: home,
-            keychain: LoginKeychainStore(),
-            processes: SystemProcessList(),
-            now: AccountClock.utcTimestamp,
-            preferredLanguages: Locale.preferredLanguages,
-            terminal: terminal,
-            launcher: InteractiveAgy(),
-            usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
-            refresher: SelfSpawner()
-        )
+        switch provider {
+        case .antigravity:
+            return CommandServices(
+                home: home,
+                keychain: LoginKeychainStore(),
+                processes: SystemProcessList(),
+                now: AccountClock.utcTimestamp,
+                preferredLanguages: Locale.preferredLanguages,
+                terminal: terminal,
+                launcher: InteractiveAgy(),
+                usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
+                refresher: SelfSpawner(),
+                provider: .antigravity
+            )
+        case .colab:
+            return CommandServices(
+                home: home,
+                keychain: ColabKeychainStore(cacheURL: ToolLocations(home: home, provider: .colab).clientFile),
+                processes: SystemProcessList(),
+                now: AccountClock.utcTimestamp,
+                preferredLanguages: Locale.preferredLanguages,
+                terminal: terminal,
+                launcher: InteractiveColab(),
+                usage: ColabUsageFetcher(),
+                refresher: SelfSpawner(prefix: ["colab"]),
+                provider: .colab
+            )
+        }
     }
 
     var profile: ToolProfile {
-        ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages)
+        ToolProfile(home: home, now: now, preferredLanguages: preferredLanguages, provider: provider)
+    }
+
+    func forProvider(_ target: AccountProvider) -> CommandServices {
+        if target == provider {
+            return self
+        }
+        switch target {
+        case .antigravity:
+            var copy = self
+            copy.provider = .antigravity
+            return copy
+        case .colab:
+            let overrides = colab ?? ProviderServices(
+                keychain: ColabKeychainStore(cacheURL: ToolLocations(home: home, provider: .colab).clientFile),
+                codec: ColabLoginCodec(),
+                launcher: InteractiveColab(),
+                usage: ColabUsageFetcher(),
+                refresher: SelfSpawner(prefix: ["colab"])
+            )
+            return CommandServices(
+                home: home,
+                keychain: overrides.keychain,
+                processes: processes,
+                now: now,
+                preferredLanguages: preferredLanguages,
+                terminal: terminal,
+                launcher: overrides.launcher,
+                usage: overrides.usage,
+                refresher: overrides.refresher,
+                stateWait: stateWait,
+                provider: .colab,
+                colab: overrides
+            )
+        }
     }
 
     func commands(
@@ -38,8 +99,16 @@ struct CommandServices {
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> AccountCommands {
-        AccountCommands(
-            files: AccountFiles(locations: AccountLocations(home: home), now: now),
+        let locations = AccountLocations(home: home, provider: provider)
+        let activeCodec: any LoginDecoding = provider == .colab
+            ? (colab?.codec ?? ColabLoginCodec())
+            : AntigravityLoginCodec()
+        let files = AccountFiles(locations: locations, now: now, codec: activeCodec)
+        let sync: any ProviderStateSyncing = provider == .colab
+            ? ColabStateSync(locations: locations)
+            : AntigravityStateSync(files: files)
+        return AccountCommands(
+            files: files,
             profile: profile,
             keychain: keychain,
             processes: processes,
@@ -48,6 +117,9 @@ struct CommandServices {
             usage: usage,
             refresher: refresher,
             stateWait: stateWait,
+            provider: provider,
+            codec: activeCodec,
+            stateSync: sync,
             text: text,
             stdout: stdout,
             stderr: stderr
@@ -78,6 +150,7 @@ public enum AgyAccountCLI {
         launcher: any AgyLaunching,
         usage: any UsageFetching,
         refresher: any QuotaRefreshStarting,
+        colab: ProviderServices? = nil,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
@@ -92,7 +165,8 @@ public enum AgyAccountCLI {
                 terminal: terminal,
                 launcher: launcher,
                 usage: usage,
-                refresher: refresher
+                refresher: refresher,
+                colab: colab
             ),
             stdout: stdout,
             stderr: stderr
@@ -107,26 +181,40 @@ public enum AgyAccountCLI {
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> (code: Int32, failure: TextKey?, details: [String]) {
-        let profile = services.profile
+        let route = routeProvider(arguments, defaultProvider: services.provider)
+        let scoped = services.forProvider(route.provider)
+        let profile = scoped.profile
         let text = Localizer(language: profile.resolvedLanguage())
-        let commands = services.commands(text: text, stdout: stdout, stderr: stderr)
+        let commands = scoped.commands(text: text, stdout: stdout, stderr: stderr)
         do {
             try profile.prepare()
             try commands.initializeIfNeeded()
-            try commands.run(try parse(arguments))
+            try commands.run(try parse(route.arguments))
             return (0, nil, [])
         } catch let error as AccountFailure {
-            stderr(text.line(error.key, argumentList: error.arguments))
+            let key = providerTextKey(error.key, provider: scoped.provider)
+            stderr(text.line(key, argumentList: error.arguments))
             return (1, error.key, error.arguments)
         } catch let error as UsageFailure {
-            let spoken = usageLanguage(commandArguments: arguments, profile: profile, fallback: text)
-            stderr(spoken.line(error.key, argumentList: error.arguments))
+            let spoken = usageLanguage(commandArguments: route.arguments, profile: profile, fallback: text)
+            let key = providerTextKey(error.key, provider: scoped.provider)
+            stderr(spoken.line(key, argumentList: error.arguments))
             return (2, error.key, error.arguments)
         } catch {
             stderr(text.line(.operationFailed))
             return (1, .operationFailed, [])
         }
     }
+}
+
+private func routeProvider(
+    _ arguments: [String],
+    defaultProvider: AccountProvider
+) -> (provider: AccountProvider, arguments: [String]) {
+    if arguments.first == AccountProvider.colab.rawValue {
+        return (.colab, Array(arguments.dropFirst()))
+    }
+    return (defaultProvider, arguments)
 }
 
 func parse(_ arguments: [String]) throws -> AccountCommandKind {

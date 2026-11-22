@@ -12,9 +12,10 @@ protocol QuotaRefreshStarting {
 // 这样菜单里随后换成 agy 的那个进程下面不会留下僵尸进程。
 struct SelfSpawner: QuotaRefreshStarting {
     var executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
+    var prefix: [String] = []
 
     func startDetached() {
-        guard let pid = spawn(["refresh", "quota", "--detach"], ownSession: false) else {
+        guard let pid = spawn(prefix + ["refresh", "quota", "--detach"], ownSession: false) else {
             return
         }
         var status: Int32 = 0
@@ -22,7 +23,7 @@ struct SelfSpawner: QuotaRefreshStarting {
     }
 
     func spawnWorker() {
-        _ = spawn(["refresh", "quota"], ownSession: true)
+        _ = spawn(prefix + ["refresh", "quota"], ownSession: true)
     }
 
     private func spawn(_ arguments: [String], ownSession: Bool) -> pid_t? {

@@ -174,6 +174,26 @@ public enum TextKey: String, CaseIterable {
     case moveNeedsNameAndPosition
     case moveBadPosition
     case moved
+    case colabNotFound
+    case colabLoginFormat
+    case colabKeychainMissing
+    case colabKeychainDenied
+    case colabMissingEmail
+    case colabEmailFailed
+    case colabActiveSessions
+    case colabNoSavedAccounts
+    case colabNoCurrentAccount
+    case colabCurrentNoLogin
+    case colabInitializedNoLogin
+    case colabLoginOpening
+    case colabLaunchFailed
+    case colabPanelNoAccounts
+    case colabPanelRefreshing
+    case colabPanelRefreshed
+    case colabRowBalance
+    case colabRowRate
+    case colabRowSessions
+    case colabActiveBadge
 }
 
 struct AccountFailure: Error, Equatable {

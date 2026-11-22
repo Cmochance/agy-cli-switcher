@@ -6,6 +6,7 @@ struct HTTPRequest {
     var headers: [String: String]
     var body: Data
     var timeout: TimeInterval = 6
+    var method: String = "POST"
 }
 
 struct HTTPResponse {
@@ -37,8 +38,10 @@ struct URLSessionPoster: HTTPPosting {
     func post(_ request: HTTPRequest) -> HTTPResponse? {
         let timeout = request.timeout
         var call = URLRequest(url: request.url, timeoutInterval: timeout)
-        call.httpMethod = "POST"
-        call.httpBody = request.body
+        call.httpMethod = request.method
+        if request.method != "GET" || !request.body.isEmpty {
+            call.httpBody = request.body
+        }
         for (field, value) in request.headers {
             call.setValue(value, forHTTPHeaderField: field)
         }

@@ -23,6 +23,7 @@ enum PanelPrompt: Equatable {
 // 面板的状态。每个动作在后台队列里按顺序执行，同一时间只有一个；结果回到主线程再显示。
 @MainActor
 final class PanelModel: ObservableObject {
+    @Published private(set) var provider: AccountProvider
     @Published private(set) var state: BoardState
     @Published private(set) var messages: [String] = []
     @Published private(set) var failed = false
@@ -61,7 +62,9 @@ final class PanelModel: ObservableObject {
         self.rereadEvery = rereadEvery
         self.shown = shown
         self.open = open
-        state = board.load()
+        let initial = board.selectedProvider()
+        self.provider = initial
+        state = board.load(provider: initial)
     }
 
     var lines: [String] {
@@ -82,7 +85,30 @@ final class PanelModel: ObservableObject {
     }
 
     func text(_ key: TextKey, _ arguments: String...) -> String {
-        state.text.line(key, argumentList: arguments)
+        let mapped = providerTextKey(key, provider: state.provider)
+        return state.text.line(mapped, argumentList: arguments)
+    }
+
+    func toggleProvider() {
+        guard busy == nil else {
+            return
+        }
+        let next = provider.next
+        provider = next
+        prompt = nil
+        draft = ""
+        messages = []
+        failed = false
+        busy = text(.panelWorking)
+        let board = board
+        work.async {
+            try? board.setSelectedProvider(next)
+            let fresh = board.load(provider: next)
+            DispatchQueue.main.async {
+                self.busy = nil
+                self.state = fresh
+            }
+        }
     }
 
     // 名字是给命令行选账号用的，面板上只显示邮箱。同一个邮箱存了几个名字时才带上名字，不然这几行分不出来。
@@ -132,11 +158,13 @@ final class PanelModel: ObservableObject {
             return
         }
         prompt = nil
+        draft = ""
         busy = text(.panelWorking)
         let board = board
         let executable = executable
+        let currentProvider = provider
         work.async {
-            let script = try? board.writeAddAccountCommand(executable: executable)
+            let script = try? board.writeAddAccountCommand(executable: executable, provider: currentProvider)
             DispatchQueue.main.async {
                 let opened = script.map(self.open) ?? false
                 self.busy = nil
@@ -144,7 +172,7 @@ final class PanelModel: ObservableObject {
                 self.messages = [
                     opened
                         ? self.text(.panelAddOpened)
-                        : self.text(.panelAddFailed, board.addAccountCommandLine(executable: executable)),
+                        : self.text(.panelAddFailed, board.addAccountCommandLine(executable: executable, provider: currentProvider)),
                 ]
             }
         }
@@ -226,9 +254,10 @@ final class PanelModel: ObservableObject {
         draft = ""
         busy = label
         let board = board
+        let currentProvider = provider
         work.async {
-            let outcome = board.perform(arguments)
-            let fresh = board.load()
+            let outcome = board.perform(currentProvider.cliPrefix + arguments)
+            let fresh = board.load(provider: currentProvider)
             DispatchQueue.main.async {
                 self.busy = nil
                 self.state = fresh
@@ -249,10 +278,11 @@ final class PanelModel: ObservableObject {
             return
         }
         let board = board
+        let currentProvider = provider
         work.async {
-            let fresh = board.load()
+            let fresh = board.load(provider: currentProvider)
             DispatchQueue.main.async {
-                guard self.busy == nil, self.differs(fresh) else {
+                guard self.busy == nil, self.provider == currentProvider, self.differs(fresh) else {
                     return
                 }
                 self.state = fresh
@@ -262,7 +292,7 @@ final class PanelModel: ObservableObject {
 
     private func differs(_ fresh: BoardState) -> Bool {
         fresh.rows != state.rows || fresh.notices != state.notices || fresh.failed != state.failed
-            || fresh.language != state.language
+            || fresh.language != state.language || fresh.provider != state.provider
     }
 
     private func tick() {

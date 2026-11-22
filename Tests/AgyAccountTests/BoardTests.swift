@@ -1133,6 +1133,10 @@ final class BoardTests: XCTestCase {
             PanelView(model: PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })),
             to: output.appendingPathComponent("9-same-login-twice.png")
         )
+        let jaModel = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        jaModel.setLanguage("ja")
+        await settle(jaModel)
+        try picture(PanelView(model: jaModel), to: output.appendingPathComponent("14-agy-ja.png"))
 
         let empty = try Fixture(blob: makeBlob(email: "nobody@example.com"))
         defer { empty.cleanup() }
@@ -1141,6 +1145,82 @@ final class BoardTests: XCTestCase {
             PanelView(model: PanelModel(board: empty.board, executable: "/somewhere/agy-cs", open: { _ in true })),
             to: output.appendingPathComponent("8-empty.png")
         )
+
+        let colabFixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "z"))
+        defer { colabFixture.cleanup() }
+        let colabKeychain = MemoryKeychain(makeColabBlob(refresh: "colab-r1"))
+        let colabUsage = ScriptedUsage()
+        colabFixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["colab-r1": "researcher@example.com", "colab-r2": "lab.long.account.name@example.com"])),
+            launcher: ScriptedLauncher(),
+            usage: colabUsage,
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(colabFixture.run(["colab", "save", "researcher"]).code, 0)
+        colabKeychain.blob = makeColabBlob(refresh: "colab-r2")
+        XCTAssertEqual(colabFixture.run(["colab", "save", "lab"]).code, 0)
+        colabUsage.snapshots = [
+            "researcher": UsageSnapshot(planID: "", planName: "", buckets: [], colab: ColabUsageData(balance: 87.5, rateHourly: 1.96, activeAssignments: 1)),
+            "lab": UsageSnapshot(planID: "", planName: "", buckets: [], colab: ColabUsageData(balance: 0, rateHourly: 0, activeAssignments: 0)),
+        ]
+        XCTAssertEqual(colabFixture.run(["colab", "refresh", "quota"]).code, 0)
+        try colabFixture.board.setSelectedProvider(.colab)
+        let colabModel = PanelModel(board: colabFixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        try picture(PanelView(model: colabModel), to: output.appendingPathComponent("11-colab-zh.png"))
+        colabModel.setLanguage("en")
+        await settle(colabModel)
+        try picture(PanelView(model: colabModel), to: output.appendingPathComponent("12-colab-en.png"))
+        colabModel.setLanguage("ja")
+        await settle(colabModel)
+        try picture(PanelView(model: colabModel), to: output.appendingPathComponent("13-colab-ja.png"))
+    }
+
+    @MainActor
+    func testPanelProviderTogglePersistsAndIsolatesProviders() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "a1"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "agy1"]).code, 0)
+
+        let colabKeychain = MemoryKeychain(makeColabBlob(refresh: "colab-1"))
+        let colabUsage = ScriptedUsage()
+        colabUsage.snapshots = [
+            "col1": UsageSnapshot(planID: "", planName: "", buckets: [], colab: ColabUsageData(balance: 42.25, rateHourly: 1.25, activeAssignments: 2)),
+        ]
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["colab-1": "col1@example.com", "colab-2": "col2@example.com"])),
+            launcher: ScriptedLauncher(),
+            usage: colabUsage,
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "col1"]).code, 0)
+        XCTAssertEqual(fixture.run(["colab", "refresh", "quota"]).code, 0)
+
+        let model = PanelModel(board: fixture.board, executable: "/path with spaces/agy-cs", open: { _ in true })
+        XCTAssertEqual(model.provider, .antigravity)
+        XCTAssertEqual(model.state.rows.map(\.name), ["agy1"])
+
+        model.toggleProvider()
+        await settle(model)
+        XCTAssertEqual(model.provider, .colab)
+        XCTAssertEqual(fixture.board.selectedProvider(), .colab)
+        XCTAssertEqual(model.state.rows.map(\.name), ["col1"])
+        XCTAssertEqual(model.state.rows.first?.usage?.colabBalance, "42.25 CU")
+        XCTAssertEqual(model.state.rows.first?.usage?.colabActiveCount, 2)
+
+        let cmdURL = try fixture.board.writeAddAccountCommand(executable: "/path with 'quote'/agy-cs", provider: .colab)
+        let script = try String(contentsOf: cmdURL, encoding: .utf8)
+        XCTAssertEqual(script, "#!/bin/sh\nexec '/path with '\\''quote'\\''/agy-cs' colab switch add\n")
+
+        // New PanelModel restores persisted provider selection.
+        let reloaded = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        XCTAssertEqual(reloaded.provider, .colab)
+        XCTAssertEqual(reloaded.state.rows.map(\.name), ["col1"])
+        reloaded.toggleProvider()
+        await settle(reloaded)
+        XCTAssertEqual(reloaded.provider, .antigravity)
+        XCTAssertEqual(reloaded.state.rows.map(\.name), ["agy1"])
     }
 }
 
