@@ -54,7 +54,8 @@ func colabBinary(
 func colabPythonExecutable(
     for colabPath: String,
     path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
-    home: URL = FileManager.default.homeDirectoryForCurrentUser
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    preferredPython: String? = nil
 ) -> String? {
     guard isColabLauncherScript(colabPath),
           let line = firstShebangLine(atPath: colabPath)
@@ -74,9 +75,18 @@ func colabPythonExecutable(
         guard !interpreter.contains("/"), interpreter.lowercased().hasPrefix("python") else {
             return nil
         }
+        let systemDirs: Set<String> = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let allPathDirs = path.split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
+        let userPathCandidates = allPathDirs.filter { !systemDirs.contains($0) }.map {
+            URL(fileURLWithPath: $0).appendingPathComponent(interpreter).path
+        }
+        let systemPathCandidates = allPathDirs.filter { systemDirs.contains($0) }.map {
+            URL(fileURLWithPath: $0).appendingPathComponent(interpreter).path
+        }
+        let remembered = [preferredPython].compactMap { $0 }.filter { $0.hasPrefix("/") }
         let standard = [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
             .map { $0 + "/\(interpreter)" }
-        let candidates = standard + pathCandidates(interpreter, in: path)
+        let candidates = userPathCandidates + remembered + standard + systemPathCandidates
         return candidates.first(where: isTrustedPythonInterpreter)
     }
     return isTrustedPythonInterpreter(executable) ? executable : nil
@@ -87,10 +97,23 @@ func resolveColabInstallation(
     path: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
     home: URL = FileManager.default.homeDirectoryForCurrentUser
 ) -> ColabInstallation? {
-    resolveColabInstallation(
+    let cachedObject = (try? Data(contentsOf: cacheURL))
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let cachedPath = cachedObject?["path"] as? String
+    let cachedPython = cachedObject?["python"] as? String
+    return resolveColabInstallation(
         cacheURL: cacheURL,
         locateColab: { colabBinary(path: path, recorded: $0, home: home) },
-        resolvePython: { colabPythonExecutable(for: $0, path: path, home: home) }
+        resolvePython: { colabPath in
+            let resolvedColab = (colabPath as NSString).resolvingSymlinksInPath
+            let matchingCachedPython = cachedPath == resolvedColab ? cachedPython : nil
+            return colabPythonExecutable(
+                for: colabPath,
+                path: path,
+                home: home,
+                preferredPython: matchingCachedPython
+            )
+        }
     )
 }
 
@@ -99,14 +122,19 @@ func resolveColabInstallation(
     locateColab: (String?) -> String?,
     resolvePython: (String) -> String?
 ) -> ColabInstallation? {
-    let cached = (try? Data(contentsOf: cacheURL))
-        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["path"] as? String
-    guard let colabPath = locateColab(cached), let pythonPath = resolvePython(colabPath) else {
+    let cachedObject = (try? Data(contentsOf: cacheURL))
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let cachedPath = cachedObject?["path"] as? String
+    let cachedPython = cachedObject?["python"] as? String
+    guard let colabPath = locateColab(cachedPath), let pythonPath = resolvePython(colabPath) else {
         return nil
     }
     let resolved = (colabPath as NSString).resolvingSymlinksInPath
-    if cached != resolved,
-       let data = try? JSONSerialization.data(withJSONObject: ["path": resolved], options: [.prettyPrinted, .sortedKeys])
+    if cachedPath != resolved || cachedPython != pythonPath,
+       let data = try? JSONSerialization.data(
+           withJSONObject: ["path": resolved, "python": pythonPath],
+           options: [.prettyPrinted, .sortedKeys]
+       )
     {
         try? AtomicFile.write(cacheURL, String(decoding: data, as: UTF8.self) + "\n")
     }
@@ -143,7 +171,7 @@ func isTrustedExecutablePath(_ path: String) -> Bool {
     }
     let uid = getuid()
     let candidateParent = (path as NSString).deletingLastPathComponent
-    guard isTrustedDirectory(candidateParent, uid: uid) else {
+    guard isTrustedDirectoryTree(candidateParent, uid: uid) else {
         return false
     }
     var linkInfo = stat()
@@ -157,7 +185,7 @@ func isTrustedExecutablePath(_ path: String) -> Bool {
     }
     let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     let resolvedParent = (resolved as NSString).deletingLastPathComponent
-    guard isTrustedDirectory(resolvedParent, uid: uid) else {
+    guard isTrustedDirectoryTree(resolvedParent, uid: uid) else {
         return false
     }
     var fileInfo = stat()
@@ -169,6 +197,31 @@ func isTrustedExecutablePath(_ path: String) -> Bool {
         return false
     }
     return FileManager.default.isExecutableFile(atPath: resolved)
+}
+
+private func isTrustedDirectoryTree(_ dirPath: String, uid: uid_t) -> Bool {
+    let raw = URL(fileURLWithPath: dirPath).standardizedFileURL.path
+    let resolved = URL(fileURLWithPath: dirPath).resolvingSymlinksInPath().path
+    for rootPath in Set([raw, resolved]) {
+        guard rootPath.hasPrefix("/") else {
+            return false
+        }
+        var current = rootPath
+        while true {
+            guard isTrustedDirectory(current, uid: uid) else {
+                return false
+            }
+            if current == "/" {
+                break
+            }
+            let parent = (current as NSString).deletingLastPathComponent
+            if parent.isEmpty || parent == current {
+                break
+            }
+            current = parent
+        }
+    }
+    return true
 }
 
 private func isTrustedDirectory(_ path: String, uid: uid_t) -> Bool {

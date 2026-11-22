@@ -137,16 +137,35 @@ final class ColabTests: XCTestCase {
         let envColabStd = binDir.appendingPathComponent("colab-env-std")
         try "#!/usr/bin/env python3\nfrom colab_cli.cli import main\n".write(to: envColabStd, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: envColabStd.path)
+        // `#!/usr/bin/env python3` honors trusted virtualenv PATH ahead of ~/.local/bin / system python3, while skipping world-writable PATH dirs.
         XCTAssertEqual(
-            colabPythonExecutable(for: envColabStd.path, path: venvBin.path, home: root),
+            colabPythonExecutable(for: envColabStd.path, path: "\(unsafeBin.path):\(venvBin.path)", home: root),
+            fakePython.path
+        )
+        XCTAssertEqual(
+            colabPythonExecutable(for: envColabStd.path, path: "/usr/bin:/bin", home: root),
             localPython.path
         )
 
-        // World-writable directory is rejected (Fix #7).
+        // World-writable directory and safe child under a world-writable ancestor are both rejected.
         let worldColab = unsafeBin.appendingPathComponent("colab")
         try "#!\(fakePython.path)\nfrom colab_cli.cli import main\n".write(to: worldColab, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: worldColab.path)
         XCTAssertNil(colabBinary(path: unsafeBin.path, recorded: nil, home: root))
+
+        let nestedUnderWorld = unsafeBin.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedUnderWorld, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: nestedUnderWorld.path)
+        let nestedColab = nestedUnderWorld.appendingPathComponent("colab")
+        try "#!\(fakePython.path)\nfrom colab_cli.cli import main\n".write(to: nestedColab, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: nestedColab.path)
+        XCTAssertFalse(isTrustedExecutablePath(nestedColab.path))
+        XCTAssertNil(colabBinary(path: nestedUnderWorld.path, recorded: nil, home: root))
+
+        // Direct python+script command construction bypasses /usr/bin/env re-lookup on launch.
+        let whoamiSpec = InteractiveColab.whoamiCommand(for: ColabInstallation(colabPath: directColab.path, pythonPath: fakePython.path))
+        XCTAssertEqual(whoamiSpec.executable, fakePython.path)
+        XCTAssertEqual(whoamiSpec.arguments, [fakePython.path, directColab.path, "whoami"])
 
         // Launcher without colab_cli import or pointing to non-python interpreter is rejected (Fix #7).
         let decoyDir = root.appendingPathComponent("decoy", isDirectory: true)

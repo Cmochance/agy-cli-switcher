@@ -9,8 +9,8 @@ struct InteractiveColab: AgyLaunching {
     var launchesAfterSwitch: Bool { false }
 
     func runUntilLoggedIn(_ poll: () throws -> ObservedLogin?) throws -> LoginWatchResult {
-        let binary = try colabExecutable()
-        let pid = try spawnWhoami(binary)
+        let installation = try colabInstallation()
+        let pid = try spawnWhoami(installation)
         let tty = STDIN_FILENO
         let ownGroup = getpgrp()
         let interactive = isatty(tty) != 0
@@ -54,25 +54,26 @@ struct InteractiveColab: AgyLaunching {
 
     func startInCurrentTerminal() throws {}
 
-    private func colabExecutable() throws -> String {
+    private func colabInstallation() throws -> ColabInstallation {
         let installed = locate?(cacheURL) ?? resolveColabInstallation(cacheURL: cacheURL)
         guard let installed else {
             throw AccountFailure(.colabLaunchFailed, "colab")
         }
-        return installed.colabPath
+        return installed
     }
 
-    private func spawnWhoami(_ binary: String) throws -> pid_t {
-        let command = strdup(binary)
-        let arg = strdup("whoami")
-        defer {
-            free(command)
-            free(arg)
-        }
-        var argv: [UnsafeMutablePointer<CChar>?] = [command, arg, nil]
+    static func whoamiCommand(for installation: ColabInstallation) -> (executable: String, arguments: [String]) {
+        (installation.pythonPath, [installation.pythonPath, installation.colabPath, "whoami"])
+    }
+
+    private func spawnWhoami(_ installation: ColabInstallation) throws -> pid_t {
+        let spec = Self.whoamiCommand(for: installation)
+        let pointers = spec.arguments.map { strdup($0) }
+        defer { pointers.forEach { free($0) } }
+        var argv: [UnsafeMutablePointer<CChar>?] = pointers + [nil]
         var attributes: posix_spawnattr_t?
         guard posix_spawnattr_init(&attributes) == 0 else {
-            throw AccountFailure(.colabLaunchFailed, binary)
+            throw AccountFailure(.colabLaunchFailed, spec.executable)
         }
         defer { posix_spawnattr_destroy(&attributes) }
         var defaults = sigset_t()
@@ -86,7 +87,7 @@ struct InteractiveColab: AgyLaunching {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF))
         var pid: pid_t = 0
         let spawned = argv.withUnsafeMutableBufferPointer { buffer in
-            posix_spawn(&pid, binary, nil, &attributes, buffer.baseAddress, environ)
+            posix_spawn(&pid, spec.executable, nil, &attributes, buffer.baseAddress, environ)
         }
         guard spawned == 0 else {
             throw AccountFailure(.colabLaunchFailed, String(spawned))
