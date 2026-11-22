@@ -537,7 +537,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(refreshed.errors, [])
         XCTAssertEqual(refreshed.output.map(cells), expected)
         XCTAssertEqual(fixture.usage.calls, [["alice", "bob"]])
-        XCTAssertEqual(fixture.keychain.reads, reads + 1)
+        XCTAssertEqual(fixture.keychain.reads, reads + 2)
         XCTAssertEqual(fixture.keychain.writes, [alice])
         XCTAssertEqual(try mode(fixture.tool.usageDirectory), 0o700)
         XCTAssertEqual(try mode(fixture.tool.usageURL("alice")), 0o600)
@@ -549,7 +549,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(listed.output, refreshed.output)
         XCTAssertEqual(listed.errors, [])
         XCTAssertEqual(fixture.usage.calls.count, 1)
-        XCTAssertEqual(fixture.keychain.reads, reads + 2)
+        XCTAssertEqual(fixture.keychain.reads, reads + 3)
 
         fixture.usage.snapshots = ["alice": pro]
         let partial = fixture.run(["refresh", "quota"])

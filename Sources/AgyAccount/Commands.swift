@@ -203,6 +203,8 @@ struct AccountCommands {
     // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
     private func refreshQuota() throws {
         let started = DispatchTime.now()
+        // 当前登录还没保存过的话先存下来，这一次就把它一起查了，不用再另起一个进程。
+        _ = currentLogin(refreshing: false)
         guard let lock = profile.lockUsage(wait: usage.budget) else {
             throw AccountFailure(.usageBusy)
         }
@@ -286,7 +288,8 @@ struct AccountCommands {
             }
             backedUp = true
         }
-        if !backedUp {
+        // 用户带着 --force 删掉的那一个不再存回来；登录没完成时写回钥匙串用的是内存里的这一份。
+        if !backedUp, profile.dismissedEmail() != snapshot.meta.email {
             try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
         }
     }
@@ -377,7 +380,9 @@ struct AccountCommands {
     // active 只在同一个邮箱存了几个名字时决定指的是哪个名字，和钥匙串对不上就改正它。
     // 钥匙串里的邮箱还没保存过时直接保存，不提示。钥匙串读不出来时退回 active 的记录并说一声。
     // holdingLock：调用的指令已经拿着改账号的锁。没拿着时，保存和改正 active 只在拿得到锁的时候做，拿不到就留给下一次。
-    func currentLogin(holdingLock: Bool = false, saving: Bool = true, announcing: Bool = true) -> CurrentLogin {
+    func currentLogin(
+        holdingLock: Bool = false, saving: Bool = true, announcing: Bool = true, refreshing: Bool = true
+    ) -> CurrentLogin {
         var result = CurrentLogin()
         let login: ObservedLogin
         do {
@@ -422,7 +427,9 @@ struct AccountCommands {
         slots = profile.slots(forEmail: login.meta.email)
         if slots.isEmpty, profile.dismissedEmail() != login.meta.email {
             if (try? saveUnsaved(login)) != nil {
-                refresher.startDetached()
+                if refreshing {
+                    refresher.startDetached()
+                }
             } else {
                 result.notices.append(text.line(.autoSaveFailed, login.meta.email))
             }
@@ -439,8 +446,11 @@ struct AccountCommands {
     // 名字用邮箱 @ 前面的字符；被另一个邮箱占着时试 -2、-3…，不动别人的副本。
     private func saveUnsaved(_ login: ObservedLogin) throws {
         let base = try defaultAccountName(email: login.meta.email)
-        for suffix in 1 ... 99 {
-            guard let name = try? checkNewName(suffix == 1 ? base : "\(base)-\(suffix)"),
+        for number in 1 ... 99 {
+            // 名字最长 64 个字符，加后缀时把前面截短，留出后缀的位置。
+            let suffix = number == 1 ? "" : "-\(number)"
+            let head = String(String.UnicodeScalarView(base.unicodeScalars.prefix(64 - suffix.unicodeScalars.count)))
+            guard let name = try? checkNewName(head + suffix),
                   (try? checkHolder(of: name, allowed: [login.meta.email])) != nil
             else {
                 continue

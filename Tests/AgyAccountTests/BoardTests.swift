@@ -683,6 +683,26 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(rejected.errors, ["当前登录 a+b@example.com 没能自动保存。用 agy-cs save <名字> 保存。"])
         XCTAssertEqual(fixture.run(["current"]).output, ["a+b@example.com"])
         XCTAssertEqual(fixture.keychain.writes, [])
+
+        // refresh quota 先把没保存过的登录存下来，这一次就一起查，不另起进程。
+        let fresh = try Fixture(blob: alice)
+        defer { fresh.cleanup() }
+        XCTAssertEqual(fresh.run(["save", "alice"]).code, 0)
+        fresh.keychain.blob = bob
+        XCTAssertEqual(fresh.run(["refresh", "quota"]).code, 0)
+        XCTAssertEqual(fresh.usage.calls, [["alice", "bob"]])
+        XCTAssertEqual(fresh.refresher.started, 0)
+        let usageLock = try XCTUnwrap(fresh.board.services.profile.lockUsage(wait: 0))
+        XCTAssertNotEqual(fcntl(usageLock.descriptor, F_GETFD) & FD_CLOEXEC, 0)
+        close(usageLock.descriptor)
+
+        // 邮箱前缀已经是最长的名字、又被别人占着时，把前面截短再加后缀。
+        let long = String(repeating: "a", count: 64)
+        let crowded = try Fixture(blob: alice)
+        defer { crowded.cleanup() }
+        XCTAssertEqual(crowded.run(["save", long]).code, 0)
+        crowded.keychain.blob = makeBlob(email: long + "@example.com", refresh: "l")
+        XCTAssertEqual(Set(crowded.board.load().rows.map(\.name)), [long, String(repeating: "a", count: 62) + "-2"])
     }
 
     // 带着 --force 删掉当前登录唯一的一份副本之后，不会又被自动存回来；重新保存或者换了登录之后恢复。
@@ -695,6 +715,13 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.board.load().rows, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
         XCTAssertEqual(fixture.refresher.started, 0)
+
+        // 开始新增账号又没登录成：原来的登录写回钥匙串，删掉的副本不会回来。
+        fixture.terminal.isInteractive = true
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 1)
+        XCTAssertFalse(fixture.keychain.missing)
+        XCTAssertEqual(fixture.board.load().rows, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
 
         fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
         XCTAssertEqual(fixture.run(["list"]).output, ["* bob  bob@example.com"])

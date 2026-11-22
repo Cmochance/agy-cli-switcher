@@ -170,7 +170,7 @@ struct ToolProfile {
     // 同一时间只让一个进程查询并写额度记录。进程结束时锁自动释放。
     // 锁被占着时最多等 wait 秒，等不到返回 nil。waited 表示等过别的进程。
     func lockUsage(wait: TimeInterval) -> (descriptor: Int32, waited: Bool)? {
-        let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         let deadline = DispatchTime.now() + wait
         var waited = false
         while descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) != 0, errno == EWOULDBLOCK || errno == EINTR {
