@@ -1,9 +1,14 @@
+import AgyAccount
 import AppKit
 import SwiftUI
 
 public enum SwitcherApp {
     // 从 main.swift 的主线程调用，不返回。
     public static func main() {
+        // 已经有一个在运行（比如另一个文件夹里的那一份）就直接退出。
+        guard AccountBoard().lockApp() != nil else {
+            exit(0)
+        }
         MainActor.assumeIsolated {
             let application = NSApplication.shared
             let controller = MenuBarController()
@@ -42,11 +47,51 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "person.2.circle", accessibilityDescription: "Agy Switcher")
         item.button?.target = self
-        item.button?.action = #selector(toggle(_:))
+        item.button?.action = #selector(clicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         self.item = item
     }
 
-    @objc private func toggle(_ sender: Any?) {
+    @objc private func clicked(_ sender: Any?) {
+        if let event = NSApp.currentEvent, Self.opensMenu(event.type, modifiers: event.modifierFlags) {
+            showMenu()
+        } else {
+            toggle(sender)
+        }
+    }
+
+    // 右键和按住 control 的左键打开菜单，其余的点击开关面板。
+    static func opensMenu(_ type: NSEvent.EventType, modifiers: NSEvent.ModifierFlags) -> Bool {
+        type == .rightMouseUp || (type == .leftMouseUp && modifiers.contains(.control))
+    }
+
+    // 图标的右键菜单，只有退出。面板点不开的时候也能从这里退出。
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        let quit = NSMenuItem(title: model.text(.panelQuit), action: #selector(quit(_:)), keyEquivalent: "")
+        quit.target = self
+        menu.addItem(quit)
+        return menu
+    }
+
+    @objc private func quit(_ sender: Any?) {
+        model.quit()
+    }
+
+    // 菜单只在这一次点击里挂在图标上，弹完就摘掉，不然左键也会变成打开菜单。
+    private func showMenu() {
+        guard let item else {
+            return
+        }
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        item.menu = makeMenu()
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
+    private func toggle(_ sender: Any?) {
         guard let button = item?.button else {
             return
         }

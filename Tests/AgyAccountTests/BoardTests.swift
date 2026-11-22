@@ -597,6 +597,66 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob"])
     }
 
+    // 同一时间只能有一个菜单栏工具拿到锁；前一个放开之后，下一个才拿得到。
+    func testOnlyOneMenuBarToolHoldsTheLock() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        let first = try XCTUnwrap(fixture.board.lockApp())
+        XCTAssertGreaterThanOrEqual(first, 0)
+        XCTAssertNotEqual(fcntl(first, F_GETFD) & FD_CLOEXEC, 0)
+        XCTAssertNil(fixture.board.lockApp())
+        let mode = try FileManager.default.attributesOfItem(atPath: fixture.tool.appLockFile.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o600)
+        close(first)
+        let second = try XCTUnwrap(fixture.board.lockApp())
+        XCTAssertGreaterThanOrEqual(second, 0)
+        close(second)
+    }
+
+    // 图标的右键菜单只有退出这一项，用的是当前语言；右键和 control 加左键打开它，左键仍然开关面板。
+    @MainActor
+    func testStatusItemMenuOnlyQuitsAndOpensOnSecondaryClick() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        XCTAssertEqual(fixture.run(["language", "en"]).code, 0)
+        _ = NSApplication.shared
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        var exits = 0
+        let controller = MenuBarController { shown in
+            PanelModel(
+                board: fixture.board, executable: "/somewhere/agy-cs", rereadEvery: 0.05, shown: shown,
+                open: { _ in true }, exit: { exits += 1 }
+            )
+        }
+        let menu = controller.makeMenu()
+        XCTAssertEqual(menu.items.map(\.title), ["Quit"])
+        XCTAssertTrue(menu.items[0].target === controller)
+        XCTAssertNotNil(menu.items[0].action)
+
+        XCTAssertTrue(MenuBarController.opensMenu(.rightMouseUp, modifiers: []))
+        XCTAssertTrue(MenuBarController.opensMenu(.leftMouseUp, modifiers: [.control]))
+        XCTAssertFalse(MenuBarController.opensMenu(.leftMouseUp, modifiers: []))
+        XCTAssertFalse(MenuBarController.opensMenu(.leftMouseUp, modifiers: [.command]))
+
+        // 切换到一半时点退出：等切换做完再退，当前账号已经记成新的。
+        let model = controller.model
+        let quit = menu.items[0]
+        let alice = try XCTUnwrap(model.state.rows.first { $0.name == "alice" })
+        model.switchTo(alice)
+        XCTAssertNotNil(model.busy)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(quit.action), to: quit.target, from: quit))
+        XCTAssertEqual(exits, 0)
+        await settle(model)
+        XCTAssertEqual(exits, 1)
+        XCTAssertEqual(model.state.rows.filter(\.isCurrent).map(\.name), ["alice"])
+
+        // 没有事情在做时马上退出。
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(quit.action), to: quit.target, from: quit))
+        XCTAssertEqual(exits, 2)
+    }
+
     // 面板的大小跟着内容走：多出几行提示时变高，提示没了、面板关着的时候也要变回去，
     // 不然再打开时内容上下各空出一条。
     @MainActor

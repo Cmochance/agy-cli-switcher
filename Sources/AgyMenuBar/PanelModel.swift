@@ -26,7 +26,13 @@ final class PanelModel: ObservableObject {
     @Published private(set) var state: BoardState
     @Published private(set) var messages: [String] = []
     @Published private(set) var failed = false
-    @Published private(set) var busy: String?
+    @Published private(set) var busy: String? {
+        didSet {
+            if busy == nil, leaving {
+                exit()
+            }
+        }
+    }
     @Published private(set) var prompt: PanelPrompt?
     @Published var draft = ""
 
@@ -37,6 +43,8 @@ final class PanelModel: ObservableObject {
     private let shown: @MainActor () -> Bool
     private let work = DispatchQueue(label: "agy-cs.panel", qos: .userInitiated)
     private var watcher: Timer?
+    private let exit: @MainActor () -> Void
+    private var leaving = false
 
     // shown 说面板现在是不是开着。
     init(
@@ -44,8 +52,10 @@ final class PanelModel: ObservableObject {
         executable: String = Bundle.main.executablePath ?? CommandLine.arguments[0],
         rereadEvery: TimeInterval = 2,
         shown: @escaping @MainActor () -> Bool = { false },
-        open: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
+        open: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        exit: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) }
     ) {
+        self.exit = exit
         self.board = board
         self.executable = executable
         self.rereadEvery = rereadEvery
@@ -194,8 +204,13 @@ final class PanelModel: ObservableObject {
         }) { $0.output + $0.errors }
     }
 
+    // 有指令正在执行时不马上退出，等它做完：切换是先换钥匙串、再记当前账号，中途退出会只做了一半。
     func quit() {
-        NSApplication.shared.terminate(nil)
+        guard busy == nil else {
+            leaving = true
+            return
+        }
+        exit()
     }
 
     private func run(

@@ -15,7 +15,7 @@
 
 **agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
 
-Current version **v0.2.0** (see [Changelog](documents/CHANGELOG.md)).
+Current version **v0.2.1** (see [Changelog](documents/CHANGELOG.md)).
 
 ## What it does
 
@@ -102,6 +102,7 @@ Click the icon in the menu bar to open the panel.
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…" opens a terminal that runs `agy-cs switch add`, where you sign in. Open the panel again afterwards to see the new account
 - The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
+- Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results. It makes no request and does not read the keychain
 
 ## Commands

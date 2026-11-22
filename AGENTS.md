@@ -11,6 +11,8 @@
 - 这一个可执行文件两用。`Sources/agy-cs/main.swift` 用 `launchMode` 判断：没有参数、父进程是 launchd（`getppid() == 1`）、环境里有 `AGY_CS_MENU_BAR=1`，三样都对上才进菜单栏，其余情况都是命令行。这个标记只写在 `Packaging/Info.plist` 的 `LSEnvironment` 里，被系统打开（Finder、Dock、`open`）时才有（实测）。进菜单栏之后立刻 `unsetenv`，不传给之后启动的进程。不要另加一个 app 专用的可执行文件：切换后查额度的进程是重新执行自己，新增账号也是让终端执行包里的这同一个文件。
 - 目标分三个。`AgyAccount` 是全部逻辑。`AgyMenuBar` 是界面：菜单栏图标是 `NSStatusItem`，点开的面板是 `NSPopover`，里面的内容用 SwiftUI 写，由 `NSHostingController` 按内容的大小报给面板。不要改回 SwiftUI 的 `MenuBarExtra` 窗口样式：它显示过几行提示之后窗口不再变矮，内容上下各空出一条（实测窗口 358 高，内容约 281 高）。`agy-cs` 只剩 `main.swift`。面板不自己实现任何账号操作，每个动作都经 `AccountBoard.perform` 在本进程里执行一条 `agy-cs` 指令，说的话收集起来显示。面板要的新能力先做成指令，再接到面板上。
 - 面板里的操作：点一行等于 `switch -- <名字>`；“刷新额度”等于 `refresh quota`；每行的 `…` 里是 `rename` 和 `rm`，当前记录只剩这一份副本时再问一次，确认了才带 `--force`；齿轮里是 `save`、`language` 和退出。输入名字和确认删除都在面板里完成，不弹别的窗口。
+- 菜单栏图标左键开关面板；右键，或者按住 control 的左键，弹出一个只有“退出”的菜单，面板点不开的时候也能退出。图标的按钮同时收左键和右键的松开，在动作里看当前事件分开。菜单只在这一次点击里挂到 `NSStatusItem.menu` 上，弹完就摘掉；一直挂着的话左键也会变成打开菜单，面板就点不开了。退出（右键菜单和齿轮里的都是 `PanelModel.quit`）遇到有指令正在执行时先等它做完再退：切换是先换钥匙串、再记当前账号，中途退出会只做了一半。
+- 同一时间只运行一个菜单栏工具。启动时在 `~/.agy-cs/app.lock` 上拿 `flock`（`AccountBoard.lockApp`），拿不到说明已经有一个在运行，新启动的这个直接退出，不出图标。锁跟着进程走，退出或崩溃都会自动放开，不用清理文件。锁文件带 `O_CLOEXEC` 打开，不传给之后启动的查额度进程。命令行不拿这把锁。
 - 面板上每行只显示邮箱，行和行之间有分隔线。名字是给命令行选账号用的，面板上不显示；只有同一个邮箱存了几个名字时，这几行才在邮箱后面带上名字，不然分不出来。改名和删除的提示里仍然写名字。
 - 账号的顺序记在 `~/.agy-cs/order`，一行一个名字。`agy-cs move <名字> <位置>` 把一个账号移到第几位，只改这个文件，不读钥匙串。`list`、不带名字的 `switch`、`next` 和面板都按这个顺序。还没有这个文件时全部按字母顺序。有了之后，新存的名字接在最后，先存的在前；同一个名字再存一次不挪位置。改名留在原位，从没排过顺序时改名也一样，这时会把当时的顺序记下来。删掉的名字从顺序里去掉。文件里写着不存在的名字不碍事，读的时候只留现有的名字。
 - 面板上按住一行上下拖就是执行 `move`：这一行跟着鼠标走，别的行让开，松手的那一下面板先换好，再把顺序记下来。行上的点击和拖动是同一个手势，松手时看鼠标走了多远，上下走出 6 个点算拖动，几乎没动算点击。不要把行换回按钮：按钮会把按下的鼠标吃掉，行就拖不动了。行底下另有一个看不见、不接鼠标的按钮，只给键盘用。位置怎么算在 `RowDrag` 里，不依赖界面，有单测。每一行的位置要在 `offset` 之后量，量到的才是不带拖动偏移的位置；带着偏移量的话，把一行拖到列表尽头松手之后，下一次拖动会按旧位置算（测试里撞到过）。
@@ -61,17 +63,38 @@
 
 - 说完成之前核对：`~/.local/bin/agy-cs` 的符号链接目标、钥匙串的 service 和 account 没变、当前邮箱仍能读出。
 - 输出里不打印 token。
-- 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 swift test --disable-sandbox --filter testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
-- 改了套餐和额度的抓取之后，跑一遍真实请求：`AGY_USAGE_LIVE=1 swift test --disable-sandbox --filter testLiveUsageFetchWhenEnabled`。它用本机保存的每个账号各查一次，只打印套餐和额度项的 id。
-- 改了面板之后，把它画成图片看一眼：`AGY_PANEL_SNAPSHOT=/tmp/agy-panel swift test --disable-sandbox --filter testPanelPicturesWhenEnabled`。图片写在那个目录里，用的是临时目录里的假账号。
-- 改了行上的点击或拖动之后，把真的鼠标事件送进面板跑一遍：`AGY_PANEL_GESTURES=1 swift test --disable-sandbox --filter testPanelGesturesWhenEnabled`。它会在屏幕左下角开一个两秒钟的小窗口，用的是临时目录里的假账号。
+- 改了钥匙串读写之后，用临时项跑一遍真实往返：`AGY_ACCOUNT_PROBE=1 make test FILTER=testSecurityToolRoundTripOnAProbeItemWhenEnabled`。它只动 service 为 `agy-cs-test-probe` 的临时项，结束时删掉。
+- 改了套餐和额度的抓取之后，跑一遍真实请求：`AGY_USAGE_LIVE=1 make test FILTER=testLiveUsageFetchWhenEnabled`。它用本机保存的每个账号各查一次，只打印套餐和额度项的 id。
+- 改了面板之后，把它画成图片看一眼：`AGY_PANEL_SNAPSHOT=/tmp/agy-panel make test FILTER=testPanelPicturesWhenEnabled`。图片写在那个目录里，用的是临时目录里的假账号。
+- 改了行上的点击或拖动之后，把真的鼠标事件送进面板跑一遍：`AGY_PANEL_GESTURES=1 make test FILTER=testPanelGesturesWhenEnabled`。它会在屏幕左下角开一个两秒钟的小窗口，用的是临时目录里的假账号。
 - 改了打包或启动方式之后执行 `make app`，核对三件事：`codesign --verify --strict "build/Agy Switcher.app"` 通过；在终端里运行 `"build/Agy Switcher.app/Contents/MacOS/agy-cs" ls` 仍然是命令行；`open "build/Agy Switcher.app"` 之后进程留着、菜单栏出现图标。
+
+## 本地开发用 worktree
+
+- 主目录 `~/alysechen/github/agy-cli-switcher` 只停在 `main`，不在这里建分支、改跟踪的文件、commit。它只做这几件事：读规则、`git pull --ff-only`、`make install`、放不进仓库的本地文件。
+- 每个开发分支各用一个 worktree，放在 `~/alysechen/github/agy-cli-switcher-worktree/agy-cli-switcher-<分支后缀>`。分支后缀是分支名把 `/` 换成 `-`，比如 `feat/status-item-menu` 对应 `agy-cli-switcher-feat-status-item-menu`。几个 worktree 可以同时开发，互不影响。
+- 建 worktree：在主目录先 `git pull --ff-only`，再执行 `git worktree add -b <分支> <worktree 路径> main`。不要用 `cp` 拷文件夹。worktree 里的 `.git` 只是一个指回主目录 `.git/worktrees/<名字>` 的文件，仓库本身始终在主目录（实测），之后再建 worktree、commit、push 都不受影响。同一个分支不能同时在两个文件夹里检出，所以主目录不离开 `main`。
+- 会话的工作目录保持主目录，这样读到的始终是主目录的 `AGENTS.md`。读写文件一律用 worktree 的绝对路径；`make`、`git` 用 worktree 路径作为执行目录。不要用主目录的路径改跟踪的文件。
+- 规则以主目录的 `AGENTS.md` 为准。要改规则时改 worktree 里的那一份，合并之后主目录 pull 下来才生效。
+- 编译缓存只有一份，是主目录的 `.build/`。`Makefile` 用 `git rev-parse --git-common-dir` 找到主目录，把它的 `.build` 用 `--scratch-path` 传给每一条 `swift build` 和 `swift test`；worktree 里不会另外生成 `.build/`（实测）。换一个文件夹编译时本项目的代码会重编一遍，约 8 秒（实测）。
+- 编译和测试一律用 `make build`、`make test`、`make app`、`make dist`，不直接执行 `swift build` 或 `swift test`。只跑一部分测试用 `make test FILTER=<测试名>`，环境变量照常写在 `make` 前面。直接执行 `swift` 会在 worktree 里另存一份缓存，也绕过了下面的排队。
+- 同一时间只有一个文件夹在编译。`build`、`test`、`dist` 三个目标先用 `/usr/bin/lockf` 拿主目录 `.build/agy-cs-make.lock` 上的锁，再做事；锁被占着时说一声，然后等前一个做完。锁要把“编译”和“把二进制拷到自己的 `build/`”一起包住：几个 worktree 编出来的文件在同一个位置，只锁编译的话，这边还没拷走，那边就换成了另一个分支的。实测两个文件夹同时 `make build`，后一个等前一个，各自拿到的是自己的二进制。
+- worktree 里不执行 `make install`：它会把 `~/.local/bin/agy-cs` 指到 worktree 的 `build/agy-cs`，worktree 删掉之后命令行就坏了。要手测就 `open "<worktree 路径>/build/Agy Switcher.app"`；已经有一个 Agy Switcher 在运行时先退出它，不然新开的这个拿不到 `app.lock`，会直接退出。
+- 不进仓库的本地文件只放主目录，不放 worktree。只在本机用的，把路径写进主目录的 `.git/info/exclude`，它对所有 worktree 生效，不用开 PR。忽略规则要进仓库时才开 worktree 改 `.gitignore`。主目录里未跟踪的文件不影响 `git pull`，除非远端新增了同一个路径的文件。worktree 里要用这些文件时按主目录的绝对路径读，不拷贝。
 
 ## 合并之后
 
 - 合并 PR 仍要用户当条消息明确说合并。合并完成后，下面几步默认接着做，不用再问：
-  1. 先确认本地分支和合并后的 `main` 内容一致（`git diff --quiet main <分支>`）。不一致就停下来报告，不删。
-  2. `git switch main`，`git pull --ff-only`。
-  3. 删除本地分支（squash 合并后要用 `git branch -D`）和远端分支（`git push origin --delete <分支>`），再 `git fetch --prune`。
-  4. 用 `git branch -a` 核对两个分支都已消失。
-- 只删刚合并的那个 PR 的分支，其他分支不动。
+  1. 确认 worktree 的分支和合并后的 `main` 内容一致（先 `git fetch`，再 `git diff --quiet origin/main <分支>`）。不一致就停下来报告，不删。
+  2. 在 worktree 里执行 `git status --short --ignored`。有未提交的改动就停下来报告。列出的未跟踪和被忽略的文件，除了 `build/` 和 `dist/`，逐个确认可以丢；要留的先搬到主目录。`git worktree remove` 遇到未跟踪的文件会拒绝，被忽略的文件却会不加提示地一起删掉（实测）。
+  3. 主目录 `git pull --ff-only`，再 `make install`。
+  4. `git worktree remove <worktree 路径>`。不带 `--force`；它拒绝就回到第 2 步。
+  5. 删除本地分支（squash 合并后要用 `git branch -D`）和远端分支（`git push origin --delete <分支>`），再 `git fetch --prune`。
+  6. 用 `git worktree list` 和 `git branch -a` 核对 worktree 和两个分支都已消失。
+- 只删刚合并的那个 PR 的 worktree 和分支，其他的不动。
+
+## 清理残留
+
+- 用户说清理构建和测试残留时，删这些：`build/Agy Switcher.app`、`dist/`、`/tmp` 下本项目留下的文件、系统临时目录里测试用的假 home。删之前核对内容确实是本项目产生的。
+- 不删主目录的 `.build/`。它是所有 worktree 共用的编译缓存，删掉之后下次要从头编译。
+- 不删 `build/agy-cs` 和 `~/.agy-cs/`。前者是 `~/.local/bin/agy-cs` 指向的文件，后者是用户的账号记录。
