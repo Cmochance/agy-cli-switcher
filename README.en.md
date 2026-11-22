@@ -15,7 +15,7 @@
 
 **agy-cli-switcher** switches Antigravity CLI (`agy`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
 
-Current version **v0.2.0** (see [Changelog](documents/CHANGELOG.md)).
+Current version **v0.2.1** (see [Changelog](documents/CHANGELOG.md)).
 
 ## What it does
 

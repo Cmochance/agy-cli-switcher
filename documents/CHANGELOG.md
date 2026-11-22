@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1
+
+### 简体中文
+
+- 右键点 Agy Switcher 的菜单栏图标可以直接退出，按住 control 点左键也一样。原来退出只在面板的齿轮里。
+- 有操作正在进行时点退出，会等它做完再退，不会停在切换到一半的地方。
+
+### English
+
+- Right-clicking the Agy Switcher menu bar icon now lets you quit directly. Control-clicking does the same. Quit used to be only in the panel's gear menu.
+- Quitting while an operation is in progress waits for it to finish, so a switch is never left half done.
+
 ## 0.2.0
 
 ### 简体中文

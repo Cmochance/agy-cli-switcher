@@ -15,7 +15,7 @@
 
 **agy-cli-switcher** 在 macOS 上切换 Antigravity CLI（`agy`）的登录。有两种形式：终端里的命令 `agy-cs`，和菜单栏工具 Agy Switcher。两者是同一个程序，用同一份数据，可以只装一种，也可以都装。
 
-当前版本 **v0.2.0**（详见 [Changelog](documents/CHANGELOG.md)）。
+当前版本 **v0.2.1**（详见 [Changelog](documents/CHANGELOG.md)）。
 
 ## 能做什么
 
