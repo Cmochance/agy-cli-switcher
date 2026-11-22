@@ -40,9 +40,15 @@
 - `make app` 生成 `build/Agy Switcher.app`。`Contents/MacOS/agy-cs` 就是上面那个二进制，另有 `Packaging/Info.plist` 和 `Packaging/AppIcon.icns`，整个包 ad-hoc 签名。同样先 `rm -rf` 旧的包再拷。图标由 `Packaging/AppIcon.swift` 画出来，换图标时改它，再重新生成 icns。
 - `make dist` 编译 arm64 加 x86_64 的通用二进制，生成 `dist/Agy-Switcher-v<版本号>-macOS-universal.dmg`、`dist/agy-cs-v<版本号>-macOS-universal.tar.gz`，每个文件旁边各有一个同名加 `.sha256` 的校验文件。两个架构分开编译，再用 `lipo -create` 合并。不要改成一次传两个 `--arch`：Xcode 26.6 的 SwiftPM 这时换用另一套构建系统，不生成 `.embedInCode` 的 `PackageResources`，编译不过（CI 实测）。每个架构编完就把二进制拷走，因为本机这版 SwiftPM 两次编译用同一个输出目录。dmg 用 `hdiutil create` 打，里面是 `Agy Switcher.app` 和一个指向 `/Applications` 的链接，打开就能拖进去。包名带版本号和平台，和本机其他项目的发布页一致；继续出通用包，不按架构拆，因为每个包不到 1 MB。不出 `.sig` 和 `latest.json`，它们是给自动更新用的，本项目没有。版本号只写在 `Packaging/Info.plist`，`Makefile` 从那里读；README 里的下载链接和文件名带着版本号，每次升版本要跟着改，测试会核对，CHANGELOG 也一样。
 - 发布：推 `v` 加版本号的 tag，`release.yml` 跑测试、执行 `make dist`，然后建 draft release。它只建 draft，不要在 workflow 里加发正式版的步骤。签名是 ad-hoc，没有公证，因为没有 Developer ID 证书；浏览器下载的 app 第一次打开要到“系统设置 → 隐私与安全性”里放行。以后有证书时用 `make dist SIGN_IDENTITY=…`，公证另加。
-- 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记，不再读钥匙串。菜单栏工具启动时走的是同一步。
-- 初始化之后，`current`、`list`、`rm`、`rename`、`language`、`help` 只读 `~/.agy-cs/`。`save`、`switch`、`next` 才读写钥匙串。密钥副本仍在 `~/.gemini/antigravity-cli/accounts/`。面板打开时和打开期间每两秒的重读，读的是 `list` 那一份记录，同样不读钥匙串、不联网。重读可能正好撞上别的进程在改名或删除：列出名字之后、读它之前就没了的那条记录跳过，不当成整份名单读不出来（CI 上实测撞到过）。
-- 联网只发生在 `agy-cs refresh quota` 里：用每个保存副本里的 refresh token 向 `oauth2.googleapis.com` 换一个临时 access token，再请求 `daily-cloudcode-pa.googleapis.com` 的 `loadCodeAssist`（套餐）、`retrieveUserQuotaSummary`（额度）和 `fetchAvailableModels`（模型列表），结果写到 `~/.agy-cs/usage/<名字>.json`。临时 token 只留在内存里，不回写任何文件，也不读钥匙串。从开始到最后一个回答合计最多等 10 秒。`list` 不联网，只读这些记录。记录里带着邮箱；同一个名字后来存成了另一个登录时，旧记录不再显示。
+- 非密钥名单在 `~/.agy-cs/`，目录权限 `700`，文件权限 `600`。这里不放 token。首次运行如果还没有账号记录，会读取一次钥匙串，用邮箱 `@` 前面的字符保存当前登录，并写入 `~/.agy-cs/initialized`。已经有账号记录时只补这个标记。菜单栏工具启动时走的是同一步。
+- 当前账号是谁，只看钥匙串里那一项的邮箱，不看 `~/.agy-cs/active`：还开着的 `agy` 每小时刷新 token 时会把自己的登录写回钥匙串（实测，CHX-13），只看记录的话显示和实际会不一样。`current`、`list`、面板、不带名字的 `switch`、`rm` 的“唯一一份副本”检查、不带原名的 `rename` 都经 `AccountCommands.currentLogin` 读一次钥匙串，只留邮箱。读一次实测 0.01–0.03 秒，所以面板打开期间每两秒的重读也直接读。`help`、`language`、`move` 不读钥匙串。面板和 `list` 都不联网。重读可能正好撞上别的进程在改名或删除：列出名字之后、读它之前就没了的那条记录跳过，不当成整份名单读不出来（CI 上实测撞到过）。
+- `active` 只剩一个用途：同一个邮箱存了几个名字时，决定 `current`、`rename`、`next` 指的是哪个名字。它记的名字和钥匙串里的邮箱对不上时不用它，取顺序里第一个对得上的名字，并把它改正。
+- 钥匙串里的登录还没保存过时直接保存，不提示（用户 2026-11-22 决定）。名字用邮箱 `@` 前面的字符，被另一个邮箱占着时试 `-2`、`-3`…，不动别人的副本；保存之后另起进程查一次额度。前缀不能当名字时没法自动存，这是唯一会提示的情况。`switch <名字>` 遇到当前登录没保存过也是先存再切。带 `--force` 删掉当前登录唯一的一份副本时，把这个邮箱记进 `~/.agy-cs/not-saved`，之后不再自动存它，不然下一次 `list` 又把它存回来；这个邮箱重新保存或者当前登录换了，这条记录就清掉。这样的登录在新增账号期间不存回账号名单，而是临时放在 `~/.gemini/antigravity-cli/accounts/.add-rollback`（权限 `600`，名字不以 `.token` 结尾，不算一个账号）：新登录存好或者原登录写回去之后删掉；进程中途没了的话，下一条拿到锁的指令发现钥匙串空着，就从这里把它写回去。
+- 钥匙串那一项不在时（新增账号进行到一半，或者在 `agy` 里 `/logout` 之后）没有行打勾，`list` 和面板提示现在没有登录，`current` 以非零退出，不改任何记录。钥匙串读不出来时退回 `active` 的记录并说一声。
+- 看一眼的指令不把钥匙串里更新过的 token 存回副本，回存只发生在 `switch` 和 `save`。副本里的 refresh token 不会因此失效：刷新只换 access token（实测刷新前后 refresh token 相同）。
+- 不自动把钥匙串改回去。发现钥匙串被别的进程换成另一个登录时，只让显示跟着变。这是定论（用户 2026-11-22，CHX-13），不是还没做。
+- 同一时间只有一个进程改账号。`save`、`switch <名字>`、`next`、`rm`、`rename`、`move`、新增账号和自动保存先拿 `~/.agy-cs/state.lock` 上的 `flock`（`ToolProfile.lockState`，带 `O_CLOEXEC`）。拿不到时最多等 5 秒，等不到就报忙，什么都不改；自动保存不等，拿不到就留给下一次。新增账号从移开钥匙串那一项到新登录存好（或者原来的登录写回去）一直拿着，重新启动 `agy` 之前放开：这段时间钥匙串是空的或者是还没存的新登录，别的切换不能进来，面板的重读也不能抢先把新登录存掉。锁在 `run` 里每条指令的最外面拿一次，里面的函数不再拿：`flock` 跟着打开的文件走，同一个进程再打开一次去拿会等自己。
+- 联网只发生在 `agy-cs refresh quota` 里：用每个保存副本里的 refresh token 向 `oauth2.googleapis.com` 换一个临时 access token，再请求 `daily-cloudcode-pa.googleapis.com` 的 `loadCodeAssist`（套餐）、`retrieveUserQuotaSummary`（额度）和 `fetchAvailableModels`（模型列表），结果写到 `~/.agy-cs/usage/<名字>.json`。临时 token 只留在内存里，不回写任何文件。查询本身不读钥匙串；查完列出来的那一步和 `list` 一样读一次。从开始到最后一个回答合计最多等 10 秒。`list` 不联网，只读这些记录。记录里带着邮箱；同一个名字后来存成了另一个登录时，旧记录不再显示。
 - 额度查询和切换互不干涉。`switch`、`next` 和新增账号成功之后不在本进程里查，而是另起进程执行 `agy-cs refresh quota`，不等它结束，它失败也不影响切换；切换失败时不会启动它。启动分两步：先启动 `agy-cs refresh quota --detach` 并等它退出，它再启动真正查询的进程（自成会话，标准输入输出接 `/dev/null`）然后立刻退出。这样查询进程没有父进程，菜单里随后换成 `agy` 的那个进程下面不会留下僵尸进程。`--detach` 只给这一步用，不写进 help。
 - 后台那次查询没有终端可以报错，所以每次查询都把没查到的账号写进 `~/.agy-cs/usage-status.json`，`list` 发现有就在 stderr 提示。`~/.agy-cs/usage.lock` 上的 `flock` 保证同一时间只有一个进程在查询和写记录。锁被占着时最多等 10 秒：等到了说明另一个进程刚查完，它查过的账号直接用它记下的结果，只补查它没见过的账号，等锁和补查合计仍不超过 10 秒；等不到就报忙，不写任何记录。保存的副本读不出来的账号也算没查到。本次查询的退出码用本次内存里的结果，`usage-status.json` 写不下来时直接报错。写记录前再核对一次这个名字现在的邮箱，查询期间被删掉或改存成别的登录的名字不写。
 - `list` 的每一行是：套餐、`5h`（`gemini-5h`）、`7d`（`gemini-weekly`）、`Argon`（id 里带 `argon` 的那一项）。每项显示剩余百分比和本机时区的重置时间。剩余 100% 时不显示重置时间。当前时间过了重置时间就按 100% 显示。账号没有这一项时显示 `—`。不显示套餐到期时间，这两个接口里没有这个字段。
@@ -55,7 +61,7 @@
 - 面板的“新增账号…”不在面板里登录，`agy` 的登录界面要一个终端。它把 `~/.agy-cs/add-account.command`（权限 `700`）写成两行：`#!/bin/sh` 和 `exec '<本程序的路径>' switch add`，再用 `NSWorkspace` 打开，由系统默认的终端程序执行。实测默认是 Terminal.app，脚本里 stdin 是终端、进程在前台、`PATH` 里有 `agy`。路径用单引号括起来，路径里的单引号写成 `'\''`。这是仓库里唯一一处 shell，只负责把终端打开；登录和回滚仍是 `switch add` 那一套，不要往这个文件里加别的指令。面板自己没有终端，`switch` 和 `switch add` 在面板进程里按“需要终端”报错，不动钥匙串。
 - `agy-cs switch` 不带名字时在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；从第 3 项起是已有账号。选已有账号完成切换后，在当前终端启动 `agy`。`agy-cs switch add` 跳过选择，直接新增账号。新增账号会先保存当前登录，临时移开钥匙串那一项，再启动 `agy` 让用户登录；登录写入新邮箱后按 `@` 前的字符保存，然后重新启动 `agy`。登录没有完成就退出时，把原来的钥匙串登录写回去。`agy-cs switch <名字>` 只切换，不启动 `agy`。`add` 不是账号名：`save`、`rename` 的新名字和按邮箱自动取名都拒绝它；以前留下的 `add` 记录仍能在菜单里选，也能 `rename`、`rm`。
 - 把终端交给 `agy` 之前，要求本进程是终端的前台进程组（`tcgetpgrp` 等于 `getpgrp`）。`agy-cs switch &` 这样放到后台时直接报错，不删除也不改写钥匙串那一项。首次运行的那一次读取照常发生，和其他指令一样。交出前台那一步不忽略 `SIGTTOU`，只在交出之后、收回终端期间忽略 `SIGTTOU` / `SIGTTIN`。
-- `rename <新名字>` 改当前账号的名字。`rename <旧名字> <新名字>` 改指定账号的名字。只改保存的副本和 `~/.agy-cs/` 记录，不读钥匙串。
+- `rename <新名字>` 改当前账号的名字。`rename <旧名字> <新名字>` 改指定账号的名字。只改保存的副本和 `~/.agy-cs/` 记录，不写钥匙串；不带旧名字时读一次钥匙串，看当前账号是哪个。
 - 界面语言默认跟随系统。`agy-cs language` 可改成 `zh-Hans`、`zh-Hant`、`en`、`ja`。
 - 界面句子放在 `Sources/AgyAccount/i18n/`。四种语言各一个文件：`zh-Hans.txt`、`zh-Hant.txt`、`en.txt`、`ja.txt`。改文案只改这些文件，格式见同目录 `README.md`。新增句子时，`TextKey` 和四个文件使用同一个键名。
 
@@ -68,6 +74,14 @@
 - 改了面板之后，把它画成图片看一眼：`AGY_PANEL_SNAPSHOT=/tmp/agy-panel make test FILTER=testPanelPicturesWhenEnabled`。图片写在那个目录里，用的是临时目录里的假账号。
 - 改了行上的点击或拖动之后，把真的鼠标事件送进面板跑一遍：`AGY_PANEL_GESTURES=1 make test FILTER=testPanelGesturesWhenEnabled`。它会在屏幕左下角开一个两秒钟的小窗口，用的是临时目录里的假账号。
 - 改了打包或启动方式之后执行 `make app`，核对三件事：`codesign --verify --strict "build/Agy Switcher.app"` 通过；在终端里运行 `"build/Agy Switcher.app/Contents/MacOS/agy-cs" ls` 仍然是命令行；`open "build/Agy Switcher.app"` 之后进程留着、菜单栏出现图标。
+
+## 方案和留档
+
+- 要改行为的任务，先给出完整的实现方案，写进 Linear 上对应 issue 的评论，然后停下来。用户明确同意之后才动代码。方案要写到能照着做：改哪些指令、每种情况下怎么表现、哪几处是自己定的、怎么验证、哪些不做。
+- 没有对应的 issue 时自己新建一个，不用先问。
+- 调研结果、分析过程和相关决策都要在 Linear 上对应的 issue 下留档，不只留在对话里。这些东西会有好几轮：每一轮新的内容接在后面新写一条评论，不回头改旧评论，也不为了归成“调研、分析、决策”几类把不同轮的内容并进同一条。只有和已有评论明显重复的才不再写。决定不做的事同样记一条，写明是谁在哪天决定的，免得以后被当成还没定。
+- 状态跟着进度改，不用先问：方案定下来、开始动代码时改成 `In Progress`；PR 合并之后改成 `Done`。一个 issue 分几个 PR 做时，最后一个合并了才改成 `Done`。
+- Linear 的写法按 `linear-index` skill 的约定，动手前先加载它。
 
 ## 本地开发用 worktree
 

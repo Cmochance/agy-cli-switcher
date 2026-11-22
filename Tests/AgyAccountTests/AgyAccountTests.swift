@@ -39,7 +39,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.reads, 1)
         XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
         XCTAssertEqual(fixture.run([]).output, ["* alice  alice@example.com"])
-        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.keychain.reads, 3)
         XCTAssertEqual(try mode(fixture.locations.accountsDirectory), 0o700)
         XCTAssertEqual(try mode(fixture.locations.tokenURL("alice")), 0o600)
         let saved = try String(contentsOf: fixture.locations.metaURL("alice"), encoding: .utf8)
@@ -90,16 +90,25 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
     }
 
-    func testSwitchRefusesUnsavedCurrentLogin() throws {
-        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com"))
+    // 当前登录还没保存过时，切走之前先把它存下来；名字起不出来才拒绝。
+    func testSwitchSavesAnUnsavedCurrentLoginFirst() throws {
+        let alice = makeBlob(email: "alice@example.com")
+        let carol = makeBlob(email: "carol@example.com")
+        let fixture = try Fixture(blob: alice)
         defer { fixture.cleanup() }
         XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
-        fixture.keychain.blob = makeBlob(email: "carol@example.com")
-        let refused = fixture.run(["switch", "alice"])
+        fixture.keychain.blob = carol
+        let switched = fixture.run(["switch", "alice"])
+        XCTAssertEqual(switched.code, 0)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
+        XCTAssertEqual(stripNewlines(try String(contentsOf: fixture.locations.tokenURL("carol"), encoding: .utf8)), carol)
+        XCTAssertEqual(fixture.run(["list"]).output, ["* alice  alice@example.com", "  carol  carol@example.com"])
+
+        fixture.keychain.blob = makeBlob(email: "a+b@example.com")
+        let refused = fixture.run(["switch", "carol"])
         XCTAssertEqual(refused.code, 1)
         XCTAssertTrue(refused.errors.joined(separator: "\n").contains("还没保存"))
-        XCTAssertEqual(fixture.keychain.writes, [])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.quota.path))
+        XCTAssertEqual(fixture.keychain.writes, [alice])
     }
 
     func testNextSkipsSameEmailAndStopsWhenOnlyOneMailbox() throws {
@@ -138,7 +147,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.keychain.reads, 2)
         fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "a")
         XCTAssertEqual(fixture.run(["rm", "alice"]).code, 0)
-        XCTAssertEqual(fixture.keychain.reads, 2)
+        XCTAssertEqual(fixture.keychain.reads, 3)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
         XCTAssertEqual(fixture.keychain.blob, makeBlob(email: "alice@example.com", refresh: "a"))
 
@@ -168,9 +177,9 @@ final class AgyAccountTests: XCTestCase {
         try sidecar.write(to: fixture.locations.metaURL("alice"), atomically: true, encoding: .utf8)
         try Data("alice\n".utf8).write(to: fixture.locations.activeURL)
         try Data(makeBlob(email: "bob@example.com").utf8).write(to: fixture.locations.tokenURL("alice"))
-        XCTAssertEqual(fixture.run(["list"]).output, ["* alice  alice@example.com"])
-        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
-        XCTAssertEqual(fixture.keychain.reads, 0)
+        XCTAssertEqual(fixture.run(["list"]).output, ["  alice  alice@example.com", "* bob  bob@example.com"])
+        XCTAssertEqual(fixture.run(["current"]).output, ["bob@example.com"])
+        XCTAssertEqual(fixture.keychain.reads, 2)
         let profile = try String(contentsOf: fixture.tool.profileURL("alice"), encoding: .utf8)
         XCTAssertFalse(profile.contains("go-keyring"))
         XCTAssertFalse(profile.contains("bob@example.com"))
@@ -255,7 +264,7 @@ final class AgyAccountTests: XCTestCase {
         again.terminal.isInteractive = true
         again.terminal.lines = ["1", "q"]
         XCTAssertEqual(again.run(["switch"]).code, 0)
-        XCTAssertEqual(again.keychain.reads, reads)
+        XCTAssertEqual(again.keychain.reads, reads + 2)
         XCTAssertEqual(again.launcher.started, 0)
         XCTAssertEqual(again.run(["switch", "alice", "extra"]).code, 2)
         XCTAssertEqual(again.run(["switch", "add", "extra"]).code, 2)
@@ -528,7 +537,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(refreshed.errors, [])
         XCTAssertEqual(refreshed.output.map(cells), expected)
         XCTAssertEqual(fixture.usage.calls, [["alice", "bob"]])
-        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.reads, reads + 2)
         XCTAssertEqual(fixture.keychain.writes, [alice])
         XCTAssertEqual(try mode(fixture.tool.usageDirectory), 0o700)
         XCTAssertEqual(try mode(fixture.tool.usageURL("alice")), 0o600)
@@ -540,7 +549,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(listed.output, refreshed.output)
         XCTAssertEqual(listed.errors, [])
         XCTAssertEqual(fixture.usage.calls.count, 1)
-        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.reads, reads + 3)
 
         fixture.usage.snapshots = ["alice": pro]
         let partial = fixture.run(["refresh", "quota"])
@@ -574,7 +583,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(kept.errors, ["名字 bob 下面已经存着 bob@example.com，所以没有保存。确认用当前登录替换它，再用 agy-cs save bob --force。"])
         XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
         XCTAssertEqual(fixture.run(["save", "bob", "--force"]).code, 0)
-        XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com"])
+        XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com", "* carol  carol@example.com"])
         fixture.usage.snapshots = nil
         let healed = fixture.run(["refresh", "quota"])
         XCTAssertEqual(healed.code, 0)
@@ -712,14 +721,18 @@ final class AgyAccountTests: XCTestCase {
         blocked.terminal.lines = ["2"]
         let refused = blocked.run(["switch"])
         XCTAssertEqual(refused.code, 1)
-        XCTAssertTrue(refused.errors.joined(separator: "\n").contains("名字 alice 已经被 bob@example.com 使用"))
+        // 名字 alice 下面的副本是别人的：不动它，当前登录另存成 alice-2，新增账号照常进行；没登录成就把原来的登录写回去。
         XCTAssertEqual(
             stripNewlines(try String(contentsOf: blocked.locations.tokenURL("alice"), encoding: .utf8)),
             bob
         )
+        XCTAssertEqual(
+            stripNewlines(try String(contentsOf: blocked.locations.tokenURL("alice-2"), encoding: .utf8)),
+            alice
+        )
         XCTAssertEqual(blocked.keychain.blob, alice)
         XCTAssertFalse(blocked.keychain.missing)
-        XCTAssertTrue(blocked.keychain.writes.isEmpty)
+        XCTAssertEqual(blocked.keychain.writes, [alice])
     }
 
     func testRenameMovesCatalogWithoutReadingKeychain() throws {
@@ -755,7 +768,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("carol").path))
         XCTAssertEqual(fixture.run(["rename"]).code, 2)
         XCTAssertEqual(fixture.run(["rename", "a", "b", "c"]).code, 2)
-        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.reads, reads + 3)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.quota.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.conversation.path))
     }
@@ -769,9 +782,9 @@ final class AgyAccountTests: XCTestCase {
             "已初始化当前登录: alice  alice@example.com",
             "* alice  alice@example.com",
         ])
-        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.keychain.reads, 2)
         XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
-        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.keychain.reads, 3)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.tool.initializedFile.path))
         let profile = try String(contentsOf: fixture.tool.profileURL("alice"), encoding: .utf8)
         XCTAssertFalse(profile.contains("refresh"))
@@ -780,11 +793,11 @@ final class AgyAccountTests: XCTestCase {
         let rejected = try Fixture(blob: makeBlob(email: "a+b@example.com"), markInitialized: false)
         defer { rejected.cleanup() }
         let rejectedRun = rejected.run(["current"])
-        XCTAssertEqual(rejectedRun.code, 1)
+        XCTAssertEqual(rejectedRun.code, 0)
         XCTAssertTrue(rejectedRun.errors.joined(separator: "\n").contains("save"))
-        XCTAssertEqual(rejected.keychain.reads, 1)
+        XCTAssertEqual(rejected.keychain.reads, 2)
         XCTAssertEqual(rejected.run(["list"]).code, 0)
-        XCTAssertEqual(rejected.keychain.reads, 1)
+        XCTAssertEqual(rejected.keychain.reads, 3)
         XCTAssertFalse(FileManager.default.fileExists(atPath: rejected.tool.profileURL("a+b").path))
 
         let missing = try Fixture(blob: makeBlob(email: "alice@example.com"), markInitialized: false)
@@ -794,9 +807,9 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(empty.code, 0)
         XCTAssertTrue(empty.errors.joined(separator: "\n").contains("没有自动保存"))
         XCTAssertEqual(empty.output, ["还没有保存的账号。先在 agy 里登录，再执行 agy-cs save <名字>。"])
-        XCTAssertEqual(missing.keychain.reads, 1)
+        XCTAssertEqual(missing.keychain.reads, 2)
         XCTAssertEqual(missing.run(["help"]).code, 0)
-        XCTAssertEqual(missing.keychain.reads, 1)
+        XCTAssertEqual(missing.keychain.reads, 2)
 
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }
@@ -1158,6 +1171,7 @@ final class Fixture {
     let launcher = ScriptedLauncher()
     let usage = ScriptedUsage()
     let refresher = ScriptedRefresher()
+    var stateWait: TimeInterval = 5
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -1211,7 +1225,8 @@ final class Fixture {
             terminal: NoTerminal(),
             launcher: launcher,
             usage: usage,
-            refresher: refresher
+            refresher: refresher,
+            stateWait: stateWait
         ))
     }
 

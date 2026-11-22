@@ -13,12 +13,16 @@ struct ToolLocations {
     var addCommandFile: URL
     var orderFile: URL
     var appLockFile: URL
+    var stateLockFile: URL
+    var dismissedFile: URL
 
     init(home: URL) {
         root = home.appendingPathComponent(".agy-cs", isDirectory: true)
         addCommandFile = root.appendingPathComponent("add-account.command")
         orderFile = root.appendingPathComponent("order")
         appLockFile = root.appendingPathComponent("app.lock")
+        stateLockFile = root.appendingPathComponent("state.lock")
+        dismissedFile = root.appendingPathComponent("not-saved")
         accountsDirectory = root.appendingPathComponent("accounts", isDirectory: true)
         usageDirectory = root.appendingPathComponent("usage", isDirectory: true)
         clientFile = root.appendingPathComponent("agy-client.json")
@@ -166,7 +170,7 @@ struct ToolProfile {
     // 同一时间只让一个进程查询并写额度记录。进程结束时锁自动释放。
     // 锁被占着时最多等 wait 秒，等不到返回 nil。waited 表示等过别的进程。
     func lockUsage(wait: TimeInterval) -> (descriptor: Int32, waited: Bool)? {
-        let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR, 0o600)
+        let descriptor = open(locations.usageLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         let deadline = DispatchTime.now() + wait
         var waited = false
         while descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) != 0, errno == EWOULDBLOCK || errno == EINTR {
@@ -178,6 +182,39 @@ struct ToolProfile {
             usleep(100_000)
         }
         return (descriptor, waited)
+    }
+
+    // 同一时间只让一个进程改账号（保存、切换、删除、改名、排序、新增）。进程结束时锁自动放开。
+    // 带 O_CLOEXEC，不传给之后启动的 agy 和查额度的进程。锁被占着时最多等 wait 秒，等不到返回 nil。
+    func lockState(wait: TimeInterval) -> Int32? {
+        try? ensureRoot()
+        let descriptor = open(locations.stateLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            return nil
+        }
+        let deadline = DispatchTime.now() + wait
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR, DispatchTime.now() < deadline else {
+                close(descriptor)
+                return nil
+            }
+            usleep(50_000)
+        }
+        return descriptor
+    }
+
+    // 用户带着 --force 删掉了当前登录唯一的一份副本时，把这个邮箱记在这里，之后不再自动保存它。
+    // 这个邮箱重新保存，或者当前登录换成了别的，这条记录就没用了。
+    func dismissedEmail() -> String {
+        ((try? readText(locations.dismissedFile)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func setDismissed(_ email: String) {
+        try? AtomicFile.write(locations.dismissedFile, email + "\n")
+    }
+
+    func clearDismissed() {
+        try? manager.removeItem(at: locations.dismissedFile)
     }
 
     func writeUsageStatus(failed: [String]) throws {

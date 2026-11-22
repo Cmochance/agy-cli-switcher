@@ -174,6 +174,19 @@ refresh の後ろに書けるのは quota だけです。agy-cs refresh quota �
 [noCurrentAccount]
 現在のアカウントはまだ記録されていません。agy でログインしてから agy-cs save <名前> を実行してください。
 
+
+[currentNoLogin]
+現在ログインしていません。agy でログインすると自動で保存されます。
+
+[currentUnreadable]
+キーチェーンのログインを読み取れません。チェックが付いているのは前回記録したアカウントです。
+
+[autoSaveFailed]
+現在のログイン %1 を自動で保存できませんでした。agy-cs save <名前> で保存してください。
+
+[stateBusy]
+別の agy-cs がアカウントを変更中です（アカウントの追加がまだ終わっていない可能性があります）。少し待ってからやり直してください。
+
 [languageUnknown]
 言語 %1 は使えません。コード: zh-Hans、zh-Hant、en、ja。
 

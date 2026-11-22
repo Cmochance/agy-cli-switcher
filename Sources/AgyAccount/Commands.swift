@@ -27,6 +27,7 @@ struct AccountCommands {
     var launcher: any AgyLaunching
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
+    var stateWait: TimeInterval = 5
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -72,25 +73,25 @@ struct AccountCommands {
             try list()
             reportFailedRefresh()
         case .save(let name, let force, let expecting):
-            try save(name, force: force, expecting: expecting)
+            try locked { try save(name, force: force, expecting: expecting) }
         case .choose:
             try choose()
         case .add:
             try addFromCommand()
         case .change(let name):
-            try switchTo(name)
+            try locked { try switchTo(name) }
         case .next:
-            try next()
+            try locked { try next() }
         case .refreshQuota:
             try refreshQuota()
         case .refreshQuotaDetached:
             refresher.spawnWorker()
         case .rename(let from, let to):
-            try rename(from: from, to: to)
+            try locked { try rename(from: from, to: to) }
         case .move(let name, let position):
-            try move(name, to: position)
+            try locked { try move(name, to: position) }
         case .remove(let name, let force, let expecting):
-            try remove(name, force: force, expecting: expecting)
+            try locked { try remove(name, force: force, expecting: expecting) }
         case .help:
             stdout(text.line(.help))
         case .languageShow:
@@ -105,8 +106,9 @@ struct AccountCommands {
             throw UsageFailure(.switchNeedsTerminal)
         }
         while true {
-            let activeName = profile.activeName()
-            let activeEmail = profileEmail(activeName)
+            let live = currentLogin()
+            let activeName = live.name
+            let activeEmail = live.email
             let others = profile.names().filter { $0 != activeName }
             if activeName.isEmpty || activeEmail.isEmpty {
                 stdout("  1. " + text.line(.menuNoCurrent))
@@ -142,7 +144,7 @@ struct AccountCommands {
                 stderr(text.line(.menuBadChoice))
                 continue
             }
-            try switchTo(others[index])
+            try locked { try switchTo(others[index]) }
             try launchAgy()
             return
         }
@@ -155,34 +157,44 @@ struct AccountCommands {
         try addAccount()
     }
 
+    // 从移开钥匙串那一项到新登录存好（或者原来的登录写回去）一直拿着锁：这段时间钥匙串是空的或者是还没存的新登录，
+    // 别的进程不能切换，面板的自动保存也不能抢在前面把新登录存掉。重新启动 agy 之前放开。
     private func addAccount() throws {
-        let snapshot = try captureLogin()
-        if let snapshot {
-            try keychain.checkWritable(snapshot.blob)
-            try keepSnapshot(snapshot)
-        }
-        try keychain.deleteBlob()
-        let name: String
-        let observed: ObservedLogin
-        do {
-            stdout(text.line(.loginOpening))
-            let outcome = try launcher.runUntilLoggedIn {
-                try self.observeLogin()
-            }
-            guard case .loggedIn(let login) = outcome else {
-                throw AccountFailure(snapshot == nil ? .loginNotFinished : .loginCancelled)
-            }
-            name = try availableDefaultName(login.meta.email)
-            try storeLogin(name: name, blob: login.blob, meta: login.meta)
-            observed = login
-        } catch {
+        let (snapshot, name, observed): (ObservedLogin?, String, ObservedLogin) = try locked {
+            let snapshot = try captureLogin()
             if let snapshot {
-                try keychain.writeBlob(snapshot.blob)
-                if (error as? AccountFailure)?.key != .loginCancelled {
-                    stderr(text.line(.loginRestored))
+                try keychain.checkWritable(snapshot.blob)
+                // 用户带着 --force 删掉过的登录不存回账号名单，但登录期间要留一份在 rollbackURL：
+                // 进程中途被杀掉时，下一条指令从那里把它写回钥匙串。新登录存好或者原登录写回去之后删掉。
+                if profile.dismissedEmail() == snapshot.meta.email, profile.slots(forEmail: snapshot.meta.email).isEmpty {
+                    try files.writeRollback(snapshot.blob)
+                } else {
+                    try keepSnapshot(snapshot)
                 }
             }
-            throw error
+            try keychain.deleteBlob()
+            do {
+                stdout(text.line(.loginOpening))
+                let outcome = try launcher.runUntilLoggedIn {
+                    try self.observeLogin()
+                }
+                guard case .loggedIn(let login) = outcome else {
+                    throw AccountFailure(snapshot == nil ? .loginNotFinished : .loginCancelled)
+                }
+                let name = try availableDefaultName(login.meta.email)
+                try storeLogin(name: name, blob: login.blob, meta: login.meta)
+                files.removeRollback()
+                return (snapshot, name, login)
+            } catch {
+                if let snapshot {
+                    try keychain.writeBlob(snapshot.blob)
+                    files.removeRollback()
+                    if (error as? AccountFailure)?.key != .loginCancelled {
+                        stderr(text.line(.loginRestored))
+                    }
+                }
+                throw error
+            }
         }
         if let snapshot, snapshot.meta.email != observed.meta.email {
             if let quota = files.clearQuotaCache() {
@@ -199,6 +211,8 @@ struct AccountCommands {
     // 切换之后由另一个进程执行这条指令，所以这里出什么问题都不影响切换。
     private func refreshQuota() throws {
         let started = DispatchTime.now()
+        // 当前登录还没保存过的话先存下来，这一次就把它一起查了，不用再另起一个进程。
+        _ = currentLogin(refreshing: false)
         guard let lock = profile.lockUsage(wait: usage.budget) else {
             throw AccountFailure(.usageBusy)
         }
@@ -283,7 +297,7 @@ struct AccountCommands {
             backedUp = true
         }
         if !backedUp {
-            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
+            try saveUnsaved(snapshot)
         }
     }
 
@@ -293,7 +307,7 @@ struct AccountCommands {
         if let sourceName {
             source = try checkName(sourceName)
         } else {
-            let active = profile.activeName()
+            let active = currentLogin(holdingLock: true).name
             guard !active.isEmpty else {
                 throw AccountFailure(.noCurrentAccount)
             }
@@ -354,16 +368,146 @@ struct AccountCommands {
     }
 
     private func current() throws {
-        let name = profile.activeName()
-        guard !name.isEmpty else {
-            throw AccountFailure(.noCurrentAccount)
+        let live = currentLogin(announcing: false)
+        guard !live.email.isEmpty else {
+            throw AccountFailure(live.missing ? .currentNoLogin : .noCurrentAccount)
         }
-        stdout(try profile.read(name).email)
+        live.notices.forEach(stderr)
+        stdout(live.email)
     }
 
-    // 只读 ~/.agy-cs/ 里的记录，不联网，不读钥匙串。list 和菜单栏面板都从这里取。
+    struct CurrentLogin {
+        var email = ""
+        var name = ""
+        var missing = false
+        var notices: [String] = []
+    }
+
+    // 当前账号是谁，只看钥匙串里那一项的邮箱，不看 ~/.agy-cs/active：别的进程（比如还开着的 agy）会改钥匙串。
+    // active 只在同一个邮箱存了几个名字时决定指的是哪个名字，和钥匙串对不上就改正它。
+    // 钥匙串里的邮箱还没保存过时直接保存，不提示。钥匙串读不出来时退回 active 的记录并说一声。
+    // holdingLock：调用的指令已经拿着改账号的锁。没拿着时，保存和改正 active 只在拿得到锁的时候做，拿不到就留给下一次。
+    func currentLogin(
+        holdingLock: Bool = false, saving: Bool = true, announcing: Bool = true, refreshing: Bool = true
+    ) -> CurrentLogin {
+        var result = CurrentLogin()
+        let login: ObservedLogin
+        do {
+            if files.readRollback() != nil {
+                if holdingLock {
+                    recoverInterruptedAdd()
+                } else if let descriptor = profile.lockState(wait: 0) {
+                    recoverInterruptedAdd()
+                    close(descriptor)
+                }
+            }
+            let blob = try keychain.readBlob()
+            login = ObservedLogin(blob: blob, meta: try decodeLogin(blob, source: .keychain))
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            result.missing = true
+            if announcing {
+                result.notices.append(text.line(.currentNoLogin))
+            }
+            return result
+        } catch {
+            result.name = profile.activeName()
+            result.email = profileEmail(result.name)
+            result.notices.append(text.line(.currentUnreadable))
+            return result
+        }
+        result.email = login.meta.email
+        if profile.dismissedEmail() != "", profile.dismissedEmail() != login.meta.email {
+            profile.clearDismissed()
+        }
+        let active = profile.activeName()
+        var slots = profile.slots(forEmail: login.meta.email)
+        if slots.contains(active) {
+            result.name = active
+            return result
+        }
+        guard saving else {
+            result.name = slots.first ?? ""
+            return result
+        }
+        let descriptor = holdingLock ? nil : profile.lockState(wait: 0)
+        guard holdingLock || descriptor != nil else {
+            result.name = slots.first ?? ""
+            return result
+        }
+        defer {
+            if let descriptor {
+                close(descriptor)
+            }
+        }
+        slots = profile.slots(forEmail: login.meta.email)
+        if slots.isEmpty, profile.dismissedEmail() != login.meta.email {
+            if (try? saveUnsaved(login)) != nil {
+                if refreshing {
+                    refresher.startDetached()
+                }
+            } else {
+                result.notices.append(text.line(.autoSaveFailed, login.meta.email))
+            }
+            slots = profile.slots(forEmail: login.meta.email)
+        }
+        result.name = slots.first ?? ""
+        if !result.name.isEmpty, profile.activeName() != result.name {
+            try? files.setActive(result.name)
+            try? profile.setActive(result.name)
+        }
+        return result
+    }
+
+    // 名字用邮箱 @ 前面的字符；被另一个邮箱占着时试 -2、-3…，不动别人的副本。
+    private func saveUnsaved(_ login: ObservedLogin) throws {
+        let base = try defaultAccountName(email: login.meta.email)
+        for number in 1 ... 99 {
+            // 名字最长 64 个字符，加后缀时把前面截短，留出后缀的位置。
+            let suffix = number == 1 ? "" : "-\(number)"
+            let head = String(String.UnicodeScalarView(base.unicodeScalars.prefix(64 - suffix.unicodeScalars.count)))
+            guard let name = try? checkNewName(head + suffix),
+                  (try? checkHolder(of: name, allowed: [login.meta.email])) != nil
+            else {
+                continue
+            }
+            try storeLogin(name: name, blob: login.blob, meta: login.meta)
+            return
+        }
+        throw AccountFailure(.invalidName)
+    }
+
+    private func locked<T>(_ body: () throws -> T) throws -> T {
+        guard let descriptor = profile.lockState(wait: stateWait) else {
+            throw AccountFailure(.stateBusy)
+        }
+        defer { close(descriptor) }
+        recoverInterruptedAdd()
+        return try body()
+    }
+
+    // 上一次新增账号做到一半进程就没了：钥匙串那一项已经移开，原来的登录还留在 rollbackURL。
+    // 拿着锁的时候调用（没有别的新增账号正在进行）。钥匙串还空着就把它写回去；已经有登录了就只把这份没用的东西删掉。
+    private func recoverInterruptedAdd() {
+        guard let blob = files.readRollback() else {
+            return
+        }
+        do {
+            _ = try keychain.readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            guard (try? decodeLogin(blob, source: .saved)) != nil, (try? keychain.writeBlob(blob)) != nil else {
+                return
+            }
+        } catch {
+            return
+        }
+        files.removeRollback()
+    }
+
+    // 读 ~/.agy-cs/ 里的记录和钥匙串里的邮箱，不联网。list 和菜单栏面板都从这里取。
     func listing() throws -> [AccountRow] {
-        let activeEmail = profileEmail(profile.activeName())
+        let live = currentLogin()
+        live.notices.forEach(stderr)
+        let activeEmail = live.email
         let moment = parseTimestamp(profile.now()) ?? Date()
         return try profile.names().compactMap { name in
             // 面板每两秒读一次，别的进程可能正在改名或删除：列出名字之后、读它之前，这条记录没了就跳过。
@@ -416,6 +560,7 @@ struct AccountCommands {
         try profile.write(name: checked, meta: meta)
         try files.setActive(checked)
         try profile.setActive(checked)
+        profile.clearDismissed()
         stdout(text.line(.saved, checked, meta.email))
     }
 
@@ -434,8 +579,13 @@ struct AccountCommands {
             }
             return
         }
-        if profile.slots(forEmail: current.email).isEmpty {
-            throw AccountFailure(.currentNotSaved, current.email)
+        // 当前登录还没保存过就先存下来再切走。用户带着 --force 删掉的那一个不再存。
+        if profile.slots(forEmail: current.email).isEmpty, profile.dismissedEmail() != current.email {
+            do {
+                try saveUnsaved(ObservedLogin(blob: currentBlob, meta: current))
+            } catch {
+                throw AccountFailure(.currentNotSaved, current.email)
+            }
         }
         let updated = try persistCurrentRefresh(blob: currentBlob, meta: current)
         try keychain.writeBlob(target.blob)
@@ -508,12 +658,14 @@ struct AccountCommands {
         if let expecting, meta.email != expecting {
             throw AccountFailure(.accountChanged, checked, meta.email)
         }
-        let currentEmail = profileEmail(profile.activeName())
-        if meta.email == currentEmail, !force {
-            let others = profile.slots(forEmail: meta.email).filter { $0 != checked }
-            if others.isEmpty {
+        let currentEmail = currentLogin(holdingLock: true, saving: false, announcing: false).email
+        let others = profile.slots(forEmail: meta.email).filter { $0 != checked }
+        if meta.email == currentEmail, others.isEmpty {
+            if !force {
                 throw AccountFailure(.onlyCopy, checked, meta.email)
             }
+            // 不然下一次 list 又会把它自动存回来。
+            profile.setDismissed(meta.email)
         }
         if tokenExists {
             try files.removeSaved(checked)
@@ -617,6 +769,7 @@ struct AccountCommands {
         try profile.write(name: checked, meta: meta)
         try files.setActive(checked)
         try profile.setActive(checked)
+        profile.clearDismissed()
     }
 
     private func missingAccount(_ name: String) -> AccountFailure {
