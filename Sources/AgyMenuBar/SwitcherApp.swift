@@ -45,11 +45,56 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "person.2.circle", accessibilityDescription: "Agy Switcher")
+        item.button?.image = Self.makeStatusIcon()
         item.button?.target = self
         item.button?.action = #selector(clicked(_:))
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         self.item = item
+    }
+
+    // 叠放的双账号卡片与双向切换箭头：与 App 图标同源的 18×18 菜单栏模板图标。
+    static func makeStatusIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor.black.setStroke()
+            let frontRect = NSRect(x: 4.75, y: 2.25, width: 11.5, height: 9.5)
+            let backRect = NSRect(x: 1.75, y: 6.25, width: 11.5, height: 9.5)
+
+            // 沿前卡外扩一圈挖空裁剪，让叠放处的后卡边框留出干净间隙。
+            NSGraphicsContext.saveGraphicsState()
+            let clip = NSBezierPath(rect: rect)
+            clip.append(NSBezierPath(roundedRect: frontRect.insetBy(dx: -1.1, dy: -1.1), xRadius: 3.1, yRadius: 3.1))
+            clip.windingRule = .evenOdd
+            clip.addClip()
+            let back = NSBezierPath(roundedRect: backRect, xRadius: 2.2, yRadius: 2.2)
+            back.lineWidth = 1.4
+            back.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+
+            let front = NSBezierPath(roundedRect: frontRect, xRadius: 2.2, yRadius: 2.2)
+            front.lineWidth = 1.4
+            front.stroke()
+
+            let arrows = NSBezierPath()
+            arrows.lineWidth = 1.2
+            arrows.lineCapStyle = .round
+            arrows.lineJoinStyle = .round
+            arrows.move(to: NSPoint(x: 7.5, y: 8.55))
+            arrows.line(to: NSPoint(x: 13.3, y: 8.55))
+            arrows.move(to: NSPoint(x: 12.0, y: 9.7))
+            arrows.line(to: NSPoint(x: 13.3, y: 8.55))
+            arrows.line(to: NSPoint(x: 12.0, y: 7.4))
+            arrows.move(to: NSPoint(x: 13.5, y: 5.45))
+            arrows.line(to: NSPoint(x: 7.7, y: 5.45))
+            arrows.move(to: NSPoint(x: 9.0, y: 6.6))
+            arrows.line(to: NSPoint(x: 7.7, y: 5.45))
+            arrows.line(to: NSPoint(x: 9.0, y: 4.3))
+            arrows.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Agy Switcher"
+        return image
     }
 
     @objc private func clicked(_ sender: Any?) {

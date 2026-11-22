@@ -635,6 +635,41 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(menu.items[0].target === controller)
         XCTAssertNotNil(menu.items[0].action)
 
+        let icon = MenuBarController.makeStatusIcon()
+        XCTAssertTrue(icon.isTemplate)
+        XCTAssertEqual(icon.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(icon.accessibilityDescription, "Agy Switcher")
+        let iconRep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 36,
+            pixelsHigh: 36,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        iconRep.size = NSSize(width: 18, height: 18)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: iconRep)
+        let cgIcon = try XCTUnwrap(icon.cgImage(forProposedRect: nil, context: NSGraphicsContext.current, hints: nil))
+        NSGraphicsContext.current?.cgContext.draw(cgIcon, in: CGRect(x: 0, y: 0, width: 18, height: 18))
+        NSGraphicsContext.restoreGraphicsState()
+        let pixelBytes = try XCTUnwrap(iconRep.bitmapData)
+        var transparent = 0
+        var drawn = 0
+        for index in stride(from: 3, to: 36 * 36 * 4, by: 4) {
+            if pixelBytes[index] == 0 {
+                transparent += 1
+            } else {
+                drawn += 1
+            }
+        }
+        XCTAssertGreaterThan(transparent, 0)
+        XCTAssertGreaterThan(drawn, 0)
+
         XCTAssertTrue(MenuBarController.opensMenu(.rightMouseUp, modifiers: []))
         XCTAssertTrue(MenuBarController.opensMenu(.leftMouseUp, modifiers: [.control]))
         XCTAssertFalse(MenuBarController.opensMenu(.leftMouseUp, modifiers: []))
