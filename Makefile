@@ -1,6 +1,22 @@
-.PHONY: build test install app dist
+.PHONY: build test install app dist locked-build locked-test locked-dist
 
 APP_NAME := Agy Switcher
+
+# 编译缓存只有一份，放在主目录的 .build 里；git worktree 里执行时也用主目录的那一份，不各存一份。
+# 主目录是 .git 所在的文件夹；不在 git 仓库里时就用当前文件夹。
+MAIN_DIR := $(shell common="$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && dirname "$$common")
+SCRATCH := $(if $(MAIN_DIR),$(MAIN_DIR),$(CURDIR))/.build
+SWIFT_FLAGS := --scratch-path "$(SCRATCH)"
+
+# 同一时间只让一个文件夹编译。几个 worktree 共用一份缓存，编译出来的文件也在同一个位置：
+# 不排队的话，这边刚编完还没拷走，那边就把它换成了另一个分支的。
+# 锁被占着时先说一声，再等前一个做完。$(1) 是拿到锁之后要执行的目标。
+LOCK := $(SCRATCH)/agy-cs-make.lock
+define queued
+mkdir -p "$(SCRATCH)" && \
+{ /usr/bin/lockf -k -t 0 "$(LOCK)" true 2>/dev/null || echo "另一个文件夹正在用 $(SCRATCH) 编译，等它做完…"; } && \
+/usr/bin/lockf -k "$(LOCK)" $(MAKE) --no-print-directory $(1)
+endef
 # 签名身份。默认 ad-hoc；有 Developer ID 证书时用 make dist SIGN_IDENTITY="Developer ID Application: …"。
 SIGN_IDENTITY ?= -
 
@@ -15,15 +31,22 @@ codesign --force --sign "$(SIGN_IDENTITY)" "$(2)"
 endef
 
 build:
-	swift build -c release
+	@$(call queued,locked-build)
+
+locked-build:
+	swift build -c release $(SWIFT_FLAGS)
 	mkdir -p build
-	bin_dir="$$(swift build -c release --show-bin-path)" && \
+	bin_dir="$$(swift build -c release $(SWIFT_FLAGS) --show-bin-path)" && \
 	rm -f build/agy-cs && \
 	cp -f "$$bin_dir/agy-cs" build/agy-cs && \
 	codesign --force --sign - build/agy-cs
 
+# 只跑一部分测试：make test FILTER=testPanelPicturesWhenEnabled。环境变量照常写在 make 前面。
 test:
-	swift test --disable-sandbox
+	@$(call queued,locked-test)
+
+locked-test:
+	swift test --disable-sandbox $(SWIFT_FLAGS) $(if $(FILTER),--filter $(FILTER))
 
 install: build
 	mkdir -p "$(HOME)/.local/bin"
@@ -36,11 +59,14 @@ app: build
 # 它不生成 embedInCode 的 PackageResources，编译不过（CI 实测）。每个架构编完就拷走，
 # 因为有的版本两次编译用同一个输出目录。
 dist:
+	@$(call queued,locked-dist)
+
+locked-dist:
 	rm -rf dist
 	mkdir -p dist/thin dist/cli dist/app
 	for arch in arm64 x86_64; do \
-		swift build -c release --arch $$arch && \
-		cp "$$(swift build -c release --arch $$arch --show-bin-path)/agy-cs" dist/thin/$$arch || exit 1; \
+		swift build -c release $(SWIFT_FLAGS) --arch $$arch && \
+		cp "$$(swift build -c release $(SWIFT_FLAGS) --arch $$arch --show-bin-path)/agy-cs" dist/thin/$$arch || exit 1; \
 	done
 	lipo -create -output dist/cli/agy-cs dist/thin/arm64 dist/thin/x86_64
 	rm -rf dist/thin
