@@ -162,9 +162,19 @@ struct AccountCommands {
     private func addAccount() throws {
         let (snapshot, name, observed): (ObservedLogin?, String, ObservedLogin) = try locked {
             let snapshot = try captureLogin()
+            // 用户带着 --force 删掉过的登录，登录期间也先存一份（进程中途被杀掉时还找得回来），做完或者回滚之后再删掉。
+            var temporary: String?
             if let snapshot {
                 try keychain.checkWritable(snapshot.blob)
-                try keepSnapshot(snapshot)
+                let dismissed = profile.dismissedEmail() == snapshot.meta.email
+                let created = try keepSnapshot(snapshot)
+                temporary = dismissed ? created : nil
+            }
+            func dropTemporary() {
+                if let temporary {
+                    try? files.removeSaved(temporary)
+                    try? profile.remove(temporary)
+                }
             }
             try keychain.deleteBlob()
             do {
@@ -177,10 +187,18 @@ struct AccountCommands {
                 }
                 let name = try availableDefaultName(login.meta.email)
                 try storeLogin(name: name, blob: login.blob, meta: login.meta)
+                // 重新登录的还是同一个账号时，新存的这一份就在那个名字下面，不删。
+                if temporary != name {
+                    dropTemporary()
+                }
                 return (snapshot, name, login)
             } catch {
                 if let snapshot {
                     try keychain.writeBlob(snapshot.blob)
+                    if temporary != nil {
+                        dropTemporary()
+                        profile.setDismissed(snapshot.meta.email)
+                    }
                     if (error as? AccountFailure)?.key != .loginCancelled {
                         stderr(text.line(.loginRestored))
                     }
@@ -268,7 +286,8 @@ struct AccountCommands {
         return profile.failedUsage().filter(names.contains)
     }
 
-    private func keepSnapshot(_ snapshot: ObservedLogin) throws {
+    // 返回这一次新建的副本的名字；原来就有副本时返回 nil。
+    private func keepSnapshot(_ snapshot: ObservedLogin) throws -> String? {
         let recorded = profile.slots(forEmail: snapshot.meta.email)
         var backedUp = false
         for name in recorded {
@@ -288,10 +307,12 @@ struct AccountCommands {
             }
             backedUp = true
         }
-        // 用户带着 --force 删掉的那一个不再存回来；登录没完成时写回钥匙串用的是内存里的这一份。
-        if !backedUp, profile.dismissedEmail() != snapshot.meta.email {
-            try storeLogin(name: try availableDefaultName(snapshot.meta.email), blob: snapshot.blob, meta: snapshot.meta)
+        if !backedUp {
+            let name = try availableDefaultName(snapshot.meta.email)
+            try storeLogin(name: name, blob: snapshot.blob, meta: snapshot.meta)
+            return name
         }
+        return nil
     }
 
     private func rename(from sourceName: String?, to targetName: String) throws {

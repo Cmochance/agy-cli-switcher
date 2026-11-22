@@ -717,8 +717,14 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(fixture.refresher.started, 0)
 
         // 开始新增账号又没登录成：原来的登录写回钥匙串，删掉的副本不会回来。
+        // 登录期间它先存着一份，进程中途被杀掉时还找得回来。
         fixture.terminal.isInteractive = true
+        var kept = false
+        fixture.launcher.supply = {
+            kept = FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path)
+        }
         XCTAssertEqual(fixture.run(["switch", "add"]).code, 1)
+        XCTAssertTrue(kept)
         XCTAssertFalse(fixture.keychain.missing)
         XCTAssertEqual(fixture.board.load().rows, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
