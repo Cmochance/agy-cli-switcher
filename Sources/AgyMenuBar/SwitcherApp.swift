@@ -1,9 +1,14 @@
+import AgyAccount
 import AppKit
 import SwiftUI
 
 public enum SwitcherApp {
     // 从 main.swift 的主线程调用，不返回。
     public static func main() {
+        // 已经有一个在运行（比如另一个文件夹里的那一份）就直接退出。
+        guard AccountBoard().lockApp() != nil else {
+            exit(0)
+        }
         MainActor.assumeIsolated {
             let application = NSApplication.shared
             let controller = MenuBarController()

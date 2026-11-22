@@ -597,6 +597,22 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob"])
     }
 
+    // 同一时间只能有一个菜单栏工具拿到锁；前一个放开之后，下一个才拿得到。
+    func testOnlyOneMenuBarToolHoldsTheLock() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        let first = try XCTUnwrap(fixture.board.lockApp())
+        XCTAssertGreaterThanOrEqual(first, 0)
+        XCTAssertNotEqual(fcntl(first, F_GETFD) & FD_CLOEXEC, 0)
+        XCTAssertNil(fixture.board.lockApp())
+        let mode = try FileManager.default.attributesOfItem(atPath: fixture.tool.appLockFile.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o600)
+        close(first)
+        let second = try XCTUnwrap(fixture.board.lockApp())
+        XCTAssertGreaterThanOrEqual(second, 0)
+        close(second)
+    }
+
     // 图标的右键菜单只有退出这一项，用的是当前语言；右键和 control 加左键打开它，左键仍然开关面板。
     @MainActor
     func testStatusItemMenuOnlyQuitsAndOpensOnSecondaryClick() async throws {

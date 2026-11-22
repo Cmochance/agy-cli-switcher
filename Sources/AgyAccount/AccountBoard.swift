@@ -104,6 +104,28 @@ public struct AccountBoard: @unchecked Sendable {
     public func addAccountCommandLine(executable: String) -> String {
         shellQuoted(executable) + " switch add"
     }
+
+    // 同一时间只让一个菜单栏工具运行：几份 app 用的是同一份记录和同一条钥匙串项。
+    // 返回 nil 表示已经有一个在运行。拿到的描述符一直开着，进程结束时锁自动释放；
+    // 带 O_CLOEXEC，不传给之后启动的进程，不然退出之后查额度的进程还占着锁。
+    // 锁文件打不开时返回 -1，不拦着启动。
+    public func lockApp() -> Int32? {
+        let locations = ToolLocations(home: services.home)
+        try? FileManager.default.createDirectory(
+            at: locations.root, withIntermediateDirectories: true, attributes: [.posixPermissions: NSNumber(value: 0o700)]
+        )
+        let descriptor = open(locations.appLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            return -1
+        }
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EINTR else {
+                close(descriptor)
+                return errno == EWOULDBLOCK ? nil : -1
+            }
+        }
+        return descriptor
+    }
 }
 
 func addAccountScript(executable: String) -> String {
