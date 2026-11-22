@@ -69,6 +69,12 @@
 - 改了行上的点击或拖动之后，把真的鼠标事件送进面板跑一遍：`AGY_PANEL_GESTURES=1 make test FILTER=testPanelGesturesWhenEnabled`。它会在屏幕左下角开一个两秒钟的小窗口，用的是临时目录里的假账号。
 - 改了打包或启动方式之后执行 `make app`，核对三件事：`codesign --verify --strict "build/Agy Switcher.app"` 通过；在终端里运行 `"build/Agy Switcher.app/Contents/MacOS/agy-cs" ls` 仍然是命令行；`open "build/Agy Switcher.app"` 之后进程留着、菜单栏出现图标。
 
+## 方案和留档
+
+- 要改行为的任务，先给出完整的实现方案，写进 Linear 上对应 issue 的评论，然后停下来。用户明确同意之后才动代码。方案要写到能照着做：改哪些指令、每种情况下怎么表现、哪几处是自己定的、怎么验证、哪些不做。
+- 调研结果、分析过程和相关决策都要在 Linear 上对应的 issue 下留档，各用一条独立的评论，不合并成一条，也不只留在对话里。决定不做的事同样记一条，写明是谁在哪天决定的，免得以后被当成还没定。
+- Linear 的写法按 `linear-index` skill 的约定，动手前先加载它。
+
 ## 本地开发用 worktree
 
 - 主目录 `~/alysechen/github/agy-cli-switcher` 只停在 `main`，不在这里建分支、改跟踪的文件、commit。它只做这几件事：读规则、`git pull --ff-only`、`make install`、放不进仓库的本地文件。
