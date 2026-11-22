@@ -33,10 +33,17 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          shasum -a 256 -c SHA256SUMS.txt
-          mkdir -p unpacked/cli unpacked/app
-          tar -xzf agy-cs-macos-universal.tar.gz -C unpacked/cli
-          unzip -q Agy-Switcher.zip -d unpacked/app
+          version="$(plutil -extract CFBundleShortVersionString raw ../Packaging/Info.plist)"
+          dmg="Agy-Switcher-v$version-macOS-universal.dmg"
+          tarball="agy-cs-v$version-macOS-universal.tar.gz"
+          shasum -a 256 -c "$dmg.sha256"
+          shasum -a 256 -c "$tarball.sha256"
+          mkdir -p unpacked/cli unpacked/app unpacked/mnt
+          tar -xzf "$tarball" -C unpacked/cli
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint unpacked/mnt "$dmg"
+          test "$(readlink unpacked/mnt/Applications)" = /Applications
+          ditto "unpacked/mnt/Agy Switcher.app" "unpacked/app/Agy Switcher.app"
+          hdiutil detach -quiet unpacked/mnt
           app="unpacked/app/Agy Switcher.app"
           plutil -lint "$app/Contents/Info.plist"
           codesign --verify --strict --verbose=2 "$app"

@@ -35,15 +35,17 @@ Requires macOS 13 or later, on Apple silicon or Intel. Pick either form below.
 
 ### The menu bar tool, Agy Switcher
 
-1. Download `Agy-Switcher.zip` from [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest), unpack it, and drag `Agy Switcher.app` into Applications
+1. Download `Agy-Switcher-v0.2.1-macOS-universal.dmg` from [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest), open it, and drag `Agy Switcher.app` onto the Applications folder next to it
 2. The first time you open it, macOS blocks it, because it is not notarized by Apple. Go to System Settings → Privacy & Security and click Open Anyway
 
 You can also download it in the terminal. A file downloaded this way has no `com.apple.quarantine` mark, so there is nothing to allow in System Settings:
 
 ```bash
 tmp="$(mktemp -d)" && \
-  curl -fL -o "$tmp/Agy-Switcher.zip" https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/Agy-Switcher.zip && \
-  ditto -x -k "$tmp/Agy-Switcher.zip" /Applications && \
+  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/Agy-Switcher-v0.2.1-macOS-universal.dmg && \
+  hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
+  ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app" && \
+  hdiutil detach -quiet "$tmp/mnt" && \
   open "/Applications/Agy Switcher.app"
 ```
 
@@ -57,7 +59,7 @@ The prebuilt command is a single file:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/latest/download/agy-cs-macos-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.1/agy-cs-v0.2.1-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 If Agy Switcher is already installed, there is nothing more to download. The app contains the same program:
@@ -83,7 +85,7 @@ The terminal needs `~/.local/bin` on `PATH`:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Both downloads can be checked against `SHA256SUMS.txt` from the same page: `shasum -a 256 -c SHA256SUMS.txt`.
+Each download has a file of the same name plus `.sha256` on the same page. Put the two side by side to check it, for example `shasum -a 256 -c Agy-Switcher-v0.2.1-macOS-universal.dmg.sha256`.
 
 ## Quick start
 
@@ -162,7 +164,7 @@ The four languages live in [`Sources/AgyAccount/i18n`](Sources/AgyAccount/i18n).
 make test       # swift test --disable-sandbox
 make install    # rebuild and update ~/.local/bin/agy-cs
 make app        # build "build/Agy Switcher.app"; open it with: open "build/Agy Switcher.app"
-make dist       # build the two release packages and SHA256SUMS.txt in dist/
+make dist       # build the two release packages and their .sha256 files in dist/
 ```
 
 `make test` runs `swift test --disable-sandbox`.

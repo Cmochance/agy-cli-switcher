@@ -20,6 +20,11 @@ endef
 # 签名身份。默认 ad-hoc；有 Developer ID 证书时用 make dist SIGN_IDENTITY="Developer ID Application: …"。
 SIGN_IDENTITY ?= -
 
+# 发布包的名字带版本号和平台。版本号只写在 Packaging/Info.plist 里。
+VERSION := $(shell plutil -extract CFBundleShortVersionString raw Packaging/Info.plist)
+DMG := Agy-Switcher-v$(VERSION)-macOS-universal.dmg
+TARBALL := agy-cs-v$(VERSION)-macOS-universal.tar.gz
+
 # $(1) 是编译好的 agy-cs，$(2) 是要生成的 .app。先删掉旧的再拷，原因和 build 里一样。
 define bundle
 rm -rf "$(2)" && \
@@ -72,6 +77,7 @@ locked-dist:
 	rm -rf dist/thin
 	codesign --force --sign "$(SIGN_IDENTITY)" dist/cli/agy-cs
 	$(call bundle,dist/cli/agy-cs,dist/app/$(APP_NAME).app)
-	tar --no-mac-metadata -czf dist/agy-cs-macos-universal.tar.gz -C dist/cli agy-cs
-	ditto -c -k --norsrc --noextattr --keepParent "dist/app/$(APP_NAME).app" dist/Agy-Switcher.zip
-	cd dist && shasum -a 256 agy-cs-macos-universal.tar.gz Agy-Switcher.zip > SHA256SUMS.txt
+	tar --no-mac-metadata -czf "dist/$(TARBALL)" -C dist/cli agy-cs
+	ln -s /Applications dist/app/Applications
+	hdiutil create -quiet -volname "$(APP_NAME)" -srcfolder dist/app -fs HFS+ -format UDZO -ov "dist/$(DMG)"
+	cd dist && for file in "$(DMG)" "$(TARBALL)"; do shasum -a 256 "$$file" > "$$file.sha256" || exit 1; done
