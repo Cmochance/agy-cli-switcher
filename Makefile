@@ -46,7 +46,7 @@ test:
 	@$(call queued,locked-test)
 
 locked-test:
-	swift test --disable-sandbox $(SWIFT_FLAGS) $(if $(FILTER),--filter $(FILTER))
+	swift test --disable-sandbox $(SWIFT_FLAGS) $(if $(FILTER),--filter '$(subst ','"'"',$(FILTER))')
 
 install: build
 	mkdir -p "$(HOME)/.local/bin"
