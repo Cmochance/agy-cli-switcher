@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2
+
+### 简体中文
+
+- 当前账号改为直接看钥匙串里的登录。以前只看本工具自己的记录，还开着的 `agy` 把登录写回钥匙串之后，显示的和实际用的会不一样。
+- 钥匙串里的登录还没保存过时自动保存，不用先执行 `agy-cs save`。名字用邮箱 `@` 前面的字符，被别的账号占着就加 `-2`。
+- `agy-cs switch <名字>` 遇到当前登录没保存过时不再拒绝，先存下来再切换。
+- 同一时间只有一个 `agy-cs` 或 Agy Switcher 在改账号。另一个正在改的时候，保存、切换、删除、改名、排序最多等 5 秒，等不到就提示稍后再试。新增账号的登录过程中也是这样。
+- 带 `--force` 删掉当前登录唯一的一份副本之后，它不会被自动存回来。
+
+### English
+
+- The current account is now read from the login in the keychain. It used to come only from this tool's own record, so after an `agy` that was still open wrote its login back to the keychain, what was shown differed from what was in use.
+- A login in the keychain that has not been saved yet is saved automatically, with no need to run `agy-cs save` first. The name is the characters before `@`; if another account holds it, `-2` is added.
+- `agy-cs switch <name>` no longer refuses when the current login is not saved. It saves it first, then switches.
+- Only one `agy-cs` or Agy Switcher changes the accounts at a time. While another one is doing so, save, switch, delete, rename and reorder wait up to 5 seconds and then ask you to try again. This also applies while an account is being added.
+- After the only copy of the current login is deleted with `--force`, it is not saved again automatically.
+
 ## 0.2.1
 
 ### 简体中文

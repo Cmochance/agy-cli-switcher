@@ -174,6 +174,19 @@ refresh 後面只接受 quota。執行 agy-cs refresh quota 重新查詢所有�
 [noCurrentAccount]
 還沒有記錄目前帳號。先在 agy 裡登入，再執行 agy-cs save <名字>。
 
+
+[currentNoLogin]
+現在沒有登入。在 agy 裡登入之後會自動保存。
+
+[currentUnreadable]
+讀不到鑰匙圈裡的登入，打勾的是上次記下的帳號。
+
+[autoSaveFailed]
+目前登入 %1 沒能自動保存。用 agy-cs save <名字> 保存。
+
+[stateBusy]
+另一個 agy-cs 正在改帳號（可能是新增帳號還沒完成）。稍後再試。
+
 [languageUnknown]
 不認識語言 %1。可用代碼: zh-Hans、zh-Hant、en、ja。
 

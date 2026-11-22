@@ -174,6 +174,19 @@ The current keychain login was not changed.
 [noCurrentAccount]
 No current account is recorded. Log in with agy, then run agy-cs save <name>.
 
+
+[currentNoLogin]
+No login right now. Once you log in with agy, it is saved automatically.
+
+[currentUnreadable]
+The login in the keychain cannot be read. The checked account is the one recorded last time.
+
+[autoSaveFailed]
+The current login %1 could not be saved automatically. Save it with agy-cs save <name>.
+
+[stateBusy]
+Another agy-cs is changing the accounts (an account may still be being added). Try again in a moment.
+
 [languageUnknown]
 Unknown language %1. Codes: zh-Hans, zh-Hant, en, ja.
 

@@ -12,6 +12,7 @@ struct CommandServices {
     var launcher: any AgyLaunching
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
+    var stateWait: TimeInterval = 5
 
     static func system(terminal: any LineReading) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -46,6 +47,7 @@ struct CommandServices {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
+            stateWait: stateWait,
             text: text,
             stdout: stdout,
             stderr: stderr

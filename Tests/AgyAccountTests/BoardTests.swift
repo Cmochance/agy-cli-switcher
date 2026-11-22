@@ -34,7 +34,7 @@ final class BoardTests: XCTestCase {
             AccountRow(name: "alice", email: "alice@example.com", isCurrent: false, usage: nil),
             AccountRow(name: "bob", email: "bob@example.com", isCurrent: true, usage: nil),
         ])
-        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.reads, reads + 1)
         XCTAssertTrue(fixture.usage.calls.isEmpty)
 
         let switched = board.perform(["switch", "alice"])
@@ -103,9 +103,9 @@ final class BoardTests: XCTestCase {
         let first = fixture.board.load()
         XCTAssertEqual(first.notices, ["已初始化当前登录: carol  carol@example.com"])
         XCTAssertEqual(first.rows, [AccountRow(name: "carol", email: "carol@example.com", isCurrent: true, usage: nil)])
-        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.keychain.reads, 2)
         XCTAssertEqual(fixture.board.load().notices, [])
-        XCTAssertEqual(fixture.keychain.reads, 1)
+        XCTAssertEqual(fixture.keychain.reads, 3)
         XCTAssertEqual(fixture.keychain.writes, [])
     }
 
@@ -201,7 +201,7 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(names(), ["carol", "bob", "alice"])
         XCTAssertEqual(try String(contentsOf: fixture.tool.orderFile, encoding: .utf8), "carol\nbob\nalice\n")
         XCTAssertEqual(try mode(fixture.tool.orderFile), 0o600)
-        XCTAssertEqual(fixture.keychain.reads, reads)
+        XCTAssertEqual(fixture.keychain.reads, reads + 4)
         XCTAssertEqual(fixture.run(["list"]).output.map { cells($0)[0] }, ["* carol", "bob", "alice"])
 
         // next 按这个顺序往下走，到头回到第一个。
@@ -323,8 +323,6 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(model.lines, [])
         XCTAssertFalse(model.showsFailure)
         XCTAssertEqual(fixture.run(["list"]).output.map { cells($0)[0] }, ["* carol", "alice", "bob"])
-        XCTAssertEqual(fixture.keychain.reads, reads)
-
         model.move(model.state.rows[0], to: 2)
         await settle(model)
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
@@ -595,6 +593,177 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(model.showsFailure)
         XCTAssertFalse(model.messages.isEmpty)
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob"])
+    }
+
+    // 当前账号看钥匙串，不看 active：别的进程把钥匙串换成另一个已保存的登录，list、current 和面板都跟着变，active 被改正。
+    func testCurrentAccountFollowsTheKeychain() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(try String(contentsOf: fixture.tool.activeFile, encoding: .utf8), "bob\n")
+
+        // 一个还开着的 agy 把自己的登录写回了钥匙串。
+        fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "a-refreshed")
+        let listed = fixture.run(["list"])
+        XCTAssertEqual(listed.output, ["* alice  alice@example.com", "  bob  bob@example.com"])
+        XCTAssertEqual(listed.errors, [])
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+        XCTAssertEqual(fixture.board.load().rows.map(\.isCurrent), [true, false])
+        XCTAssertEqual(try String(contentsOf: fixture.tool.activeFile, encoding: .utf8), "alice\n")
+        XCTAssertEqual(try String(contentsOf: fixture.locations.activeURL, encoding: .utf8), "alice\n")
+        // 看一眼不回存 token，也不写钥匙串。
+        XCTAssertEqual(stripNewlines(try String(contentsOf: fixture.locations.tokenURL("alice"), encoding: .utf8)), alice)
+        XCTAssertEqual(fixture.keychain.writes, [])
+        XCTAssertEqual(fixture.refresher.started, 0)
+
+        // 同一个邮箱存了几个名字时，active 仍然决定指的是哪个名字。
+        XCTAssertEqual(fixture.run(["save", "work"]).code, 0)
+        XCTAssertEqual(fixture.run(["rename", "office"]).output, ["已把 work 改名为 office  alice@example.com"])
+        XCTAssertEqual(fixture.run(["switch", "alice"]).code, 0)
+        XCTAssertEqual(fixture.run(["rename", "home"]).output, ["已把 alice 改名为 home  alice@example.com"])
+
+        // 钥匙串那一项不在：没有打勾，记录不动。
+        fixture.keychain.missing = true
+        let none = fixture.run(["list"])
+        XCTAssertEqual(none.code, 0)
+        XCTAssertEqual(none.output.map { $0.hasPrefix("*") }, [false, false, false])
+        XCTAssertEqual(none.errors, ["现在没有登录。在 agy 里登录之后会自动保存。"])
+        let nobody = fixture.run(["current"])
+        XCTAssertEqual(nobody.code, 1)
+        XCTAssertEqual(nobody.output, [])
+        XCTAssertEqual(nobody.errors, ["现在没有登录。在 agy 里登录之后会自动保存。"])
+        XCTAssertEqual(fixture.board.load().notices, ["现在没有登录。在 agy 里登录之后会自动保存。"])
+        XCTAssertEqual(try String(contentsOf: fixture.tool.activeFile, encoding: .utf8), "home\n")
+        fixture.keychain.missing = false
+
+        // 钥匙串读不出来：退回 active 记的那个，并说一声。
+        fixture.keychain.denied = true
+        let stale = fixture.run(["list"])
+        XCTAssertEqual(stale.output.map { $0.hasPrefix("*") }, [true, false, true])
+        XCTAssertEqual(stale.errors, ["读不到钥匙串里的登录，打勾的是上次记下的账号。"])
+        XCTAssertEqual(fixture.run(["current"]).output, ["alice@example.com"])
+    }
+
+    // 钥匙串里的登录还没保存过时直接存下来，不提示；名字被别的邮箱占着就加 -2；名字起不出来才说一声。
+    func testAnUnsavedLoginIsSavedWithoutAsking() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(fixture.run(["move", "bob", "1"]).code, 0)
+
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        fixture.keychain.blob = bob
+        let listed = fixture.run(["list"])
+        XCTAssertEqual(listed.output, ["  bob  alice@example.com", "* bob-2  bob@example.com"])
+        XCTAssertEqual(listed.errors, [])
+        XCTAssertEqual(stripNewlines(try String(contentsOf: fixture.locations.tokenURL("bob-2"), encoding: .utf8)), bob)
+        XCTAssertEqual(stripNewlines(try String(contentsOf: fixture.locations.tokenURL("bob"), encoding: .utf8)), alice)
+        XCTAssertEqual(try mode(fixture.locations.tokenURL("bob-2")), 0o600)
+        XCTAssertEqual(try String(contentsOf: fixture.tool.activeFile, encoding: .utf8), "bob-2\n")
+        XCTAssertEqual(fixture.refresher.started, 1)
+        XCTAssertEqual(fixture.run(["list"]).output, listed.output)
+        XCTAssertEqual(fixture.refresher.started, 1)
+
+        // 面板重读时也一样。
+        fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
+        let state = fixture.board.load()
+        XCTAssertEqual(state.rows.map(\.name), ["bob", "bob-2", "carol"])
+        XCTAssertEqual(state.rows.map(\.isCurrent), [false, false, true])
+        XCTAssertEqual(state.notices, [])
+        XCTAssertEqual(fixture.run(["current"]).output, ["carol@example.com"])
+
+        fixture.keychain.blob = makeBlob(email: "a+b@example.com", refresh: "x")
+        let rejected = fixture.run(["list"])
+        XCTAssertEqual(rejected.output.map { $0.hasPrefix("*") }, [false, false, false])
+        XCTAssertEqual(rejected.errors, ["当前登录 a+b@example.com 没能自动保存。用 agy-cs save <名字> 保存。"])
+        XCTAssertEqual(fixture.run(["current"]).output, ["a+b@example.com"])
+        XCTAssertEqual(fixture.keychain.writes, [])
+    }
+
+    // 带着 --force 删掉当前登录唯一的一份副本之后，不会又被自动存回来；重新保存或者换了登录之后恢复。
+    func testAForcedRemovalIsNotUndoneByTheNextList() throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        XCTAssertEqual(fixture.run(["rm", "alice", "--force"]).code, 0)
+        XCTAssertEqual(fixture.run(["list"]).output, ["还没有保存的账号。先在 agy 里登录，再执行 agy-cs save <名字>。"])
+        XCTAssertEqual(fixture.board.load().rows, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.locations.tokenURL("alice").path))
+        XCTAssertEqual(fixture.refresher.started, 0)
+
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["list"]).output, ["* bob  bob@example.com"])
+        fixture.keychain.blob = makeBlob(email: "alice@example.com", refresh: "a")
+        XCTAssertEqual(fixture.run(["list"]).output, ["* alice  alice@example.com", "  bob  bob@example.com"])
+    }
+
+    // 同一时间只有一个进程改账号。锁被占着时，改动的指令等不到就报忙、什么都不改；看一眼的指令照常，只是不自动保存。
+    func testOnlyOneProcessChangesTheAccountsAtATime() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        fixture.stateWait = 0.1
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+
+        let held = open(fixture.tool.stateLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertEqual(flock(held, LOCK_EX | LOCK_NB), 0)
+        let board = fixture.board
+        for command in [
+            ["switch", "--", "alice"], ["next"], ["save", "other"], ["rm", "alice"], ["rename", "alice", "anna"],
+            ["move", "bob", "1"],
+        ] {
+            let outcome = board.perform(command)
+            XCTAssertEqual(outcome.code, 1, command.joined(separator: " "))
+            XCTAssertEqual(outcome.errors, ["另一个 agy-cs 正在改账号（可能是新增账号还没完成）。稍后再试。"])
+        }
+        XCTAssertEqual(fixture.keychain.writes, [])
+        fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
+        let watching = board.load()
+        XCTAssertEqual(watching.rows.map(\.name), ["alice", "bob"])
+        XCTAssertEqual(watching.rows.map(\.isCurrent), [false, false])
+        XCTAssertEqual(watching.notices, [])
+        XCTAssertEqual(board.perform(["current"]).output, ["carol@example.com"])
+        close(held)
+
+        XCTAssertEqual(board.load().rows.map(\.name), ["alice", "bob", "carol"])
+        XCTAssertTrue(board.perform(["switch", "--", "alice"]).succeeded)
+        XCTAssertEqual(fixture.keychain.writes, [alice])
+        XCTAssertNotEqual(fcntl(try XCTUnwrap(fixture.board.services.profile.lockState(wait: 0)), F_GETFD) & FD_CLOEXEC, 0)
+        XCTAssertEqual(try mode(fixture.tool.stateLockFile), 0o600)
+    }
+
+    // 新增账号从移开钥匙串到新登录存好一直拿着锁：登录期间面板的重读不会抢先把新登录存掉，别的切换也进不来。
+    func testAddingAnAccountHoldsTheLockUntilTheNewLoginIsStored() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        fixture.stateWait = 0.1
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.terminal.isInteractive = true
+        var during: (rows: [String], notices: [String], switching: Int32)?
+        fixture.launcher.supply = {
+            let empty = fixture.board.load()
+            fixture.keychain.blob = carol
+            fixture.keychain.missing = false
+            let seen = fixture.board.load()
+            during = (seen.rows.map(\.name), empty.notices, fixture.board.perform(["switch", "--", "alice"]).code)
+        }
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 0)
+        XCTAssertEqual(during?.rows, ["alice"])
+        XCTAssertEqual(during?.notices, ["现在没有登录。在 agy 里登录之后会自动保存。"])
+        XCTAssertEqual(during?.switching, 1)
+        XCTAssertEqual(fixture.run(["list"]).output, ["  alice  alice@example.com", "* carol  carol@example.com"])
+        XCTAssertEqual(fixture.launcher.started, 1)
+        // 重新启动 agy 之前锁已经放开。
+        XCTAssertTrue(fixture.board.perform(["switch", "--", "alice"]).succeeded)
     }
 
     // 同一时间只能有一个菜单栏工具拿到锁；前一个放开之后，下一个才拿得到。

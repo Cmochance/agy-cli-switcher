@@ -112,6 +112,10 @@ public enum TextKey: String, CaseIterable {
     case removed
     case keychainUnchanged
     case noCurrentAccount
+    case currentNoLogin
+    case currentUnreadable
+    case autoSaveFailed
+    case stateBusy
     case languageUnknown
     case languageFollowing
     case languageChosen
