@@ -88,7 +88,7 @@
   1. 确认 worktree 的分支和合并后的 `main` 内容一致（先 `git fetch`，再 `git diff --quiet origin/main <分支>`）。不一致就停下来报告，不删。
   2. 在 worktree 里执行 `git status --short --ignored`。有未提交的改动就停下来报告。列出的未跟踪和被忽略的文件，除了 `build/` 和 `dist/`，逐个确认可以丢；要留的先搬到主目录。`git worktree remove` 遇到未跟踪的文件会拒绝，被忽略的文件却会不加提示地一起删掉（实测）。
   3. 主目录 `git pull --ff-only`，再 `make install`。
-  4. `git worktree remove <worktree 路径>`。不带 `--force`；它拒绝就回到第 2 步。
+  4. 把这个 worktree 自己编出来的测试 app 一起清掉（只管这个 worktree 的，别处的 app 不动），再 `git worktree remove <worktree 路径>`。不带 `--force`；它拒绝就回到第 2 步。清 app 分三步：正在运行的 Agy Switcher 如果是这个 worktree 里的那一份（`pgrep -fl "Agy Switcher.app"` 看路径），先退出它；对 `<worktree 路径>/build/Agy Switcher.app` 和 `<worktree 路径>/dist/app/Agy Switcher.app` 各执行一次 `lsregister -u`（在 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/` 下），把它们从系统的 app 名单里去掉；`git worktree remove` 会连同 `build/` 和 `dist/` 一起删掉文件，删完核对文件夹已经不在。只删文件不去登记的话，系统里会留下一条条指向已删路径的 Agy Switcher（实测 `lsregister -dump` 里留着临时目录和旧 `dist/` 的记录）。
   5. 删除本地分支（squash 合并后要用 `git branch -D`）和远端分支（`git push origin --delete <分支>`），再 `git fetch --prune`。
   6. 用 `git worktree list` 和 `git branch -a` 核对 worktree 和两个分支都已消失。
 - 只删刚合并的那个 PR 的 worktree 和分支，其他的不动。
