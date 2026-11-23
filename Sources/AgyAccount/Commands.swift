@@ -226,11 +226,10 @@ struct AccountCommands {
         try locked {
             let meta = try decodeKeychainBlob(blob)
             try keychain.checkWritable(blob)
-            // 名字被占时还没动钥匙串，也还没写回滚副本。
-            let name = try availableDefaultName(meta.email)
             let snapshot = try captureLogin()
             var previousNames: [String] = []
             let emailChanged = snapshot.map { $0.meta.email != meta.email } ?? false
+            var keptRollback = false
             if let snapshot {
                 if snapshot.meta.email == meta.email {
                     try keepSnapshot(ObservedLogin(blob: blob, meta: meta))
@@ -238,16 +237,22 @@ struct AccountCommands {
                           profile.slots(forEmail: snapshot.meta.email).isEmpty
                 {
                     try files.writeRollback(snapshot.blob)
+                    keptRollback = true
                 } else {
                     try keepSnapshot(snapshot)
                     previousNames = profile.slots(forEmail: snapshot.meta.email)
                     try stateSync.prepareSwitch(from: previousNames, to: "", sameEmail: false)
                 }
             }
+            // 旧登录先留住。keepSnapshot 可能刚用同一个前缀存下它；名字被占时钥匙串还不动，也不改成 -2。
+            let name = try availableDefaultName(meta.email)
+            if keptRollback {
+                try files.writeRollbackNew(blob)
+            }
             do {
                 try keychain.writeBlob(blob)
                 try storeLogin(name: name, blob: blob, meta: meta)
-                files.removeRollback()
+                files.removeAddRollback()
                 let notices = emailChanged
                     ? stateSync.afterSwitch(from: previousNames, to: name, sameEmail: false)
                     : []
@@ -256,9 +261,10 @@ struct AccountCommands {
                 if let snapshot {
                     do {
                         try keychain.writeBlob(snapshot.blob)
-                        files.removeRollback()
+                        files.removeAddRollback()
                         stderr(text.line(.loginRestored))
                     } catch {
+                        // 写回失败时两份都留着：钥匙串空了能从 rollback 恢复；删不掉、仍是这次新登录时也能对上 rollback-new。
                         try? keychain.deleteBlob()
                     }
                 } else {
@@ -612,28 +618,36 @@ struct AccountCommands {
         return try body()
     }
 
-    // 上一次新增账号做到一半进程就没了：钥匙串那一项已经移开，原来的登录还留在 rollbackURL。
-    // 拿着锁的时候调用（没有别的新增账号正在进行）。钥匙串还空着就把它写回去；已经有登录了就只把这份没用的东西删掉。
+    // 上一次新增做到一半进程就没了。拿着锁的时候调用。
+    // Antigravity：钥匙串空着就把 rollback 写回去；已经有登录就删掉这份回滚。
+    // Colab 的 .add-rollback 是旧登录，.add-rollback-new 是当时写进钥匙串的那一份。
+    // 钥匙串空着仍写回旧登录。钥匙串等于旧登录、不是 Colab、或已经是保存过的副本时，两份都删掉。
+    // 只有钥匙串仍等于记下的那一份、并且它还不是已保存副本时，才把旧登录写回去。
+    // 没有这份记录，或者钥匙串已经是别的登录时，不覆盖，两份都删掉。
     private func recoverInterruptedAdd() {
         guard let blob = files.readRollback() else {
+            files.removeRollbackNew()
             return
         }
         do {
             let current = try keychain.readBlob()
-            // Antigravity 的钥匙串里已经有登录时，这份回滚是用过的。Colab 可能刚写进新登录、旧的只在这里，对不上已保存的副本时写回去。
             if current == blob || provider != .colab || savedLogin(current) {
-                files.removeRollback()
+                files.removeAddRollback()
+                return
+            }
+            guard let replacement = files.readRollbackNew(), current == replacement else {
+                files.removeAddRollback()
                 return
             }
             guard codec.canRecover(blob), (try? keychain.writeBlob(blob)) != nil else {
                 return
             }
-            files.removeRollback()
+            files.removeAddRollback()
         } catch let error as AccountFailure where error.key == .keychainMissing {
             guard codec.canRecover(blob), (try? keychain.writeBlob(blob)) != nil else {
                 return
             }
-            files.removeRollback()
+            files.removeAddRollback()
         } catch {
             return
         }

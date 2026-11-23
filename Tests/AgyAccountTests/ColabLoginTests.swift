@@ -380,8 +380,15 @@ final class ColabLoginTests: XCTestCase {
         XCTAssertTrue(taken.output.contains("AGY_CS_LOGIN error nameTaken"))
         XCTAssertEqual(keychain.writes, [])
         XCTAssertEqual(keychain.blob, oldBlob)
+        let preservedOld = try String(
+            contentsOf: fixture.home.appendingPathComponent(".config/colab-cli/accounts/old.token"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(preservedOld.contains("r-old"))
+        XCTAssertFalse(preservedOld.contains("r-new"))
 
         try FileManager.default.removeItem(at: fixture.home.appendingPathComponent(".agy-cs/colab/accounts/new.json"))
+        try FileManager.default.removeItem(at: fixture.home.appendingPathComponent(".agy-cs/colab/accounts/old.json"))
         let dismissed = fixture.home.appendingPathComponent(".agy-cs/colab/not-saved")
         try FileManager.default.createDirectory(at: dismissed.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("old@example.com\n".utf8).write(to: dismissed)
@@ -399,9 +406,13 @@ final class ColabLoginTests: XCTestCase {
         XCTAssertFalse(failed.errors.joined(separator: "\n").contains("已恢复"))
         XCTAssertTrue(keychain.missing)
         let rollback = fixture.home.appendingPathComponent(".config/colab-cli/accounts/.add-rollback")
+        let replacement = fixture.home.appendingPathComponent(".config/colab-cli/accounts/.add-rollback-new")
         let savedRollback = try String(contentsOf: rollback, encoding: .utf8)
+        let savedReplacement = try String(contentsOf: replacement, encoding: .utf8)
         XCTAssertTrue(savedRollback.contains("r-old"))
         XCTAssertFalse(savedRollback.contains("r-new"))
+        XCTAssertTrue(savedReplacement.contains("r-new"))
+        XCTAssertFalse(savedReplacement.contains("r-old"))
 
         keychain.onWrite = nil
         let recovered = fixture.run(["colab", "current"])
@@ -409,6 +420,128 @@ final class ColabLoginTests: XCTestCase {
         XCTAssertEqual(keychain.blob, oldBlob)
         XCTAssertFalse(keychain.missing)
         XCTAssertFalse(FileManager.default.fileExists(atPath: rollback.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: replacement.path))
+    }
+
+    func testSamePrefixUnsavedLoginIsKeptWhenTheNewNameIsTaken() throws {
+        let work = makeColabBlob(refresh: "r-work")
+        let personal = makeColabBlob(refresh: "r-personal")
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com"))
+        defer { fixture.cleanup() }
+        let marker = fixture.home.appendingPathComponent(".agy-cs/colab/initialized")
+        try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("1\n".utf8).write(to: marker)
+        let keychain = MemoryKeychain(work)
+        let signer = ScriptedColabSigner()
+        signer.blob = personal
+        fixture.colab = ProviderServices(
+            keychain: keychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-work": "alex@work.example",
+                "r-personal": "alex@personal.example",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher(),
+            signer: signer
+        )
+        let taken = fixture.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(taken.code, 1)
+        XCTAssertTrue(taken.output.contains("AGY_CS_LOGIN error nameTaken"))
+        XCTAssertFalse(taken.errors.joined(separator: "\n").contains("已恢复"))
+        XCTAssertEqual(keychain.writes, [])
+        XCTAssertEqual(keychain.blob, work)
+        let saved = try String(
+            contentsOf: fixture.home.appendingPathComponent(".config/colab-cli/accounts/alex.token"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(saved.contains("r-work"))
+        XCTAssertFalse(saved.contains("r-personal"))
+        let record = try String(
+            contentsOf: fixture.home.appendingPathComponent(".agy-cs/colab/accounts/alex.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(record.contains("alex@work.example"))
+        XCTAssertFalse(record.contains("alex@personal.example"))
+    }
+
+    func testColabRecoveryRestoresOnlyTheRecordedReplacement() throws {
+        let previous = makeColabBlob(refresh: "r-previous")
+        let replacement = makeColabBlob(refresh: "r-replacement")
+        let native = makeColabBlob(refresh: "r-native")
+        let resolver = StaticColabEmailResolver([
+            "r-previous": "previous@example.com",
+            "r-replacement": "replacement@example.com",
+            "r-native": "native@example.com",
+        ])
+
+        let matched = try colabRecoveryFixture(blob: replacement, resolver: resolver)
+        defer { matched.fixture.cleanup() }
+        try plantColabRollback(home: matched.fixture.home, previous: previous, replacement: replacement)
+        let restored = matched.fixture.run(["colab", "current"])
+        XCTAssertEqual(restored.code, 0)
+        XCTAssertEqual(matched.keychain.blob, previous)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(matched.fixture.home).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollbackNew(matched.fixture.home).path))
+
+        let unrelated = try colabRecoveryFixture(blob: native, resolver: resolver)
+        defer { unrelated.fixture.cleanup() }
+        try plantColabRollback(home: unrelated.fixture.home, previous: previous, replacement: replacement)
+        let left = unrelated.fixture.run(["colab", "current"])
+        XCTAssertEqual(left.code, 0)
+        XCTAssertEqual(unrelated.keychain.blob, native)
+        XCTAssertEqual(unrelated.keychain.writes, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(unrelated.fixture.home).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollbackNew(unrelated.fixture.home).path))
+
+        let missingSidecar = try colabRecoveryFixture(blob: replacement, resolver: resolver)
+        defer { missingSidecar.fixture.cleanup() }
+        try plantColabRollback(home: missingSidecar.fixture.home, previous: previous, replacement: nil)
+        let kept = missingSidecar.fixture.run(["colab", "current"])
+        XCTAssertEqual(kept.code, 0)
+        XCTAssertEqual(missingSidecar.keychain.blob, replacement)
+        XCTAssertEqual(missingSidecar.keychain.writes, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(missingSidecar.fixture.home).path))
+    }
+}
+
+private func colabRollback(_ home: URL) -> URL {
+    home.appendingPathComponent(".config/colab-cli/accounts/.add-rollback")
+}
+
+private func colabRollbackNew(_ home: URL) -> URL {
+    home.appendingPathComponent(".config/colab-cli/accounts/.add-rollback-new")
+}
+
+private func colabRecoveryFixture(
+    blob: String,
+    resolver: StaticColabEmailResolver
+) throws -> (fixture: Fixture, keychain: MemoryKeychain) {
+    let fixture = try Fixture(blob: makeBlob(email: "agy@example.com"))
+    let marker = fixture.home.appendingPathComponent(".agy-cs/colab/initialized")
+    try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("1\n".utf8).write(to: marker)
+    let keychain = MemoryKeychain(blob)
+    fixture.colab = ProviderServices(
+        keychain: keychain,
+        codec: ColabLoginCodec(emailResolver: resolver),
+        launcher: ScriptedLauncher(),
+        usage: ScriptedUsage(),
+        refresher: ScriptedRefresher(),
+        signer: ScriptedColabSigner()
+    )
+    return (fixture, keychain)
+}
+
+private func plantColabRollback(home: URL, previous: String, replacement: String?) throws {
+    let files = AccountFiles(
+        locations: AccountLocations(home: home, provider: .colab),
+        now: { "2026-01-01T00:00:00Z" },
+        codec: ColabLoginCodec()
+    )
+    try files.writeRollback(previous)
+    if let replacement {
+        try files.writeRollbackNew(replacement)
     }
 }
 

@@ -56,6 +56,11 @@ struct AccountLocations {
     var rollbackURL: URL {
         accountsDirectory.appendingPathComponent(".add-rollback")
     }
+
+    // 这次要写进钥匙串的那一份。只在 rollbackURL 还在时有意义，用来判断钥匙串里现在的是不是这次写进去的。
+    var rollbackNewURL: URL {
+        accountsDirectory.appendingPathComponent(".add-rollback-new")
+    }
 }
 
 struct AccountFiles {
@@ -135,6 +140,24 @@ struct AccountFiles {
 
     func removeRollback() {
         try? manager.removeItem(at: locations.rollbackURL)
+    }
+
+    func writeRollbackNew(_ blob: String) throws {
+        try ensureDirectory()
+        try AtomicFile.write(locations.rollbackNewURL, blob + "\n")
+    }
+
+    func readRollbackNew() -> String? {
+        (try? readText(locations.rollbackNewURL)).map(stripNewlines)
+    }
+
+    func removeRollbackNew() {
+        try? manager.removeItem(at: locations.rollbackNewURL)
+    }
+
+    func removeAddRollback() {
+        removeRollback()
+        removeRollbackNew()
     }
 
     func writeSaved(name: String, blob: String, meta: LoginMeta) throws {

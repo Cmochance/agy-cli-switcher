@@ -22,7 +22,7 @@ This document records the verified upstream behavior of `googlecolab/google-cola
 | `sessions.json` | Backed up to `<name>.sessions.json` and swapped when switching between different emails; cleared to `{}` if the target account has no backup. |
 | `sessions.attached.json` | Isolated alongside `sessions.json` as `<name>.sessions.attached.json` (anticipating upstream PR #230). |
 | `settings.json` | Account-scoped capability flags `public_api_supported` and `tunnel_api_supported` are reset to `null` on email switch (per upstream #238 / PR #266). |
-| `accounts/` | Managed by `agy-cs` (dir `700`, files `600`): `<name>.token`, `<name>.meta.json`, `<name>.sessions.json`, `<name>.sessions.attached.json`, `.add-rollback`, `active`. |
+| `accounts/` | Managed by `agy-cs` (dir `700`, files `600`): `<name>.token`, `<name>.meta.json`, `<name>.sessions.json`, `<name>.sessions.attached.json`, `.add-rollback`, `.add-rollback-new`, `active`. `.add-rollback-new` is the exact blob written into the keychain while `.add-rollback` still holds the previous login. A later command restores that previous login only when the keychain is empty, or when it still equals `.add-rollback-new` and that blob is not a saved copy. Any other keychain contents drop both files. |
 | `history/`, `colab.log` | Never moved, edited, or deleted by `agy-cs`. |
 
 ## Network & OAuth endpoints
