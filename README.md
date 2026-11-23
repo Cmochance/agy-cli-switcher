@@ -132,13 +132,13 @@ export PATH="$HOME/.local/bin:$PATH"
 ## 套餐和额度
 
 ```
-* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%             Argon 100%
-  bob    bob@example.com    Free  5h —                7d 99% 11-28 18:23  Argon —
+* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%  Argon 100%
+  bob    bob@example.com    Free  7d 99% 11-28 18:23
 ```
 
 - 每一项是剩余的百分比，后面是重置时间（本机时区）。剩余 100% 时不显示重置时间
 - 过了重置时间的项按 100% 显示
-- `—` 表示这个账号没有这一项。免费账号没有 5 小时额度，Argon 只有部分账号有
+- 账号没有的额度不显示，也不留空位。免费账号通常只显示 7 日额度；Argon 只在这个账号有对应额度时出现
 - `Pro（非付费）` 表示套餐是 Pro，但 Google 没有把它算作付费订阅。这样的账号用不了 Gemini 4 的 Neon、Hydrogen 和 Argon，也没有 Argon 额度
 - `ls` 只读记下来的结果，不联网
 - `agy-cs refresh quota` 立刻把所有账号查一遍并列出来

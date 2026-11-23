@@ -56,7 +56,7 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(state.rows.map(\.isCurrent), [true, false])
         XCTAssertEqual(
             state.rows[0].usage,
-            UsageText(plan: "Pro（非付费）", fiveHour: "62% \(localTime("2026-01-01T03:00:00Z"))", weekly: "—", argon: "—")
+            UsageText(plan: "Pro（非付费）", fiveHour: "62% \(localTime("2026-01-01T03:00:00Z"))")
         )
         XCTAssertNil(state.rows[1].usage)
         XCTAssertEqual(state.notices, partial.errors)

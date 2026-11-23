@@ -132,13 +132,13 @@ Click the icon in the menu bar to open the panel.
 ## Plan and quota
 
 ```
-* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%             Argon 100%
-  bob    bob@example.com    Free  5h —                7d 99% 11-28 18:23  Argon —
+* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%  Argon 100%
+  bob    bob@example.com    Free  7d 99% 11-28 18:23
 ```
 
 - Each entry is the percentage left, followed by the reset time in the local time zone. At 100% the reset time is not shown
 - An entry whose reset time has passed is shown as 100%
-- `—` means the account has no such quota. Free accounts have no 5-hour quota, and only some accounts have Argon
+- A quota the account does not have is left out, with no placeholder. A free account usually shows only the 7-day quota, and Argon appears only when that account has an Argon bucket
 - `Pro (non-paid)` means the plan is Pro but Google does not count it as a paid subscription. Such an account cannot use Gemini 4 Neon, Hydrogen or Argon, and has no Argon quota
 - `ls` only reads the recorded results and makes no request
 - `agy-cs refresh quota` asks for every account right away and lists the result
