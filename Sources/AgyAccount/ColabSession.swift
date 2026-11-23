@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
 
-// Colab CLI 没有单独的登录指令：移除钥匙串后在前台终端跑 `colab whoami`，
-// 会自动走完远程授权码登录并写入钥匙串，随后自动退出。
+// 以前新增 Colab 账号会在前台终端跑 `colab whoami`。现在登录由 ColabBrowserSigner 自己完成。
+// 这个类型还留在 launcher 槽位上，`switch add` 不再调用它。
 struct InteractiveColab: AgyLaunching {
     var cacheURL: URL = ToolLocations(home: FileManager.default.homeDirectoryForCurrentUser, provider: .colab).clientFile
     var locate: ((URL) -> ColabInstallation?)? = nil

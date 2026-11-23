@@ -5,7 +5,7 @@ enum AccountCommandKind {
     case list
     case save(String, force: Bool, expecting: String?)
     case choose
-    case add
+    case add(handoff: Bool)
     case change(String)
     case next
     case refreshQuota
@@ -31,6 +31,7 @@ struct AccountCommands {
     var provider: AccountProvider = .antigravity
     var codec: any LoginDecoding = AntigravityLoginCodec()
     var stateSync: any ProviderStateSyncing
+    var signer: (any ColabSigning)? = nil
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -87,8 +88,8 @@ struct AccountCommands {
             try locked { try save(name, force: force, expecting: expecting) }
         case .choose:
             try choose()
-        case .add:
-            try addFromCommand()
+        case .add(let handoff):
+            try addFromCommand(handoff: handoff)
         case .change(let name):
             try locked { try switchTo(name) }
         case .next:
@@ -147,7 +148,11 @@ struct AccountCommands {
                 continue
             }
             if number == 2 {
-                try addAccount()
+                if provider == .colab {
+                    try addColabAccount(handoff: false)
+                } else {
+                    try addAccount()
+                }
                 return
             }
             let index = number - 3
@@ -161,11 +166,99 @@ struct AccountCommands {
         }
     }
 
-    private func addFromCommand() throws {
+    private func addFromCommand(handoff: Bool) throws {
+        if provider == .colab {
+            try addColabAccount(handoff: handoff)
+            return
+        }
+        if handoff {
+            throw UsageFailure(.commandNoExtra, "switch")
+        }
         guard terminal.isInteractive else {
             throw UsageFailure(.switchAddNeedsTerminal)
         }
         try addAccount()
+    }
+
+    // 浏览器登录期间不拿锁，也不删钥匙串。拿到 token 之后才写。取消或进程没了，原来的登录还在。
+    private func addColabAccount(handoff: Bool) throws {
+        if !handoff, !terminal.isInteractive {
+            throw UsageFailure(.switchAddNeedsTerminal)
+        }
+        let blob: String
+        let committed: (name: String, email: String, notices: [ProviderNotice])
+        do {
+            blob = try colabSigner().signIn(handoff: handoff)
+            committed = try commitColabLogin(blob)
+        } catch let error as AccountFailure {
+            if handoff {
+                stdout("\(colabLoginLinePrefix) error \(error.key.rawValue)")
+            }
+            throw error
+        }
+        if handoff {
+            for notice in committed.notices {
+                stderr(text.line(providerTextKey(notice.key, provider: provider), argumentList: notice.arguments))
+            }
+            stdout("\(colabLoginLinePrefix) saved \(committed.name) \(committed.email)")
+        } else {
+            emitProviderNotices(committed.notices)
+            stdout(text.line(.saved, committed.name, committed.email))
+        }
+        refresher.startDetached()
+        try launchToolIfNeeded()
+    }
+
+    private func colabSigner() -> any ColabSigning {
+        if let signer {
+            return signer
+        }
+        return ColabBrowserSigner(
+            stdout: stdout,
+            speak: { self.text.line($0) }
+        )
+    }
+
+    private func commitColabLogin(_ blob: String) throws -> (name: String, email: String, notices: [ProviderNotice]) {
+        try locked {
+            let meta = try decodeKeychainBlob(blob)
+            try keychain.checkWritable(blob)
+            let snapshot = try captureLogin()
+            var previousNames: [String] = []
+            let emailChanged = snapshot.map { $0.meta.email != meta.email } ?? false
+            if let snapshot {
+                if snapshot.meta.email == meta.email {
+                    try keepSnapshot(ObservedLogin(blob: blob, meta: meta))
+                } else if profile.dismissedEmail() == snapshot.meta.email,
+                          profile.slots(forEmail: snapshot.meta.email).isEmpty
+                {
+                    try files.writeRollback(snapshot.blob)
+                } else {
+                    try keepSnapshot(snapshot)
+                    previousNames = profile.slots(forEmail: snapshot.meta.email)
+                    try stateSync.prepareSwitch(from: previousNames, to: "", sameEmail: false)
+                }
+            }
+            do {
+                try keychain.writeBlob(blob)
+                let name = try availableDefaultName(meta.email)
+                try storeLogin(name: name, blob: blob, meta: meta)
+                files.removeRollback()
+                let notices = emailChanged
+                    ? stateSync.afterSwitch(from: previousNames, to: name, sameEmail: false)
+                    : []
+                return (name, meta.email, notices)
+            } catch {
+                if let snapshot {
+                    try? keychain.writeBlob(snapshot.blob)
+                    files.removeRollback()
+                    stderr(text.line(.loginRestored))
+                } else {
+                    try? keychain.deleteBlob()
+                }
+                throw error
+            }
+        }
     }
 
     // 从移开钥匙串那一项到新登录存好（或者原来的登录写回去）一直拿着锁：这段时间钥匙串是空的或者是还没存的新登录，

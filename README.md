@@ -23,7 +23,7 @@
 - Agy Switcher 在菜单栏里列出已保存的账号和额度，点一项完成切换，底栏按钮可在 Antigravity 和 Colab 之间切换
 - `agy-cs ls` 显示 Antigravity 账号的套餐，以及 Gemini 5 小时、7 天和 Argon 额度的剩余量与重置时间；`agy-cs colab ls` 显示 Colab 账号的剩余 CU 算力、消耗速率和活跃会话数
 - `agy-cs switch` 在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy`（Colab 不额外重启进程）
-- `agy-cs switch add` 直接新增账号，不进入选择。先保住当前登录，再打开 `agy`（Colab 执行 `colab whoami` 完成远程授权）
+- `agy-cs switch add` 直接新增账号，不进入选择。Antigravity 先保住当前登录，再在终端里打开 `agy`。Colab 打开浏览器登录，允许后自动完成，不打开终端
 - `agy-cs switch <名字>` 只切换，不启动 `agy`
 - 当前账号以钥匙串里实际的登录为准。还开着的 `agy` 把自己的登录写回钥匙串时，显示会跟着变
 - 钥匙串里的登录还没保存过时自动保存，名字用邮箱 `@` 前面的字符；这个名字被别的账号占着就加 `-2`
@@ -103,7 +103,7 @@ export PATH="$HOME/.local/bin:$PATH"
 - 按住一行上下拖可以调整顺序，和 `agy-cs move <名字> <位置>` 一样
 - 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
-- “新增账号…”打开终端执行 `agy-cs switch add` 或 `agy-cs colab switch add`，在那里登录。登录完再点开面板就能看到新账号
+- “新增账号…”：Antigravity 打开终端执行 `agy-cs switch add`。Colab 在浏览器里登录，允许后自动完成；浏览器改成显示授权码时，在面板里粘贴。登录完再点开面板就能看到新账号
 - 每行右边的 `…` 里可以改名、删除。齿轮里可以保存当前登录、换语言、退出
 - 右键点菜单栏图标也可以退出
 - 打开面板只读记下来的结果和钥匙串里当前登录的邮箱，不联网

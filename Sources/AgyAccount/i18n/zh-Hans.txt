@@ -33,7 +33,7 @@ save、switch、next，以及上面这次初始化，才会读取钥匙串。密
 switch、next 和新增账号成功之后，会另起一个后台进程联网查询每个账号的套餐和额度，记在 ~/.agy-cs/usage/。切换不等它，也不受它影响。
 list 只显示这些记录，不联网；过了重置时间的额度按 100% 显示。refresh quota 立刻查一次，不读钥匙串。
 不带名字的 switch 和 switch add 才会在当前终端启动 agy。新增账号会先保住当前登录，再打开 agy；没有换成新邮箱就退出时，会恢复原来的登录。
-加上 colab 前缀可切换 google-colab-cli 账号（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密钥副本放在 ~/.config/colab-cli/accounts/，非密钥记录与额度缓存放在 ~/.agy-cs/colab/。
+加上 colab 前缀可切换 google-colab-cli 账号（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密钥副本放在 ~/.config/colab-cli/accounts/，非密钥记录与额度缓存放在 ~/.agy-cs/colab/。colab switch add 会打开浏览器登录，允许后自动完成，不打开终端。
 
 [operationFailed]
 没能完成账号操作。
@@ -397,7 +397,7 @@ Google 没有返回这个 Colab 登录的邮箱（授权范围可能未包含邮
 当前钥匙串里没有 Colab 登录，这次没有保存账号。用 colab 登录后再执行 agy-cs colab save <名字>。
 
 [colabLoginOpening]
-接下来会在这个终端里运行 colab whoami，请按提示完成远程授权登录；完成后会自动保存并回到提示符。
+已在浏览器打开 Colab 登录。允许后会自动完成。
 
 [colabLaunchFailed]
 没能在这个终端里启动 colab (%1)。
@@ -422,3 +422,33 @@ Colab 算力与会话已更新。
 
 [colabActiveBadge]
 %1 个活跃
+
+[colabLoginPressC]
+要改成自己粘贴授权码，输入 c 后回车。
+
+[colabLoginCodePrompt]
+把授权码粘贴到这里后回车。
+
+[colabLoginCancelled]
+登录已取消。
+
+[colabLoginCodeRejected]
+授权码没用上，请再试一次。
+
+[colabBrowserFailed]
+没能打开浏览器。
+
+[colabOAuthConfigMissing]
+没找到 Colab 的登录配置。
+
+[colabLoginPageDone]
+登录完成，可以关掉这个页面。
+
+[panelColabWaiting]
+已在浏览器打开 Colab 登录。允许后会自动完成。
+
+[panelColabUseCode]
+改用授权码
+
+[panelColabCodePrompt]
+浏览器里会显示一串授权码。点页面上的 Copy，或把授权码粘贴到这里。

@@ -159,7 +159,8 @@ func shellQuoted(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
-// 面板没有终端。不带名字的 switch 和 switch add 在这里会按“需要终端”报错，不会去动钥匙串。
+// 面板进程里没有终端。不带名字的 switch 和 switch add 在这里会按“需要终端”报错，不会去动钥匙串。
+// Colab 登录不走这条路：面板另起子进程做浏览器登录。
 struct NoTerminal: LineReading {
     var isInteractive: Bool { false }
 

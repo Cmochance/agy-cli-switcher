@@ -25,7 +25,7 @@ struct PanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             accounts
-            if model.isWorking || !model.lines.isEmpty {
+            if model.busyLabel != nil || !model.lines.isEmpty {
                 Divider()
                 status
             }
@@ -91,7 +91,7 @@ struct PanelView: View {
     private func pressed(at index: Int, moved: CGSize) {
         if drag == nil {
             let ordered = model.state.rows.compactMap { frames[$0.id] }
-            guard abs(moved.height) >= slack, model.busy == nil, ordered.count > 1,
+            guard abs(moved.height) >= slack, model.busy == nil, !model.loggingIn, ordered.count > 1,
                   ordered.count == model.state.rows.count
             else {
                 return
@@ -359,17 +359,23 @@ private struct PromptView: View {
             return model.text(.panelRemoveConfirm, row.name, row.email)
         case .removeLastCopy(let row):
             return model.text(.panelRemoveLastCopy, row.name, row.email)
+        case .colabWaiting:
+            return model.text(.panelColabWaiting)
+        case .colabCode:
+            return model.text(.panelColabCodePrompt)
         }
     }
 
     private var confirmLabel: TextKey {
         switch prompt {
-        case .save, .rename:
+        case .save, .rename, .colabCode:
             return .panelConfirm
         case .replace:
             return .panelReplaceNow
         case .remove, .removeLastCopy:
             return .panelRemoveNow
+        case .colabWaiting:
+            return .panelColabUseCode
         }
     }
 

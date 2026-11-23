@@ -199,7 +199,28 @@ func isTrustedExecutablePath(_ path: String) -> Bool {
     return FileManager.default.isExecutableFile(atPath: resolved)
 }
 
-private func isTrustedDirectoryTree(_ dirPath: String, uid: uid_t) -> Bool {
+// oauth_config.json 里有 client_secret。只接受当前用户或 root 拥有、且目录链上没有别人可写的那一份。
+func isTrustedConfigFile(_ path: String) -> Bool {
+    guard path.hasPrefix("/") else {
+        return false
+    }
+    let uid = getuid()
+    let parent = (path as NSString).deletingLastPathComponent
+    guard isTrustedDirectoryTree(parent, uid: uid) else {
+        return false
+    }
+    var info = stat()
+    guard stat(path, &info) == 0,
+          (info.st_mode & S_IFMT) == S_IFREG,
+          info.st_uid == uid || info.st_uid == 0,
+          (info.st_mode & S_IWOTH) == 0
+    else {
+        return false
+    }
+    return true
+}
+
+func isTrustedDirectoryTree(_ dirPath: String, uid: uid_t) -> Bool {
     let raw = URL(fileURLWithPath: dirPath).standardizedFileURL.path
     let resolved = URL(fileURLWithPath: dirPath).resolvingSymlinksInPath().path
     for rootPath in Set([raw, resolved]) {

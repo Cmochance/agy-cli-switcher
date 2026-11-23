@@ -2,6 +2,23 @@ import Foundation
 import XCTest
 @testable import AgyAccount
 
+final class ScriptedColabSigner: ColabSigning {
+    var blob: String?
+    var failure: AccountFailure?
+    var handoffs: [Bool] = []
+
+    func signIn(handoff: Bool) throws -> String {
+        handoffs.append(handoff)
+        if let failure {
+            throw failure
+        }
+        guard let blob else {
+            throw AccountFailure(.colabLoginCancelled)
+        }
+        return blob
+    }
+}
+
 final class StaticColabEmailResolver: ColabEmailResolving {
     var byRefresh: [String: String]
     var calls = 0
@@ -388,10 +405,9 @@ final class ColabTests: XCTestCase {
 
         // Colab `switch add` adds carol and does NOT relaunch after switch.
         fixture.terminal.isInteractive = true
-        colabLauncher.supply = {
-            colabKeychain.blob = blob3
-            colabKeychain.missing = false
-        }
+        let signer = ScriptedColabSigner()
+        signer.blob = blob3
+        fixture.colab?.signer = signer
         XCTAssertEqual(fixture.run(["colab", "switch", "add"]).code, 0)
         XCTAssertEqual(colabLauncher.started, 0)
         XCTAssertEqual(fixture.run(["colab", "current"]).output, ["carol@example.com"])
@@ -563,21 +579,23 @@ final class ColabTests: XCTestCase {
         )
         XCTAssertEqual(fixture.run(["colab", "save", "alice"]).code, 0)
 
+        let signer = ScriptedColabSigner()
+        signer.blob = noEmail
         fixture.colab = ProviderServices(
             keychain: colabKeychain,
             codec: ColabLoginCodec(emailResolver: resolver),
             launcher: colabLauncher,
             usage: ScriptedUsage(),
-            refresher: ScriptedRefresher()
+            refresher: ScriptedRefresher(),
+            signer: signer
         )
-        colabLauncher.supply = {
-            colabKeychain.blob = noEmail
-            colabKeychain.missing = false
-        }
+        colabKeychain.writes = []
         let result = fixture.run(["colab", "switch", "add"])
         XCTAssertEqual(result.code, 1)
         XCTAssertEqual(colabKeychain.blob, alice)
+        XCTAssertEqual(colabKeychain.writes, [])
         XCTAssertTrue(result.errors.joined(separator: "\n").contains("未包含邮箱"))
+        XCTAssertFalse(result.errors.joined(separator: "\n").contains("已恢复"))
     }
 
     func testColabAddCompletesSessionSwapInsideStateLock() throws {
@@ -610,8 +628,11 @@ final class ColabTests: XCTestCase {
         let observedSwapBeforeUnlock = XCTestExpectation(description: "contending state lock sees completed session swap")
         var sessionsAtLockAcquisition = ""
         let colabProfile = ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: ["zh-Hans"], provider: .colab)
+        let signer = ScriptedColabSigner()
+        signer.blob = bob
+        fixture.colab?.signer = signer
 
-        colabLauncher.supply = {
+        colabKeychain.onWrite = { _ in
             DispatchQueue.global().async {
                 guard let fd = colabProfile.lockState(wait: 5) else {
                     XCTFail("Failed to acquire state.lock")
@@ -622,8 +643,6 @@ final class ColabTests: XCTestCase {
                 observedSwapBeforeUnlock.fulfill()
             }
             Thread.sleep(forTimeInterval: 0.08)
-            colabKeychain.blob = bob
-            colabKeychain.missing = false
         }
 
         XCTAssertEqual(fixture.run(["colab", "switch", "add"]).code, 0)

@@ -23,7 +23,7 @@ Current version **v0.2.2** (see [Changelog](documents/CHANGELOG.md)).
 - Agy Switcher lists the saved accounts and their quota in the menu bar. Click one to switch, or use the bottom-bar button to toggle between Antigravity and Colab
 - `agy-cs ls` shows each Antigravity account's plan and Gemini 5-hour, 7-day and Argon quota; `agy-cs colab ls` shows Colab CU balance, hourly burn rate, and active assignments
 - `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal (Colab exits cleanly without spawning a nested shell)
-- `agy-cs switch add` adds an account directly, without the menu. The current login is kept, then `agy` opens (or `colab whoami` runs for Colab remote auth)
+- `agy-cs switch add` adds an account directly, without the menu. Antigravity keeps the current login, then opens `agy` in the terminal. Colab opens a browser and finishes after you allow access, without a terminal
 - `agy-cs switch <name>` only switches. It does not start `agy`
 - The current account is whatever login is actually in the keychain. When an `agy` that is still open writes its own login back, the display follows
 - A login in the keychain that has not been saved yet is saved automatically, under the characters before `@`; if another account holds that name, `-2` is added
@@ -103,7 +103,7 @@ Click the icon in the menu bar to open the panel.
 - Press a row and drag it up or down to change the order. This is the same as `agy-cs move <name> <position>`
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
-- "Add account…" opens a terminal that runs `agy-cs switch add` or `agy-cs colab switch add`, where you sign in. Open the panel again afterwards to see the new account
+- "Add account…": Antigravity opens a terminal that runs `agy-cs switch add`. Colab signs in through the browser and finishes after you allow access; if the browser shows a code instead, paste it in the panel. Open the panel again afterwards to see the new account
 - The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
 - Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results and the email of the current login in the keychain. It makes no request

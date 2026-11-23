@@ -41,6 +41,9 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
         popover.contentViewController = host
         popover.behavior = .transient
         popover.delegate = self
+        model.onKeepsOpenChanged = { [weak self] keep in
+            self?.popover.behavior = keep ? .applicationDefined : .transient
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

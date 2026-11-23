@@ -1010,6 +1010,7 @@ final class MemoryKeychain: KeychainStoring {
     var missing = false
     var denied = false
     var writeLimit: Int?
+    var onWrite: ((String) -> Void)?
 
     func checkWritable(_ blob: String) throws {
         if let writeLimit, blob.count > writeLimit {
@@ -1034,6 +1035,7 @@ final class MemoryKeychain: KeychainStoring {
         self.blob = blob
         missing = false
         denied = false
+        onWrite?(blob)
     }
 
     func deleteBlob() throws {
