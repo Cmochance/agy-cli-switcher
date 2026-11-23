@@ -530,7 +530,7 @@ final class AgyAccountTests: XCTestCase {
         let reads = fixture.keychain.reads
         let expected = [
             ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
-            ["bob", "bob@example.com", "Free", "5h —", "7d 99% \(localTime("2026-01-07T10:23:00Z"))", "Argon —"],
+            ["bob", "bob@example.com", "Free", "7d 99% \(localTime("2026-01-07T10:23:00Z"))"],
         ]
         let refreshed = fixture.run(["refresh", "quota"])
         XCTAssertEqual(refreshed.code, 0)
@@ -574,14 +574,15 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(fixture.run(["rm", "anna"]).code, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.usageURL("anna").path))
 
-        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        let bobLine = ["* bob"] + expected[1].dropFirst()
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), bobLine)
         XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
-        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), bobLine)
         fixture.keychain.blob = makeBlob(email: "carol@example.com", refresh: "c")
         let kept = fixture.run(["save", "bob"])
         XCTAssertEqual(kept.code, 1)
         XCTAssertEqual(kept.errors, ["名字 bob 下面已经存着 bob@example.com，所以没有保存。确认用当前登录替换它，再用 agy-cs save bob --force。"])
-        XCTAssertEqual(cells(fixture.run(["list"]).output[0]).count, 6)
+        XCTAssertEqual(cells(fixture.run(["list"]).output[0]), expected[1])
         XCTAssertEqual(fixture.run(["save", "bob", "--force"]).code, 0)
         XCTAssertEqual(fixture.run(["list"]).output, ["* bob  carol@example.com", "* carol  carol@example.com"])
         fixture.usage.snapshots = nil
@@ -652,7 +653,8 @@ final class AgyAccountTests: XCTestCase {
         let waited = fixture.run(["refresh", "quota"])
         XCTAssertEqual(waited.code, 0)
         XCTAssertEqual(waited.errors, [])
-        XCTAssertEqual(waited.output.map { cells($0).count }, [6, 6])
+        XCTAssertEqual(waited.output.map { cells($0).count }, [3, 3])
+        XCTAssertFalse(waited.output.contains { $0.contains("5h") || $0.contains("7d") || $0.contains("Argon") })
         XCTAssertEqual(fixture.usage.calls.last, ["alice"])
         XCTAssertGreaterThan(Date().timeIntervalSince(started), 0.2)
         XCTAssertLessThan(try XCTUnwrap(fixture.usage.allowed.last), 4.9)

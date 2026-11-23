@@ -189,12 +189,13 @@ func bucketText(_ bucket: UsageBucket?, now: Date, timeZone: TimeZone) -> String
     return "\(percent)% \(formatter.string(from: reset))"
 }
 
-// 一个账号的套餐和三项额度，已经是要显示的文字。list 和菜单栏面板用同一份。
+// 一个账号要显示的文字。list 和菜单栏面板用同一份。
+// 没有的额度是 nil：不显示横线，也不占一列。有的几项合成最后一格，列对齐只保持到套餐名。
 public struct UsageText: Equatable {
     public var plan: String
-    public var fiveHour: String
-    public var weekly: String
-    public var argon: String
+    public var fiveHour: String?
+    public var weekly: String?
+    public var argon: String?
     public var colabBalance: String?
     public var colabRate: String?
     public var colabActive: String?
@@ -203,9 +204,9 @@ public struct UsageText: Equatable {
 
     public init(
         plan: String,
-        fiveHour: String,
-        weekly: String,
-        argon: String,
+        fiveHour: String? = nil,
+        weekly: String? = nil,
+        argon: String? = nil,
         colabBalance: String? = nil,
         colabRate: String? = nil,
         colabActive: String? = nil,
@@ -227,7 +228,16 @@ public struct UsageText: Equatable {
         if isColab {
             return [colabBalance ?? "—", colabRate ?? "—", colabActive ?? "—"]
         }
-        return [plan, "5h " + fiveHour, "7d " + weekly, "Argon " + argon]
+        var row = [plan]
+        let quotas = [
+            fiveHour.map { "5h \($0)" },
+            weekly.map { "7d \($0)" },
+            argon.map { "Argon \($0)" },
+        ].compactMap { $0 }
+        if !quotas.isEmpty {
+            row.append(quotas.joined(separator: "  "))
+        }
+        return row
     }
 }
 
@@ -244,9 +254,6 @@ func usageText(
         let active = "\(colab.activeAssignments) active"
         return UsageText(
             plan: balance,
-            fiveHour: rate,
-            weekly: "\(colab.activeAssignments)",
-            argon: "",
             colabBalance: balance,
             colabRate: rate,
             colabActive: active,
@@ -255,8 +262,11 @@ func usageText(
         )
     }
     let label = planLabel(id: snapshot.planID, name: snapshot.planName)
-    func text(_ match: (String) -> Bool) -> String {
-        bucketText(snapshot.buckets.first { match($0.id) }, now: now, timeZone: timeZone)
+    func text(_ match: (String) -> Bool) -> String? {
+        guard let bucket = snapshot.buckets.first(where: { match($0.id) }) else {
+            return nil
+        }
+        return bucketText(bucket, now: now, timeZone: timeZone)
     }
     return UsageText(
         plan: snapshot.argonLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,

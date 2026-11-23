@@ -93,8 +93,34 @@ final class UsageTests: XCTestCase {
             usageText(pro, now: now, timeZone: utc),
             UsageText(plan: "Pro", fiveHour: "62% 11-21 15:35", weekly: "99% 11-28 10:23", argon: "100%")
         )
-        XCTAssertEqual(usageText(pro, now: now, timeZone: utc).cells, ["Pro", "5h 62% 11-21 15:35", "7d 99% 11-28 10:23", "Argon 100%"])
-        XCTAssertEqual(usageText(free, now: now, timeZone: utc).cells, ["Free", "5h —", "7d 100%", "Argon —"])
+        XCTAssertEqual(usageText(pro, now: now, timeZone: utc).cells, [
+            "Pro",
+            "5h 62% 11-21 15:35  7d 99% 11-28 10:23  Argon 100%",
+        ])
+        XCTAssertEqual(
+            usageText(free, now: now, timeZone: utc),
+            UsageText(plan: "Free", weekly: "100%")
+        )
+        XCTAssertEqual(usageText(free, now: now, timeZone: utc).cells, ["Free", "7d 100%"])
+        let ultra = UsageSnapshot(planID: "g1-ultra-tier", planName: "Google AI Ultra", buckets: [
+            UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-11-21T15:35:35.5Z"),
+            UsageBucket(id: "gemini-weekly", remaining: 1, resetTime: "2026-11-28T10:00:00Z"),
+            UsageBucket(id: "3p-5h", remaining: 0.1, resetTime: "2026-11-21T15:35:35.5Z"),
+        ], argonLocked: false)
+        let ultraText = usageText(ultra, now: now, timeZone: utc)
+        XCTAssertEqual(ultraText.plan, "Ultra")
+        XCTAssertEqual(ultraText.fiveHour, "62% 11-21 15:35")
+        XCTAssertEqual(ultraText.weekly, "100%")
+        XCTAssertNil(ultraText.argon)
+        XCTAssertFalse(ultraText.cells.joined().contains("3p"))
+        let empty = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true)
+        let hidden = usageText(empty, now: now, timeZone: utc) { "\($0)（非付费）" }
+        XCTAssertEqual(hidden, UsageText(plan: "Pro（非付费）"))
+        XCTAssertEqual(hidden.cells, ["Pro（非付费）"])
+        let zero = UsageSnapshot(planID: "free-tier", planName: "", buckets: [
+            UsageBucket(id: "gemini-weekly", remaining: 0, resetTime: "2026-11-28T10:23:13Z"),
+        ])
+        XCTAssertEqual(usageText(zero, now: now, timeZone: utc).weekly, "0% 11-28 10:23")
         var marked = pro
         marked.argonLocked = true
         XCTAssertEqual(usageText(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Pro（非付费）")
@@ -115,13 +141,13 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(
             alignedRows([
-                ["* alice", "alice@example.com", "Pro", "5h 62% 11-21 15:35", "7d 100%", "Argon 100%"],
-                ["  bo", "bo@example.com", "Free", "5h —", "7d 99% 11-28 10:23", "Argon —"],
+                ["* alice", "alice@example.com", "Pro", "5h 62% 11-21 15:35  7d 100%  Argon 100%"],
+                ["  bo", "bo@example.com", "Free", "7d 99% 11-28 10:23"],
                 ["  carol", "carol@example.com"],
             ]),
             [
-                "* alice  alice@example.com  Pro   5h 62% 11-21 15:35  7d 100%             Argon 100%",
-                "  bo     bo@example.com     Free  5h —                7d 99% 11-28 10:23  Argon —",
+                "* alice  alice@example.com  Pro   5h 62% 11-21 15:35  7d 100%  Argon 100%",
+                "  bo     bo@example.com     Free  7d 99% 11-28 10:23",
                 "  carol  carol@example.com",
             ]
         )
