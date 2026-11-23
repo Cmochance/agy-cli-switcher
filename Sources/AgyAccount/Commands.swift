@@ -230,24 +230,31 @@ struct AccountCommands {
             var previousNames: [String] = []
             let emailChanged = snapshot.map { $0.meta.email != meta.email } ?? false
             var keptRollback = false
-            if let snapshot {
-                if snapshot.meta.email == meta.email {
-                    try keepSnapshot(ObservedLogin(blob: blob, meta: meta))
-                } else if profile.dismissedEmail() == snapshot.meta.email,
-                          profile.slots(forEmail: snapshot.meta.email).isEmpty
+            if let snapshot, snapshot.meta.email != meta.email {
+                if profile.dismissedEmail() == snapshot.meta.email,
+                   profile.slots(forEmail: snapshot.meta.email).isEmpty
                 {
-                    try files.writeRollback(snapshot.blob)
                     keptRollback = true
                 } else {
+                    // 不同邮箱先留住旧登录。它可能刚用同一个前缀占住名字。
                     try keepSnapshot(snapshot)
                     previousNames = profile.slots(forEmail: snapshot.meta.email)
                     try stateSync.prepareSwitch(from: previousNames, to: "", sameEmail: false)
                 }
             }
-            // 旧登录先留住。keepSnapshot 可能刚用同一个前缀存下它；名字被占时钥匙串还不动，也不改成 -2。
+            // 名字被占时还没写回滚文件，也还没把这次的新登录存下来。不改成 -2。
             let name = try availableDefaultName(meta.email)
-            if keptRollback {
-                try files.writeRollbackNew(blob)
+            if let snapshot, snapshot.meta.email == meta.email {
+                try keepSnapshot(ObservedLogin(blob: blob, meta: meta))
+            }
+            if keptRollback, let snapshot {
+                do {
+                    try files.writeRollback(snapshot.blob)
+                    try files.writeRollbackNew(blob)
+                } catch {
+                    files.removeAddRollback()
+                    throw error
+                }
             }
             do {
                 try keychain.writeBlob(blob)

@@ -503,6 +503,155 @@ final class ColabLoginTests: XCTestCase {
         XCTAssertEqual(missingSidecar.keychain.writes, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(missingSidecar.fixture.home).path))
     }
+
+    func testRejectedColabLoginLeavesNoRollbackAndDoesNotSaveTheNewBlob() throws {
+        let work = makeColabBlob(refresh: "r-work")
+        let incoming = makeColabBlob(refresh: "r-incoming")
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com"))
+        defer { fixture.cleanup() }
+        let keychain = MemoryKeychain(work)
+        let signer = ScriptedColabSigner()
+        signer.blob = incoming
+        fixture.colab = ProviderServices(
+            keychain: keychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-work": "work@example.com",
+                "r-incoming": "new@example.com",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher(),
+            signer: signer
+        )
+        let profile = ToolProfile(
+            home: fixture.home,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            provider: .colab
+        )
+        try profile.write(
+            name: "new",
+            meta: LoginMeta(email: "other@example.com", authMethod: "oauth", expiry: "2026-01-01T00:00:00Z")
+        )
+        let dismissed = fixture.home.appendingPathComponent(".agy-cs/colab/not-saved")
+        try Data("work@example.com\n".utf8).write(to: dismissed)
+        let rejected = fixture.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(rejected.code, 1)
+        XCTAssertTrue(rejected.output.contains("AGY_CS_LOGIN error nameTaken"))
+        XCTAssertEqual(keychain.writes, [])
+        XCTAssertEqual(keychain.blob, work)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(fixture.home).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollbackNew(fixture.home).path))
+
+        keychain.missing = true
+        let cleared = fixture.run(["colab", "current"])
+        XCTAssertEqual(cleared.code, 1)
+        XCTAssertTrue(keychain.missing)
+        XCTAssertEqual(keychain.writes, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: colabRollback(fixture.home).path))
+
+        let renewed = makeColabBlob(refresh: "r-work-new")
+        let again = try Fixture(blob: makeBlob(email: "agy@example.com"))
+        defer { again.cleanup() }
+        let sameKeychain = MemoryKeychain(work)
+        let sameSigner = ScriptedColabSigner()
+        sameSigner.blob = renewed
+        again.colab = ProviderServices(
+            keychain: sameKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-work": "alex@work.example",
+                "r-personal": "alex@personal.example",
+                "r-work-new": "alex@work.example",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher(),
+            signer: sameSigner
+        )
+        let saved = AccountFiles(
+            locations: AccountLocations(home: again.home, provider: .colab),
+            now: { "2026-01-01T00:00:00Z" },
+            codec: ColabLoginCodec()
+        )
+        let workMeta = LoginMeta(email: "alex@work.example", authMethod: "oauth2", expiry: "2026-12-01T00:00:00Z")
+        try saved.writeSaved(name: "work", blob: work, meta: workMeta)
+        let personal = makeColabBlob(refresh: "r-personal")
+        try saved.writeSaved(
+            name: "alex",
+            blob: personal,
+            meta: LoginMeta(email: "alex@personal.example", authMethod: "oauth2", expiry: "2026-12-01T00:00:00Z")
+        )
+        let againProfile = ToolProfile(
+            home: again.home,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            provider: .colab
+        )
+        try againProfile.write(name: "work", meta: workMeta)
+        try againProfile.write(
+            name: "alex",
+            meta: LoginMeta(email: "alex@personal.example", authMethod: "oauth2", expiry: "2026-12-01T00:00:00Z")
+        )
+        let sameRejected = again.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(sameRejected.code, 1)
+        XCTAssertTrue(sameRejected.output.contains("AGY_CS_LOGIN error nameTaken"))
+        XCTAssertEqual(sameKeychain.writes, [])
+        XCTAssertEqual(sameKeychain.blob, work)
+        let workCopy = try String(contentsOf: saved.locations.tokenURL("work"), encoding: .utf8)
+        XCTAssertTrue(workCopy.contains("r-work"))
+        XCTAssertFalse(workCopy.contains("r-work-new"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: saved.locations.tokenURL("alex-2").path))
+        let personalCopy = try String(contentsOf: saved.locations.tokenURL("alex"), encoding: .utf8)
+        XCTAssertTrue(personalCopy.contains("r-personal"))
+        XCTAssertFalse(personalCopy.contains("r-work-new"))
+
+        let dismissedHome = try Fixture(blob: makeBlob(email: "agy@example.com"))
+        defer { dismissedHome.cleanup() }
+        let dismissedKeychain = MemoryKeychain(work)
+        let dismissedSigner = ScriptedColabSigner()
+        dismissedSigner.blob = renewed
+        dismissedHome.colab = ProviderServices(
+            keychain: dismissedKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-work": "alex@work.example",
+                "r-personal": "alex@personal.example",
+                "r-work-new": "alex@work.example",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher(),
+            signer: dismissedSigner
+        )
+        let dismissedFiles = AccountFiles(
+            locations: AccountLocations(home: dismissedHome.home, provider: .colab),
+            now: { "2026-01-01T00:00:00Z" },
+            codec: ColabLoginCodec()
+        )
+        try dismissedFiles.writeSaved(
+            name: "alex",
+            blob: personal,
+            meta: LoginMeta(email: "alex@personal.example", authMethod: "oauth2", expiry: "2026-12-01T00:00:00Z")
+        )
+        let dismissedProfile = ToolProfile(
+            home: dismissedHome.home,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            provider: .colab
+        )
+        try dismissedProfile.write(
+            name: "alex",
+            meta: LoginMeta(email: "alex@personal.example", authMethod: "oauth2", expiry: "2026-12-01T00:00:00Z")
+        )
+        let notSaved = dismissedHome.home.appendingPathComponent(".agy-cs/colab/not-saved")
+        try Data("alex@work.example\n".utf8).write(to: notSaved)
+        let dismissedRejected = dismissedHome.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(dismissedRejected.code, 1)
+        XCTAssertTrue(dismissedRejected.output.contains("AGY_CS_LOGIN error nameTaken"))
+        XCTAssertEqual(dismissedKeychain.writes, [])
+        XCTAssertEqual(dismissedKeychain.blob, work)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dismissedFiles.locations.tokenURL("alex-2").path))
+        XCTAssertEqual(try String(contentsOf: notSaved, encoding: .utf8), "alex@work.example\n")
+    }
 }
 
 private func colabRollback(_ home: URL) -> URL {
