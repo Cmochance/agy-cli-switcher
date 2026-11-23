@@ -15,7 +15,7 @@
 
 **agy-cli-switcher** 在 macOS 上切换 Antigravity CLI（`agy`）和 Google Colab CLI（`colab`）的登录。有两种形式：终端里的命令 `agy-cs`，和菜单栏工具 Agy Switcher。两者是同一个程序，用同一份数据，可以只装一种，也可以都装。
 
-当前版本 **v0.2.2**（详见 [Changelog](documents/CHANGELOG.md)）。
+当前版本 **v0.2.3**（详见 [Changelog](documents/CHANGELOG.md)）。
 
 ## 能做什么
 
@@ -36,14 +36,14 @@
 
 ### 菜单栏工具 Agy Switcher
 
-1. 在 [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest) 下载 `Agy-Switcher-v0.2.2-macOS-universal.dmg`，打开后把 `Agy Switcher.app` 拖到旁边的“应用程序”上
+1. 在 [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest) 下载 `Agy-Switcher-v0.2.3-macOS-universal.dmg`，打开后把 `Agy Switcher.app` 拖到旁边的“应用程序”上
 2. 第一次打开时系统会拦住它，因为它没有经过 Apple 公证。到“系统设置 → 隐私与安全性”里点“仍要打开”
 
 也可以在终端里下载。这样下载的文件不带 `com.apple.quarantine` 标记，不用去系统设置里放行：
 
 ```bash
 tmp="$(mktemp -d)" && \
-  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.2/Agy-Switcher-v0.2.2-macOS-universal.dmg && \
+  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.3/Agy-Switcher-v0.2.3-macOS-universal.dmg && \
   hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
   { ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app"; copied=$?; hdiutil detach -quiet "$tmp/mnt"; [ "$copied" -eq 0 ]; } && \
   open "/Applications/Agy Switcher.app"
@@ -59,7 +59,7 @@ tmp="$(mktemp -d)" && \
 
 ```bash
 mkdir -p ~/.local/bin
-curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.2/agy-cs-v0.2.2-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.3/agy-cs-v0.2.3-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 已经装了 Agy Switcher 的话不用再下载，包里就是同一个程序：
@@ -85,7 +85,7 @@ make install
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-每个下载的文件在同一页上都有一个同名加 `.sha256` 的文件。两个放在一起就可以核对，比如 `shasum -a 256 -c Agy-Switcher-v0.2.2-macOS-universal.dmg.sha256`。
+每个下载的文件在同一页上都有一个同名加 `.sha256` 的文件。两个放在一起就可以核对，比如 `shasum -a 256 -c Agy-Switcher-v0.2.3-macOS-universal.dmg.sha256`。
 
 ## 快速开始
 

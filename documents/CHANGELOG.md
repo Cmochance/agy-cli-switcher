@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3
+
+### 简体中文
+
+- 可以切换 Google Colab CLI（`colab`）的账号。命令前面加 `colab`，例如 `agy-cs colab ls`。面板底栏可以在 Antigravity 和 Colab 之间换。
+- `agy-cs colab ls` 显示剩余 CU、消耗速率和活跃会话数。切换到另一个邮箱时，按账号备份并恢复会话文件。
+- Colab 新增账号不再打开终端。浏览器打开登录页，允许后自动完成。页面改成显示授权码时，在面板里粘贴。Antigravity 新增账号仍走原来的终端。
+
+### English
+
+- Google Colab CLI (`colab`) accounts can be switched. Put `colab` before the command, for example `agy-cs colab ls`. The panel's bottom bar switches between Antigravity and Colab.
+- `agy-cs colab ls` shows the remaining CU, the consumption rate and the number of active sessions. Switching to another email backs up and restores that account's session files.
+- Adding a Colab account no longer opens a terminal. The browser opens the sign-in page and finishes after you allow it. When the page shows an authorization code instead, paste it in the panel. Adding an Antigravity account still uses the terminal.
+
 ## 0.2.2
 
 ### 简体中文
