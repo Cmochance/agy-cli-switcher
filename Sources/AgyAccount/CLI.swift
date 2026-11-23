@@ -7,6 +7,7 @@ struct ProviderServices {
     var launcher: any AgyLaunching
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
+    var signer: (any ColabSigning)? = nil
 }
 
 // 一条指令要用到的外部东西。命令行和菜单栏面板各自配一份，指令本身是同一套。
@@ -122,6 +123,7 @@ struct CommandServices {
             provider: provider,
             codec: activeCodec,
             stateSync: sync,
+            signer: provider == .colab ? colab?.signer : nil,
             text: text,
             stdout: stdout,
             stderr: stderr
@@ -129,12 +131,18 @@ struct CommandServices {
     }
 }
 
+// `print` 在管道上是整段缓冲。面板要在子进程还等着的时候读到 `need-code`，所以每一行都立刻送出去。
+func writeStdoutLine(_ line: String) {
+    print(line)
+    fflush(stdout)
+}
+
 public enum AgyAccountCLI {
     public static func run(_ arguments: [String]) -> Int32 {
         execute(
             arguments,
             services: .system(terminal: StandardTerminal()),
-            stdout: { print($0) },
+            stdout: writeStdoutLine,
             stderr: { message in
                 fputs(message + "\n", stderr)
             }
@@ -242,7 +250,9 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         case 1:
             return .choose
         case 2 where arguments[1] == reservedName:
-            return .add
+            return .add(handoff: false)
+        case 3 where arguments[1] == reservedName && arguments[2] == "--handoff":
+            return .add(handoff: true)
         case 2:
             return .change(arguments[1])
         // 面板点一行用这种写法。以前留下的、名字正好是 add 的记录也能切过去，不会被当成新增账号。

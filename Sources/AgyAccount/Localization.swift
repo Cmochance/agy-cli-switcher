@@ -194,6 +194,16 @@ public enum TextKey: String, CaseIterable {
     case colabRowRate
     case colabRowSessions
     case colabActiveBadge
+    case colabLoginPressC
+    case colabLoginCodePrompt
+    case colabLoginCancelled
+    case colabLoginCodeRejected
+    case colabBrowserFailed
+    case colabOAuthConfigMissing
+    case colabLoginPageDone
+    case panelColabWaiting
+    case panelColabUseCode
+    case panelColabCodePrompt
 }
 
 struct AccountFailure: Error, Equatable {

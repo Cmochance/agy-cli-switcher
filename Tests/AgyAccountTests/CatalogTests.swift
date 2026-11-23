@@ -222,6 +222,12 @@ final class CatalogTests: XCTestCase {
             ColabUsageFetcher.ccuInfoURL.path,
             "X-Colab-Client-Agent",
             "colab-cli",
+            "127.0.0.1",
+            "access_denied",
+            "accounts.google.com",
+            "oauth2.googleapis.com",
+            "applicationdefaultauthcode.html",
+            "universe_domain",
         ] {
             XCTAssertTrue(contract.contains(token), "COLAB_CONTRACT.md missing \(token)")
         }

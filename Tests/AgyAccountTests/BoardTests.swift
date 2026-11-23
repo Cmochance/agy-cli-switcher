@@ -310,7 +310,6 @@ final class BoardTests: XCTestCase {
             XCTAssertEqual(fixture.run(["save", name]).code, 0)
         }
         let model = PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
-        let reads = fixture.keychain.reads
         XCTAssertEqual(model.state.rows.map(\.name), ["alice", "bob", "carol"])
 
         // 松手的那一下面板上就换好了，不等指令执行完，也不显示“正在处理”。
@@ -1174,6 +1173,13 @@ final class BoardTests: XCTestCase {
         colabModel.setLanguage("ja")
         await settle(colabModel)
         try picture(PanelView(model: colabModel), to: output.appendingPathComponent("13-colab-ja.png"))
+        colabModel.setLanguage("zh-Hans")
+        await settle(colabModel)
+        colabModel.ask(.colabWaiting)
+        try picture(PanelView(model: colabModel), to: output.appendingPathComponent("15-colab-waiting.png"))
+        colabModel.cancel()
+        colabModel.ask(.colabCode)
+        try picture(PanelView(model: colabModel), to: output.appendingPathComponent("16-colab-code.png"))
     }
 
     @MainActor
@@ -1222,6 +1228,222 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(reloaded.provider, .antigravity)
         XCTAssertEqual(reloaded.state.rows.map(\.name), ["agy1"])
     }
+
+    @MainActor
+    func testPanelColabLoginStaysInThePanel() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "a1"))
+        defer { fixture.cleanup() }
+        let colabKeychain = MemoryKeychain(makeColabBlob(refresh: "colab-1"))
+        fixture.colab = ProviderServices(
+            keychain: colabKeychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["colab-1": "researcher@example.com"])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "researcher"]).code, 0)
+        try fixture.board.setSelectedProvider(.colab)
+
+        let runner = ScriptedPanelLogin()
+        let clip = ClipboardSample()
+        var exited = false
+        let model = PanelModel(
+            board: fixture.board,
+            executable: "/somewhere/agy-cs",
+            open: { _ in
+                XCTFail("Colab add must not open a terminal script")
+                return false
+            },
+            exit: { exited = true },
+            loginRunner: runner,
+            pasteboard: { (clip.changeCount, clip.string) }
+        )
+        XCTAssertEqual(model.state.rows.map(\.name), ["researcher"])
+        model.addAccount()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.tool.addCommandFile.path))
+        XCTAssertEqual(runner.arguments, ["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(runner.executable, "/somewhere/agy-cs")
+        XCTAssertEqual(model.prompt, .colabWaiting)
+        XCTAssertTrue(model.loggingIn)
+        XCTAssertTrue(model.isWorking)
+        model.toggleProvider()
+        XCTAssertEqual(model.provider, .colab)
+
+        model.confirm()
+        XCTAssertEqual(runner.channel.sent, ["fallback"])
+        runner.emit("\(colabLoginLinePrefix) retry colabLoginCodeRejected")
+        XCTAssertEqual(model.prompt, .colabWaiting)
+        XCTAssertEqual(model.messages, [model.text(.colabLoginCodeRejected)])
+        XCTAssertTrue(model.loggingIn)
+
+        let copied = "4/" + String(repeating: "a", count: 24)
+        clip.string = copied
+        clip.changeCount += 1
+        model.pollClipboard()
+        XCTAssertEqual(runner.channel.sent, ["fallback"])
+
+        runner.emit("\(colabLoginLinePrefix) need-code")
+        XCTAssertEqual(model.prompt, .colabCode)
+        clip.string = String(repeating: "b", count: 30)
+        clip.changeCount += 1
+        model.pollClipboard()
+        XCTAssertEqual(runner.channel.sent, ["fallback"])
+        clip.string = copied
+        clip.changeCount += 1
+        model.pollClipboard()
+        XCTAssertEqual(runner.channel.sent, ["fallback", copied])
+
+        model.draft = "short"
+        model.confirm()
+        XCTAssertEqual(runner.channel.sent, ["fallback", copied])
+        XCTAssertEqual(model.messages, [model.text(.colabLoginCodeRejected)])
+
+        let typed = String(repeating: "c", count: 30)
+        model.draft = typed
+        model.confirm()
+        XCTAssertEqual(runner.channel.sent, ["fallback", copied, typed])
+
+        XCTAssertEqual(fixture.run(["colab", "rename", "researcher", "renamed"]).code, 0)
+        XCTAssertEqual(model.state.rows.map(\.name), ["researcher"])
+        runner.emit("\(colabLoginLinePrefix) saved renamed researcher@example.com")
+        XCTAssertTrue(model.messages.contains { $0.contains("renamed") && $0.contains("researcher@example.com") })
+        XCTAssertNil(model.prompt)
+        runner.emitError("原账号仍有运行中的会话")
+        XCTAssertTrue(model.messages.contains("原账号仍有运行中的会话"))
+        XCTAssertFalse(model.messages.joined(separator: "\n").contains(copied))
+        for _ in 0 ..< 100 where model.state.rows.map(\.name) != ["renamed"] {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.state.rows.map(\.name), ["renamed"])
+        runner.finish()
+        XCTAssertFalse(model.loggingIn)
+        XCTAssertNil(model.prompt)
+
+        model.addAccount()
+        runner.emitError("stderr-must-stay-hidden")
+        runner.emit("\(colabLoginLinePrefix) error colabBrowserFailed")
+        XCTAssertEqual(model.messages, [model.text(.colabBrowserFailed)])
+        XCTAssertFalse(model.messages.joined(separator: "\n").contains("stderr-must-stay-hidden"))
+        XCTAssertNil(model.prompt)
+        XCTAssertTrue(model.loggingIn)
+        runner.finish()
+        XCTAssertFalse(model.loggingIn)
+        XCTAssertEqual(model.messages, [model.text(.colabBrowserFailed)])
+
+        model.addAccount()
+        model.cancel()
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertEqual(model.prompt, .colabWaiting)
+        model.quit()
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertFalse(exited)
+        runner.finish()
+        XCTAssertTrue(exited)
+        XCTAssertFalse(model.loggingIn)
+    }
+
+    @MainActor
+    func testPanelQuitKillsAWaitingLoginAndWaitsOnceItIsCommitting() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "a1"))
+        defer { fixture.cleanup() }
+        fixture.colab = ProviderServices(
+            keychain: MemoryKeychain(makeColabBlob(refresh: "colab-1")),
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["colab-1": "researcher@example.com"])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "researcher"]).code, 0)
+        try fixture.board.setSelectedProvider(.colab)
+        let runner = ScriptedPanelLogin()
+        var exited = false
+        let model = PanelModel(
+            board: fixture.board,
+            executable: "/somewhere/agy-cs",
+            open: { _ in false },
+            exit: { exited = true },
+            loginRunner: runner,
+            pasteboard: { (0, nil) }
+        )
+        model.addAccount()
+        model.quit()
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertTrue(runner.channel.stopped)
+        XCTAssertTrue(exited)
+        runner.finish()
+        XCTAssertFalse(model.loggingIn)
+
+        exited = false
+        model.addAccount()
+        runner.emit("\(colabLoginLinePrefix) committing")
+        model.quit()
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertFalse(runner.channel.stopped)
+        XCTAssertFalse(exited)
+        runner.finish()
+        XCTAssertTrue(exited)
+    }
+}
+
+private final class ScriptedPanelLogin: PanelLoginRunning {
+    let channel = ScriptedLoginChannel()
+    private(set) var arguments: [String] = []
+    private(set) var executable = ""
+    private var onLine: (@MainActor (String) -> Void)?
+    private var onError: (@MainActor (String) -> Void)?
+    private var onExit: (@MainActor () -> Void)?
+
+    func launch(
+        executable: String,
+        arguments: [String],
+        onLine: @escaping @MainActor (String) -> Void,
+        onError: @escaping @MainActor (String) -> Void,
+        onExit: @escaping @MainActor () -> Void
+    ) -> any PanelLoginChannel {
+        self.executable = executable
+        self.arguments = arguments
+        self.onLine = onLine
+        self.onError = onError
+        self.onExit = onExit
+        channel.sent = []
+        channel.stopped = false
+        return channel
+    }
+
+    @MainActor
+    func emit(_ line: String) {
+        onLine?(line)
+    }
+
+    @MainActor
+    func emitError(_ line: String) {
+        onError?(line)
+    }
+
+    @MainActor
+    func finish() {
+        onExit?()
+    }
+}
+
+private final class ScriptedLoginChannel: PanelLoginChannel {
+    var sent: [String] = []
+    var stopped = false
+
+    func send(_ line: String) {
+        sent.append(line)
+    }
+
+    func stop() {
+        stopped = true
+    }
+}
+
+private final class ClipboardSample {
+    var changeCount = 1
+    var string: String?
 }
 
 @MainActor

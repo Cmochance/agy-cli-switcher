@@ -33,7 +33,7 @@ save、switch、next，以及上面這次初始化，才會讀取鑰匙圈。密
 switch、next 和新增帳號成功之後，會另起一個背景行程連網查詢每個帳號的方案和額度，記在 ~/.agy-cs/usage/。切換不等它，也不受它影響。
 list 只顯示這些記錄，不連網；過了重置時間的額度按 100% 顯示。refresh quota 立刻查一次，不讀鑰匙圈。
 不帶名字的 switch 和 switch add 才會在目前終端機啟動 agy。新增帳號會先保住目前登入，再開啟 agy；沒有換成新電子郵件就退出時，會恢復原來的登入。
-加上 colab 前綴可切換 google-colab-cli 帳號（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密鑰副本放在 ~/.config/colab-cli/accounts/，非密鑰記錄與額度快取放在 ~/.agy-cs/colab/。
+加上 colab 前綴可切換 google-colab-cli 帳號（例如 agy-cs colab ls、agy-cs colab switch <名字>、agy-cs colab refresh quota），使用相同的子指令；密鑰副本放在 ~/.config/colab-cli/accounts/，非密鑰記錄與額度快取放在 ~/.agy-cs/colab/。colab switch add 會打開瀏覽器登入，允許後自動完成，不打開終端機。
 
 [operationFailed]
 沒能完成帳號操作。
@@ -397,7 +397,7 @@ Google 沒有傳回這個 Colab 登入的電子郵件（授權範圍可能未包
 目前鑰匙圈裡沒有 Colab 登入，這次沒有保存帳號。用 colab 登入後再執行 agy-cs colab save <名字>。
 
 [colabLoginOpening]
-接下來會在這個終端機裡執行 colab whoami，請依提示完成遠端授權登入；完成後會自動保存並回到提示字元。
+已在瀏覽器打開 Colab 登入。允許後會自動完成。
 
 [colabLaunchFailed]
 沒能在這個終端機裡啟動 colab (%1)。
@@ -422,3 +422,33 @@ Colab 算力與工作階段已更新。
 
 [colabActiveBadge]
 %1 個作用中
+
+[colabLoginPressC]
+要改成自己貼上授權碼，輸入 c 後按 Return。
+
+[colabLoginCodePrompt]
+把授權碼貼到這裡後按 Return。
+
+[colabLoginCancelled]
+登入已取消。
+
+[colabLoginCodeRejected]
+授權碼沒用上，請再試一次。
+
+[colabBrowserFailed]
+沒能打開瀏覽器。
+
+[colabOAuthConfigMissing]
+沒找到 Colab 的登入設定。
+
+[colabLoginPageDone]
+登入完成，可以關掉這個頁面。
+
+[panelColabWaiting]
+已在瀏覽器打開 Colab 登入。允許後會自動完成。
+
+[panelColabUseCode]
+改用授權碼
+
+[panelColabCodePrompt]
+瀏覽器裡會顯示一串授權碼。點頁面上的 Copy，或把授權碼貼到這裡。

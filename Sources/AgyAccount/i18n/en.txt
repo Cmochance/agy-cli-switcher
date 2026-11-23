@@ -33,7 +33,7 @@ save, switch, next, and that first-run initialization read the keychain. Secret 
 After a switch, next, or a new account, a separate background process asks Google for each account's plan and quota and records them in ~/.agy-cs/usage/. The switch does not wait for it and is not affected by it.
 list only shows those records and makes no request. A quota whose reset time has passed is shown as 100%. refresh quota asks right away and does not read the keychain.
 Only switch without a name, and switch add, start agy in this terminal. Adding an account keeps the current login first, then opens agy. If you quit before a new email is stored, the previous login is restored.
-Prefix commands with colab to switch google-colab-cli accounts (for example, agy-cs colab ls, agy-cs colab switch <name>, agy-cs colab refresh quota). Secret copies stay in ~/.config/colab-cli/accounts/, and non-secret records and quota cache stay in ~/.agy-cs/colab/.
+Prefix commands with colab to switch google-colab-cli accounts (for example, agy-cs colab ls, agy-cs colab switch <name>, agy-cs colab refresh quota). Secret copies stay in ~/.config/colab-cli/accounts/, and non-secret records and quota cache stay in ~/.agy-cs/colab/. colab switch add opens a browser to sign in and finishes by itself, without a terminal.
 
 [operationFailed]
 Couldn't finish the account operation.
@@ -397,7 +397,7 @@ No Colab login right now. Once you log in with colab, it is saved automatically.
 No current Colab login was found, so nothing was saved. Log in, then run agy-cs colab save <name>.
 
 [colabLoginOpening]
-colab whoami will run in this terminal so you can complete remote sign-in. After that, the login is saved automatically.
+Colab sign-in is open in the browser. It finishes after you allow access.
 
 [colabLaunchFailed]
 Couldn't start colab in this terminal (%1).
@@ -422,3 +422,33 @@ Sessions %1
 
 [colabActiveBadge]
 %1 active
+
+[colabLoginPressC]
+Type c and press Return to paste an authorization code instead.
+
+[colabLoginCodePrompt]
+Paste the authorization code and press Return.
+
+[colabLoginCancelled]
+Sign-in was cancelled.
+
+[colabLoginCodeRejected]
+That code was not accepted. Try again.
+
+[colabBrowserFailed]
+The browser could not be opened.
+
+[colabOAuthConfigMissing]
+Colab's sign-in configuration was not found.
+
+[colabLoginPageDone]
+Sign-in is finished. You can close this page.
+
+[panelColabWaiting]
+Colab sign-in is open in the browser. It finishes after you allow access.
+
+[panelColabUseCode]
+Use a code
+
+[panelColabCodePrompt]
+The browser shows an authorization code. Click Copy on that page, or paste the code here.

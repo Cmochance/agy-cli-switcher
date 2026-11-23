@@ -33,7 +33,7 @@ save、switch、next、およびこの初回初期化だけがキーチェーン
 switch、next、アカウントの追加が成功すると、別のバックグラウンドプロセスが各アカウントのプランと利用枠を Google に問い合わせ、~/.agy-cs/usage/ に記録します。切り替えはそれを待たず、影響も受けません。
 list はその記録だけを表示し、通信しません。リセット時刻を過ぎた利用枠は 100% と表示します。refresh quota はすぐに問い合わせ、キーチェーンは読みません。
 名前なしの switch と switch add だけが、この端末で agy を起動します。新しいアカウントは現在のログインを先に保存してから agy を開きます。新しいメールアドレスが保存される前に終了したときは、元のログインを戻します。
-colab を前に付けると google-colab-cli のアカウントを切り替えられます（例: agy-cs colab ls、agy-cs colab switch <名前>、agy-cs colab refresh quota）。秘密のコピーは ~/.config/colab-cli/accounts/ に、秘密ではない記録と利用枠キャッシュは ~/.agy-cs/colab/ に保存します。
+colab を前に付けると google-colab-cli のアカウントを切り替えられます（例: agy-cs colab ls、agy-cs colab switch <名前>、agy-cs colab refresh quota）。秘密のコピーは ~/.config/colab-cli/accounts/ に、秘密ではない記録と利用枠キャッシュは ~/.agy-cs/colab/ に保存します。colab switch add はブラウザでログインし、許可すると自動で完了します。ターミナルは開きません。
 
 [operationFailed]
 アカウント操作を完了できませんでした。
@@ -397,7 +397,7 @@ Google からこの Colab ログインのメールアドレスを取得できま
 現在の Colab ログインが見つからなかったため保存しませんでした。ログイン後に agy-cs colab save <名前> を実行してください。
 
 [colabLoginOpening]
-この端末で colab whoami を実行します。画面の案内に従って認証を完了すると、ログインが自動保存されます。
+ブラウザで Colab のログインを開きました。許可すると自動で完了します。
 
 [colabLaunchFailed]
 この端末で colab を起動できませんでした (%1)。
@@ -422,3 +422,33 @@ Colab のコンピューティングユニットとセッションを更新し�
 
 [colabActiveBadge]
 %1 件稼働中
+
+[colabLoginPressC]
+認可コードを自分で貼り付ける場合は、c を入力して Return を押してください。
+
+[colabLoginCodePrompt]
+認可コードを貼り付けて Return を押してください。
+
+[colabLoginCancelled]
+ログインを取り消しました。
+
+[colabLoginCodeRejected]
+認可コードを使えませんでした。もう一度試してください。
+
+[colabBrowserFailed]
+ブラウザを開けませんでした。
+
+[colabOAuthConfigMissing]
+Colab のログイン設定が見つかりません。
+
+[colabLoginPageDone]
+ログインが完了しました。このページを閉じてください。
+
+[panelColabWaiting]
+ブラウザで Colab のログインを開きました。許可すると自動で完了します。
+
+[panelColabUseCode]
+認可コードを使う
+
+[panelColabCodePrompt]
+ブラウザに認可コードが表示されます。ページの Copy を押すか、ここにコードを貼り付けてください。

@@ -9,12 +9,14 @@ enum PanelPrompt: Equatable {
     case rename(AccountRow)
     case remove(AccountRow)
     case removeLastCopy(AccountRow)
+    case colabWaiting
+    case colabCode
 
     var needsText: Bool {
         switch self {
-        case .save, .rename:
+        case .save, .rename, .colabCode:
             return true
-        case .replace, .remove, .removeLastCopy:
+        case .replace, .remove, .removeLastCopy, .colabWaiting:
             return false
         }
     }
@@ -35,7 +37,9 @@ final class PanelModel: ObservableObject {
         }
     }
     @Published private(set) var prompt: PanelPrompt?
+    @Published private(set) var loggingIn = false
     @Published var draft = ""
+    var onKeepsOpenChanged: ((Bool) -> Void)?
 
     private let board: AccountBoard
     private let executable: String
@@ -46,6 +50,16 @@ final class PanelModel: ObservableObject {
     private var watcher: Timer?
     private let exit: @MainActor () -> Void
     private var leaving = false
+    private let loginRunner: any PanelLoginRunning
+    private var loginPipe: (any PanelLoginChannel)?
+    private var loginGeneration = 0
+    private var committingLogin = false
+    private var loginSettled = false
+    private var savedLogin = false
+    private var loginErrors: [String] = []
+    private let pasteboard: () -> (changeCount: Int, string: String?)
+    private var clipboardTimer: Timer?
+    private var clipboardChange = 0
 
     // shown 说面板现在是不是开着。
     init(
@@ -54,7 +68,12 @@ final class PanelModel: ObservableObject {
         rereadEvery: TimeInterval = 2,
         shown: @escaping @MainActor () -> Bool = { false },
         open: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
-        exit: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) }
+        exit: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) },
+        loginRunner: any PanelLoginRunning = ProcessPanelLogin(),
+        pasteboard: @escaping () -> (changeCount: Int, string: String?) = {
+            let board = NSPasteboard.general
+            return (board.changeCount, board.string(forType: .string))
+        }
     ) {
         self.exit = exit
         self.board = board
@@ -62,6 +81,8 @@ final class PanelModel: ObservableObject {
         self.rereadEvery = rereadEvery
         self.shown = shown
         self.open = open
+        self.loginRunner = loginRunner
+        self.pasteboard = pasteboard
         let initial = board.selectedProvider()
         self.provider = initial
         state = board.load(provider: initial)
@@ -81,7 +102,7 @@ final class PanelModel: ObservableObject {
     }
 
     var isWorking: Bool {
-        busyLabel != nil
+        busyLabel != nil || loggingIn
     }
 
     func text(_ key: TextKey, _ arguments: String...) -> String {
@@ -90,7 +111,7 @@ final class PanelModel: ObservableObject {
     }
 
     func toggleProvider() {
-        guard busy == nil else {
+        guard busy == nil, !loggingIn else {
             return
         }
         let next = provider.next
@@ -131,12 +152,15 @@ final class PanelModel: ObservableObject {
 
     // 当前账号那几行也能点：同一个登录存了几个名字时，点另一个名字把它记成当前项。
     func switchTo(_ row: AccountRow) {
+        guard !loggingIn else {
+            return
+        }
         run(["switch", "--", row.name], saying: text(.panelWorking)) { $0.output + $0.errors }
     }
 
     // 拖动一行松手之后调用。先在面板上把这一行放到新位置，再执行 move 把顺序记下来；不显示“正在处理”。
     func move(_ row: AccountRow, to index: Int) {
-        guard busy == nil, let from = state.rows.firstIndex(of: row), from != index, state.rows.indices.contains(index) else {
+        guard busy == nil, !loggingIn, let from = state.rows.firstIndex(of: row), from != index, state.rows.indices.contains(index) else {
             return
         }
         state.rows.remove(at: from)
@@ -154,7 +178,11 @@ final class PanelModel: ObservableObject {
     }
 
     func addAccount() {
-        guard busy == nil else {
+        guard busy == nil, !loggingIn else {
+            return
+        }
+        if provider == .colab {
+            beginColabLogin()
             return
         }
         prompt = nil
@@ -179,7 +207,7 @@ final class PanelModel: ObservableObject {
     }
 
     func ask(_ question: PanelPrompt) {
-        guard busy == nil else {
+        guard busy == nil, !loggingIn else {
             return
         }
         if case .rename(let row) = question {
@@ -191,6 +219,10 @@ final class PanelModel: ObservableObject {
     }
 
     func cancel() {
+        if loggingIn {
+            loginPipe?.send("cancel")
+            return
+        }
         prompt = nil
         draft = ""
     }
@@ -218,6 +250,10 @@ final class PanelModel: ObservableObject {
             ) { $0.output + $0.errors }
         case .removeLastCopy(let row):
             run(["rm", row.name, "--force", "--expect", row.email], saying: text(.panelWorking)) { $0.output + $0.errors }
+        case .colabWaiting:
+            loginPipe?.send("fallback")
+        case .colabCode:
+            submitColabCode(draft)
         }
     }
 
@@ -234,6 +270,21 @@ final class PanelModel: ObservableObject {
 
     // 有指令正在执行时不马上退出，等它做完：切换是先换钥匙串、再记当前账号，中途退出会只做了一半。
     func quit() {
+        if loggingIn {
+            leaving = true
+            loginPipe?.send("cancel")
+            let generation = loginGeneration
+            work.asyncAfter(deadline: .now() + 2) {
+                DispatchQueue.main.async {
+                    guard self.leaving, self.loggingIn, !self.committingLogin, self.loginGeneration == generation else {
+                        return
+                    }
+                    self.loginPipe?.stop()
+                    self.exit()
+                }
+            }
+            return
+        }
         guard busy == nil else {
             leaving = true
             return
@@ -247,7 +298,7 @@ final class PanelModel: ObservableObject {
         retry: @escaping (ActionOutcome) -> PanelPrompt? = { _ in nil },
         report: @escaping (ActionOutcome) -> [String]
     ) {
-        guard busy == nil else {
+        guard busy == nil, !loggingIn else {
             return
         }
         prompt = nil
@@ -307,7 +358,7 @@ final class PanelModel: ObservableObject {
     func panelClosed() {
         watcher?.invalidate()
         watcher = nil
-        guard busy == nil else {
+        guard busy == nil, !loggingIn else {
             return
         }
         prompt = nil
@@ -315,5 +366,167 @@ final class PanelModel: ObservableObject {
         if !failed {
             messages = []
         }
+    }
+
+    private func beginColabLogin() {
+        prompt = .colabWaiting
+        draft = ""
+        messages = []
+        failed = false
+        loginSettled = false
+        savedLogin = false
+        loginErrors = []
+        committingLogin = false
+        loginGeneration += 1
+        loggingIn = true
+        onKeepsOpenChanged?(true)
+        stopClipboard()
+        loginPipe = loginRunner.launch(
+            executable: executable,
+            arguments: ["colab", "switch", "add", "--handoff"],
+            onLine: { [weak self] line in
+                self?.consumeLogin(line)
+            },
+            onError: { [weak self] line in
+                self?.noteLoginError(line)
+            },
+            onExit: { [weak self] in
+                self?.finishLoginPipe()
+            }
+        )
+    }
+
+    private func consumeLogin(_ line: String) {
+        switch parseColabLoginLine(line) {
+        case .opened:
+            prompt = .colabWaiting
+        case .needCode:
+            prompt = .colabCode
+            draft = ""
+            startClipboard()
+        case .committing:
+            committingLogin = true
+        case .retry(let key):
+            failed = true
+            messages = [text(key)]
+            if prompt != .colabCode {
+                prompt = .colabWaiting
+                stopClipboard()
+            } else {
+                startClipboard()
+            }
+        case .saved(let name, let email):
+            showSaved(name: name, email: email)
+        case .error(let key):
+            loginSettled = true
+            failed = true
+            messages = [text(key)]
+            prompt = nil
+            draft = ""
+            stopClipboard()
+        case .ignored:
+            break
+        }
+    }
+
+    private func noteLoginError(_ line: String) {
+        guard !line.isEmpty else {
+            return
+        }
+        loginErrors.append(line)
+        if savedLogin {
+            messages = savedMessages()
+        }
+    }
+
+    private func showSaved(name: String, email: String) {
+        loginSettled = true
+        savedLogin = true
+        failed = false
+        prompt = nil
+        draft = ""
+        stopClipboard()
+        messages = [text(.saved, name, email)] + loginErrors
+        let board = board
+        let currentProvider = provider
+        work.async {
+            let fresh = board.load(provider: currentProvider)
+            DispatchQueue.main.async {
+                guard self.provider == currentProvider else {
+                    return
+                }
+                self.state = fresh
+            }
+        }
+    }
+
+    private func savedMessages() -> [String] {
+        messages.filter { loginErrors.contains($0) == false } + loginErrors
+    }
+
+    private func finishLoginPipe() {
+        if !loginSettled {
+            loginSettled = true
+            failed = true
+            messages = loginErrors.isEmpty ? [text(.colabLoginCancelled)] : loginErrors
+            prompt = nil
+            draft = ""
+        } else if savedLogin {
+            messages = savedMessages()
+        }
+        loggingIn = false
+        committingLogin = false
+        stopClipboard()
+        loginPipe = nil
+        onKeepsOpenChanged?(false)
+        if leaving {
+            exit()
+        }
+    }
+
+    private func submitColabCode(_ raw: String) {
+        let code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isColabManualCode(code) else {
+            failed = true
+            messages = [text(.colabLoginCodeRejected)]
+            return
+        }
+        draft = ""
+        failed = false
+        messages = []
+        loginPipe?.send(code)
+    }
+
+    func pollClipboard() {
+        guard loggingIn, prompt == .colabCode else {
+            return
+        }
+        let sample = pasteboard()
+        guard sample.changeCount != clipboardChange else {
+            return
+        }
+        clipboardChange = sample.changeCount
+        let code = sample.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard isColabClipboardCode(code) else {
+            return
+        }
+        submitColabCode(code)
+    }
+
+    private func startClipboard() {
+        clipboardChange = pasteboard().changeCount
+        guard clipboardTimer == nil else {
+            return
+        }
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollClipboard()
+            }
+        }
+    }
+
+    private func stopClipboard() {
+        clipboardTimer?.invalidate()
+        clipboardTimer = nil
     }
 }
