@@ -52,6 +52,8 @@ final class PanelModel: ObservableObject {
     private var leaving = false
     private let loginRunner: any PanelLoginRunning
     private var loginPipe: (any PanelLoginChannel)?
+    private var loginGeneration = 0
+    private var committingLogin = false
     private var loginSettled = false
     private var savedLogin = false
     private var loginErrors: [String] = []
@@ -271,9 +273,10 @@ final class PanelModel: ObservableObject {
         if loggingIn {
             leaving = true
             loginPipe?.send("cancel")
+            let generation = loginGeneration
             work.asyncAfter(deadline: .now() + 2) {
                 DispatchQueue.main.async {
-                    guard self.leaving, self.loggingIn else {
+                    guard self.leaving, self.loggingIn, !self.committingLogin, self.loginGeneration == generation else {
                         return
                     }
                     self.loginPipe?.stop()
@@ -373,6 +376,8 @@ final class PanelModel: ObservableObject {
         loginSettled = false
         savedLogin = false
         loginErrors = []
+        committingLogin = false
+        loginGeneration += 1
         loggingIn = true
         onKeepsOpenChanged?(true)
         stopClipboard()
@@ -399,6 +404,8 @@ final class PanelModel: ObservableObject {
             prompt = .colabCode
             draft = ""
             startClipboard()
+        case .committing:
+            committingLogin = true
         case .retry(let key):
             failed = true
             messages = [text(key)]
@@ -468,6 +475,7 @@ final class PanelModel: ObservableObject {
             messages = savedMessages()
         }
         loggingIn = false
+        committingLogin = false
         stopClipboard()
         loginPipe = nil
         onKeepsOpenChanged?(false)

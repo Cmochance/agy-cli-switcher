@@ -44,6 +44,7 @@ final class ColabLoginTests: XCTestCase {
         XCTAssertFalse(isColabManualCode("short"))
         XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN opened"), .opened)
         XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN need-code"), .needCode)
+        XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN committing"), .committing)
         XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN retry colabLoginCodeRejected"), .retry(.colabLoginCodeRejected))
         XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN saved ada ada@example.com"), .saved(name: "ada", email: "ada@example.com"))
         XCTAssertEqual(parseColabLoginLine("AGY_CS_LOGIN error colabLoginCancelled"), .error(.colabLoginCancelled))
@@ -90,8 +91,37 @@ final class ColabLoginTests: XCTestCase {
         let loaded = try loadColabOAuthClient(at: found)
         XCTAssertEqual(loaded.clientID, "id.apps.googleusercontent.com")
         XCTAssertEqual(loaded.clientSecret, "test-secret")
+        try FileManager.default.setAttributes([.posixPermissions: 0o660], ofItemAtPath: found)
+        XCTAssertThrowsError(try loadColabOAuthClient(at: found)) { error in
+            XCTAssertEqual(error as? AccountFailure, AccountFailure(.colabOAuthConfigMissing))
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: found)
+        _ = try loadColabOAuthClient(at: found)
         try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: found)
         XCTAssertThrowsError(try loadColabOAuthClient(at: found)) { error in
+            XCTAssertEqual(error as? AccountFailure, AccountFailure(.colabOAuthConfigMissing))
+        }
+
+        let base = root.appendingPathComponent("base/bin/python3.13")
+        try FileManager.default.createDirectory(at: base.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: base.path, contents: Data("#!/bin/sh\n".utf8))
+        let link = root.appendingPathComponent("venv/bin/python")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: base)
+        let venvSite = root.appendingPathComponent("venv/lib/python3.13/site-packages/colab_cli", isDirectory: true)
+        try FileManager.default.createDirectory(at: venvSite, withIntermediateDirectories: true)
+        let venvConfig = venvSite.appendingPathComponent("oauth_config.json")
+        try Data(try Data(contentsOf: config)).write(to: venvConfig)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: venvConfig.path)
+        let linked = try XCTUnwrap(colabOAuthConfigFile(pythonPath: link.path))
+        XCTAssertEqual((linked as NSString).resolvingSymlinksInPath, (venvConfig.path as NSString).resolvingSymlinksInPath)
+        XCTAssertNil(colabOAuthConfigFile(pythonPath: base.path))
+        let evil = venvConfig.deletingLastPathComponent().appendingPathComponent("evil.json")
+        try Data(
+            #"{"installed":{"client_id":"id.apps.googleusercontent.com","client_secret":"test-secret","token_uri":"https://evil.example/token"}}"#
+                .utf8
+        ).write(to: evil)
+        XCTAssertThrowsError(try loadColabOAuthClient(at: evil.path)) { error in
             XCTAssertEqual(error as? AccountFailure, AccountFailure(.colabOAuthConfigMissing))
         }
     }
@@ -232,9 +262,170 @@ final class ColabLoginTests: XCTestCase {
 
         let handoff = fixture.run(["colab", "switch", "add", "--handoff"])
         XCTAssertEqual(handoff.code, 0)
-        XCTAssertTrue(handoff.output.contains("AGY_CS_LOGIN saved new new@example.com"))
+        let loginLines = handoff.output.filter { $0.hasPrefix(colabLoginLinePrefix) }
+        XCTAssertEqual(loginLines, [
+            "AGY_CS_LOGIN committing",
+            "AGY_CS_LOGIN saved new new@example.com",
+        ])
         XCTAssertFalse(handoff.output.joined(separator: "\n").contains("已保存"))
         XCTAssertFalse(handoff.output.joined(separator: "\n").contains("r-new"))
+    }
+
+    func testStdoutLineReachesAPipeBeforeTheProcessContinues() throws {
+        let pipe = Pipe()
+        let saved = dup(STDOUT_FILENO)
+        XCTAssertGreaterThanOrEqual(saved, 0)
+        defer {
+            if saved >= 0 {
+                _ = dup2(saved, STDOUT_FILENO)
+                close(saved)
+            }
+        }
+        XCTAssertEqual(dup2(pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO), STDOUT_FILENO)
+        let ready = DispatchSemaphore(value: 0)
+        let received = LockedData()
+        let reader = Thread {
+            received.set(pipe.fileHandleForReading.availableData)
+            ready.signal()
+        }
+        reader.start()
+        writeStdoutLine("\(colabLoginLinePrefix) need-code")
+        XCTAssertEqual(ready.wait(timeout: .now() + 1), .success)
+        _ = dup2(saved, STDOUT_FILENO)
+        XCTAssertEqual(String(data: received.get(), encoding: .utf8), "\(colabLoginLinePrefix) need-code\n")
+    }
+
+    func testDeniedConsentEndsTheWaitAndAMismatchedStateDoesNot() throws {
+        let pipes = try openPipe()
+        defer {
+            close(pipes.read)
+            close(pipes.write)
+        }
+        let http = LoginHTTP { _ in
+            XCTFail("a denied consent must not exchange a code")
+            return nil
+        }
+        let signer = makeSigner(http: http, lines: { _ in }, stdin: pipes.read) { url in
+            DispatchQueue.global().async {
+                guard let state = query(url, "state"), let redirect = query(url, "redirect_uri"), let port = URL(string: redirect)?.port else {
+                    return
+                }
+                let wrong = rawGET(port: UInt16(port), path: "/?error=access_denied&state=wrong")
+                XCTAssertTrue(wrong.contains("400"))
+                let denied = rawGET(port: UInt16(port), path: "/?error=access_denied&state=\(state)")
+                XCTAssertTrue(denied.contains("登录已取消"))
+            }
+        }
+        XCTAssertThrowsError(try signer.signIn(handoff: true)) { error in
+            XCTAssertEqual(error as? AccountFailure, AccountFailure(.colabLoginCancelled))
+        }
+        XCTAssertEqual(http.requests.count, 0)
+    }
+
+    func testCancelDuringExchangeDoesNotReturnTheToken() throws {
+        let pipes = try openPipe()
+        defer {
+            close(pipes.read)
+            close(pipes.write)
+        }
+        let code = "4/" + String(repeating: "e", count: 24)
+        let http = LoginHTTP { _ in
+            writeLine("cancel", pipes.write)
+            return tokenResponse(refresh: "refresh-should-stay-out")
+        }
+        let signer = makeSigner(http: http, lines: { _ in }, stdin: pipes.read) { url in
+            DispatchQueue.global().async {
+                guard let state = query(url, "state"), let redirect = query(url, "redirect_uri"), let port = URL(string: redirect)?.port else {
+                    return
+                }
+                _ = rawGET(port: UInt16(port), path: "/?code=\(code)&state=\(state)")
+            }
+        }
+        XCTAssertThrowsError(try signer.signIn(handoff: true)) { error in
+            XCTAssertEqual(error as? AccountFailure, AccountFailure(.colabLoginCancelled))
+        }
+    }
+
+    func testNameTakenDoesNotTouchTheKeychainAndAFailedRestoreKeepsTheRollback() throws {
+        let oldBlob = makeColabBlob(refresh: "r-old")
+        let newBlob = makeColabBlob(refresh: "r-new")
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com"))
+        defer { fixture.cleanup() }
+        let keychain = MemoryKeychain(oldBlob)
+        let signer = ScriptedColabSigner()
+        signer.blob = newBlob
+        fixture.colab = ProviderServices(
+            keychain: keychain,
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver([
+                "r-old": "old@example.com",
+                "r-new": "new@example.com",
+            ])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher(),
+            signer: signer
+        )
+        let profile = ToolProfile(
+            home: fixture.home,
+            now: { "2026-01-01T00:00:00Z" },
+            preferredLanguages: ["zh-Hans"],
+            provider: .colab
+        )
+        try profile.write(
+            name: "new",
+            meta: LoginMeta(email: "other@example.com", authMethod: "oauth", expiry: "2026-01-01T00:00:00Z")
+        )
+        let taken = fixture.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(taken.code, 1)
+        XCTAssertTrue(taken.output.contains("AGY_CS_LOGIN error nameTaken"))
+        XCTAssertEqual(keychain.writes, [])
+        XCTAssertEqual(keychain.blob, oldBlob)
+
+        try FileManager.default.removeItem(at: fixture.home.appendingPathComponent(".agy-cs/colab/accounts/new.json"))
+        let dismissed = fixture.home.appendingPathComponent(".agy-cs/colab/not-saved")
+        try FileManager.default.createDirectory(at: dismissed.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old@example.com\n".utf8).write(to: dismissed)
+        let accounts = fixture.home.appendingPathComponent(".agy-cs/colab/accounts")
+        keychain.onWrite = { _ in
+            guard keychain.writes.count == 1 else {
+                return
+            }
+            try? FileManager.default.removeItem(at: accounts)
+            try? Data("x".utf8).write(to: accounts)
+        }
+        keychain.failOnAttempt = 2
+        let failed = fixture.run(["colab", "switch", "add", "--handoff"])
+        XCTAssertEqual(failed.code, 1)
+        XCTAssertFalse(failed.errors.joined(separator: "\n").contains("已恢复"))
+        XCTAssertTrue(keychain.missing)
+        let rollback = fixture.home.appendingPathComponent(".config/colab-cli/accounts/.add-rollback")
+        let savedRollback = try String(contentsOf: rollback, encoding: .utf8)
+        XCTAssertTrue(savedRollback.contains("r-old"))
+        XCTAssertFalse(savedRollback.contains("r-new"))
+
+        keychain.onWrite = nil
+        let recovered = fixture.run(["colab", "current"])
+        XCTAssertEqual(recovered.code, 0)
+        XCTAssertEqual(keychain.blob, oldBlob)
+        XCTAssertFalse(keychain.missing)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollback.path))
+    }
+}
+
+private final class LockedData: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func set(_ data: Data) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+
+    func get() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
     }
 }
 

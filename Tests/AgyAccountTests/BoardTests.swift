@@ -1341,6 +1341,50 @@ final class BoardTests: XCTestCase {
         XCTAssertTrue(exited)
         XCTAssertFalse(model.loggingIn)
     }
+
+    @MainActor
+    func testPanelQuitKillsAWaitingLoginAndWaitsOnceItIsCommitting() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "agy@example.com", refresh: "a1"))
+        defer { fixture.cleanup() }
+        fixture.colab = ProviderServices(
+            keychain: MemoryKeychain(makeColabBlob(refresh: "colab-1")),
+            codec: ColabLoginCodec(emailResolver: StaticColabEmailResolver(["colab-1": "researcher@example.com"])),
+            launcher: ScriptedLauncher(),
+            usage: ScriptedUsage(),
+            refresher: ScriptedRefresher()
+        )
+        XCTAssertEqual(fixture.run(["colab", "save", "researcher"]).code, 0)
+        try fixture.board.setSelectedProvider(.colab)
+        let runner = ScriptedPanelLogin()
+        var exited = false
+        let model = PanelModel(
+            board: fixture.board,
+            executable: "/somewhere/agy-cs",
+            open: { _ in false },
+            exit: { exited = true },
+            loginRunner: runner,
+            pasteboard: { (0, nil) }
+        )
+        model.addAccount()
+        model.quit()
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertTrue(runner.channel.stopped)
+        XCTAssertTrue(exited)
+        runner.finish()
+        XCTAssertFalse(model.loggingIn)
+
+        exited = false
+        model.addAccount()
+        runner.emit("\(colabLoginLinePrefix) committing")
+        model.quit()
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        XCTAssertEqual(runner.channel.sent.last, "cancel")
+        XCTAssertFalse(runner.channel.stopped)
+        XCTAssertFalse(exited)
+        runner.finish()
+        XCTAssertTrue(exited)
+    }
 }
 
 private final class ScriptedPanelLogin: PanelLoginRunning {

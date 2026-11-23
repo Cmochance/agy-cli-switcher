@@ -199,7 +199,7 @@ func isTrustedExecutablePath(_ path: String) -> Bool {
     return FileManager.default.isExecutableFile(atPath: resolved)
 }
 
-// oauth_config.json 里有 client_secret。只接受当前用户或 root 拥有、且目录链上没有别人可写的那一份。
+// oauth_config.json 里有 client_secret，还决定授权码送到哪一台。只接受当前用户或 root 拥有、组和其他人都不能写、且目录链上没有别人可写的那一份。
 func isTrustedConfigFile(_ path: String) -> Bool {
     guard path.hasPrefix("/") else {
         return false
@@ -213,7 +213,7 @@ func isTrustedConfigFile(_ path: String) -> Bool {
     guard stat(path, &info) == 0,
           (info.st_mode & S_IFMT) == S_IFREG,
           info.st_uid == uid || info.st_uid == 0,
-          (info.st_mode & S_IWOTH) == 0
+          (info.st_mode & (S_IWGRP | S_IWOTH)) == 0
     else {
         return false
     }

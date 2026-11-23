@@ -189,6 +189,9 @@ struct AccountCommands {
         let committed: (name: String, email: String, notices: [ProviderNotice])
         do {
             blob = try colabSigner().signIn(handoff: handoff)
+            if handoff {
+                stdout("\(colabLoginLinePrefix) committing")
+            }
             committed = try commitColabLogin(blob)
         } catch let error as AccountFailure {
             if handoff {
@@ -223,6 +226,8 @@ struct AccountCommands {
         try locked {
             let meta = try decodeKeychainBlob(blob)
             try keychain.checkWritable(blob)
+            // 名字被占时还没动钥匙串，也还没写回滚副本。
+            let name = try availableDefaultName(meta.email)
             let snapshot = try captureLogin()
             var previousNames: [String] = []
             let emailChanged = snapshot.map { $0.meta.email != meta.email } ?? false
@@ -241,7 +246,6 @@ struct AccountCommands {
             }
             do {
                 try keychain.writeBlob(blob)
-                let name = try availableDefaultName(meta.email)
                 try storeLogin(name: name, blob: blob, meta: meta)
                 files.removeRollback()
                 let notices = emailChanged
@@ -250,9 +254,13 @@ struct AccountCommands {
                 return (name, meta.email, notices)
             } catch {
                 if let snapshot {
-                    try? keychain.writeBlob(snapshot.blob)
-                    files.removeRollback()
-                    stderr(text.line(.loginRestored))
+                    do {
+                        try keychain.writeBlob(snapshot.blob)
+                        files.removeRollback()
+                        stderr(text.line(.loginRestored))
+                    } catch {
+                        try? keychain.deleteBlob()
+                    }
                 } else {
                     try? keychain.deleteBlob()
                 }
@@ -611,15 +619,30 @@ struct AccountCommands {
             return
         }
         do {
-            _ = try keychain.readBlob()
+            let current = try keychain.readBlob()
+            // Antigravity 的钥匙串里已经有登录时，这份回滚是用过的。Colab 可能刚写进新登录、旧的只在这里，对不上已保存的副本时写回去。
+            if current == blob || provider != .colab || savedLogin(current) {
+                files.removeRollback()
+                return
+            }
+            guard codec.canRecover(blob), (try? keychain.writeBlob(blob)) != nil else {
+                return
+            }
+            files.removeRollback()
         } catch let error as AccountFailure where error.key == .keychainMissing {
             guard codec.canRecover(blob), (try? keychain.writeBlob(blob)) != nil else {
                 return
             }
+            files.removeRollback()
         } catch {
             return
         }
-        files.removeRollback()
+    }
+
+    private func savedLogin(_ blob: String) -> Bool {
+        files.savedNames().contains { name in
+            (try? files.readSaved(name))?.blob == blob
+        }
     }
 
     // 读 ~/.agy-cs/ 里的记录和钥匙串里的邮箱，不联网。list 和菜单栏面板都从这里取。

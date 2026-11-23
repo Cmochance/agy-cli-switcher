@@ -38,9 +38,9 @@ This document records the verified upstream behavior of `googlecolab/google-cola
 - **Authorization endpoint**: `https://accounts.google.com/o/oauth2/auth`
 - **Token endpoint**: `https://oauth2.googleapis.com/token`
 - **PKCE**: S256. Scopes are `openid`, `https://www.googleapis.com/auth/userinfo.profile`, `https://www.googleapis.com/auth/userinfo.email`, `https://www.googleapis.com/auth/cloud-platform`, `https://www.googleapis.com/auth/colaboratory`, and `https://www.googleapis.com/auth/drive.file`, plus `access_type=offline` and `prompt=consent`.
-- **Loopback redirect**: exactly `http://127.0.0.1:<port>/`, where the kernel chooses the port. That request does not send `token_usage`. The listener accepts one successful callback, rejects a mismatched `state`, and closes when sign-in finishes, is cancelled, or times out after 10 minutes.
+- **Loopback redirect**: exactly `http://127.0.0.1:<port>/`, where the kernel chooses the port. That request does not send `token_usage`. The listener accepts one successful callback, rejects a mismatched `state`, and treats a matching-state `error` such as `access_denied` as cancellation. It closes when sign-in finishes, is cancelled, or times out after 10 minutes.
 - **Remote fallback**: redirect `https://sdk.cloud.google.com/applicationdefaultauthcode.html` and `token_usage=remote`. The authorization code is read from stdin, never from argv.
-- **Client credentials**: read at run time from `oauth_config.json` next to the trusted `colab` install (`lib/python*/site-packages/colab_cli/oauth_config.json`). They are not stored in this repository or under `~/.agy-cs/`.
+- **Client credentials**: read at run time from `oauth_config.json` in the virtualenv of the shebang interpreter (`<venv>/lib/python*/site-packages/colab_cli/oauth_config.json`), not from the base install when `bin/python` is a symlink. `auth_uri` must use host `accounts.google.com` and `token_uri` must use host `oauth2.googleapis.com`. They are not stored in this repository or under `~/.agy-cs/`.
 
 ## Non-secret switcher metadata (`~/.agy-cs/colab/`)
 

@@ -131,12 +131,18 @@ struct CommandServices {
     }
 }
 
+// `print` 在管道上是整段缓冲。面板要在子进程还等着的时候读到 `need-code`，所以每一行都立刻送出去。
+func writeStdoutLine(_ line: String) {
+    print(line)
+    fflush(stdout)
+}
+
 public enum AgyAccountCLI {
     public static func run(_ arguments: [String]) -> Int32 {
         execute(
             arguments,
             services: .system(terminal: StandardTerminal()),
-            stdout: { print($0) },
+            stdout: writeStdoutLine,
             stderr: { message in
                 fputs(message + "\n", stderr)
             }

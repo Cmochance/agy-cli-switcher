@@ -20,6 +20,7 @@ public let colabLoginLinePrefix = "AGY_CS_LOGIN"
 public enum ColabLoginEvent: Equatable {
     case opened
     case needCode
+    case committing
     case retry(TextKey)
     case saved(name: String, email: String)
     case error(TextKey)
@@ -37,6 +38,8 @@ public func parseColabLoginLine(_ line: String) -> ColabLoginEvent {
         return .opened
     case "need-code" where parts.count == 2:
         return .needCode
+    case "committing" where parts.count == 2:
+        return .committing
     case "retry" where parts.count == 3:
         guard let key = TextKey(rawValue: parts[2]) else {
             return .ignored
@@ -145,9 +148,10 @@ func colabExpiryString(now: Date, expiresIn: Int) -> String {
     return formatter.string(from: now.addingTimeInterval(TimeInterval(expiresIn)))
 }
 
-// 解释器在 `<venv>/bin/python`，配置在旁边的 `lib/python*/site-packages/colab_cli/oauth_config.json`。
+// 解释器在 `<venv>/bin/python`。uv 把它指到基础安装，配置仍在虚拟环境旁边的 `lib/python*/site-packages/colab_cli/oauth_config.json`。
+// 这里不跟随这条符号链接，否则会到基础 Python 的目录里去找。
 func colabOAuthConfigFile(pythonPath: String) -> String? {
-    let python = URL(fileURLWithPath: pythonPath).resolvingSymlinksInPath()
+    let python = URL(fileURLWithPath: pythonPath)
     let binDirectory = python.deletingLastPathComponent()
     guard binDirectory.lastPathComponent == "bin" else {
         return nil
@@ -184,8 +188,10 @@ func loadColabOAuthClient(at path: String) throws -> ColabOAuthClient {
     else {
         throw AccountFailure(.colabOAuthConfigMissing)
     }
-    let authURI = httpsString(installed["auth_uri"]) ?? "https://accounts.google.com/o/oauth2/auth"
-    let tokenURI = httpsString(installed["token_uri"]) ?? "https://oauth2.googleapis.com/token"
+    let authURI = try googleOAuthURI(installed["auth_uri"], host: "accounts.google.com")
+        ?? "https://accounts.google.com/o/oauth2/auth"
+    let tokenURI = try googleOAuthURI(installed["token_uri"], host: "oauth2.googleapis.com")
+        ?? "https://oauth2.googleapis.com/token"
     return ColabOAuthClient(clientID: clientID, clientSecret: clientSecret, authURI: authURI, tokenURI: tokenURI)
 }
 
@@ -258,12 +264,15 @@ struct ColabBrowserSigner: ColabSigning {
                 buffer: &stdinBuffer,
                 slice: slice,
                 state: loop.state,
-                page: page
+                page: page,
+                denyPage: speak(.colabLoginCancelled)
             )
             switch event {
             case .callback(let code):
                 do {
-                    return try exchange(code, verifier: loop.verifier, redirect: redirect, client: client)
+                    let blob = try exchange(code, verifier: loop.verifier, redirect: redirect, client: client)
+                    try throwIfHandoffCancelled(handoff: handoff, buffer: &stdinBuffer)
+                    return blob
                 } catch is ExchangeRejected {
                     listener.allowAnother()
                     failures += 1
@@ -287,7 +296,7 @@ struct ColabBrowserSigner: ColabSigning {
                         buffer: &stdinBuffer
                     )
                 }
-            case .eof:
+            case .eof, .denied:
                 throw AccountFailure(.colabLoginCancelled)
             case .slice:
                 break
@@ -320,7 +329,7 @@ struct ColabBrowserSigner: ColabSigning {
         while now() < deadline {
             let event = try waitStdin(buffer: &buffer, slice: slice)
             switch event {
-            case .eof:
+            case .eof, .denied:
                 throw AccountFailure(.colabLoginCancelled)
             case .slice:
                 break
@@ -336,7 +345,9 @@ struct ColabBrowserSigner: ColabSigning {
                     continue
                 }
                 do {
-                    return try exchange(line, verifier: remote.verifier, redirect: colabRemoteRedirectURI, client: client)
+                    let blob = try exchange(line, verifier: remote.verifier, redirect: colabRemoteRedirectURI, client: client)
+                    try throwIfHandoffCancelled(handoff: handoff, buffer: &buffer)
+                    return blob
                 } catch is ExchangeRejected {
                     try noteRejection(handoff: handoff, failures: &failures)
                 }
@@ -353,6 +364,32 @@ struct ColabBrowserSigner: ColabSigning {
             throw AccountFailure(.colabLoginCancelled)
         }
         tellRetry(handoff)
+    }
+
+    // 换 token 的那一段时间不再读标准输入。拿到 token 之后先看管道里有没有 `cancel`，有就不把登录交出去写钥匙串。
+    private func throwIfHandoffCancelled(handoff: Bool, buffer: inout StdinBuffer) throws {
+        guard handoff, stdin >= 0 else {
+            return
+        }
+        let flags = fcntl(stdin, F_GETFL)
+        if flags >= 0 {
+            _ = fcntl(stdin, F_SETFL, flags | O_NONBLOCK)
+            defer { _ = fcntl(stdin, F_SETFL, flags) }
+            while true {
+                var bytes = [UInt8](repeating: 0, count: 256)
+                let count = read(stdin, &bytes, bytes.count)
+                if count > 0 {
+                    buffer.append(Data(bytes.prefix(count)))
+                    continue
+                }
+                break
+            }
+        }
+        while let line = buffer.popLine() {
+            if line == "cancel" {
+                throw AccountFailure(.colabLoginCancelled)
+            }
+        }
     }
 
     private func tellRetry(_ handoff: Bool) {
@@ -461,8 +498,14 @@ private struct PKCEMaterial {
 private enum LoopbackEvent {
     case slice
     case eof
+    case denied
     case line(String)
     case callback(String)
+}
+
+private enum AcceptedCallback {
+    case code(String)
+    case denied
 }
 
 struct StdinBuffer {
@@ -555,7 +598,8 @@ final class LoopbackListener {
         buffer: inout StdinBuffer,
         slice: TimeInterval,
         state: String,
-        page: String
+        page: String,
+        denyPage: String
     ) throws -> LoopbackEvent {
         guard descriptor >= 0 else {
             throw AccountFailure(.colabBrowserFailed)
@@ -593,14 +637,19 @@ final class LoopbackListener {
                 }
             }
         }
-        if fdContains(descriptor, set), let code = acceptOne(state: state, page: page) {
-            return .callback(code)
+        if fdContains(descriptor, set), let acceptedCallback = acceptOne(state: state, page: page, denyPage: denyPage) {
+            switch acceptedCallback {
+            case .code(let code):
+                return .callback(code)
+            case .denied:
+                return .denied
+            }
         }
         return .slice
     }
 
-    // 对上 state 的那一次才收。别的请求回完就继续等，不把等待时间耗在一个不说话的连接上。
-    private func acceptOne(state: String, page: String) -> String? {
+    // 对上 state 的那一次才收。state 不对，或者不是授权结果，回完就继续等。
+    private func acceptOne(state: String, page: String, denyPage: String) -> AcceptedCallback? {
         var clientAddress = sockaddr_in()
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         let client = withUnsafeMutablePointer(to: &clientAddress) {
@@ -628,13 +677,22 @@ final class LoopbackListener {
             writeHTTP(client, status: 404, body: "")
             return nil
         }
-        guard request.state == state, let code = request.code, isColabManualCode(code) else {
+        guard request.state == state else {
             writeHTTP(client, status: 400, body: "")
             return nil
         }
-        accepted = true
-        writeHTTP(client, status: 200, body: colabLoginPage(page))
-        return code
+        if let code = request.code, isColabManualCode(code) {
+            accepted = true
+            writeHTTP(client, status: 200, body: colabLoginPage(page))
+            return .code(code)
+        }
+        if request.code == nil, let error = request.error, !error.isEmpty {
+            accepted = true
+            writeHTTP(client, status: 200, body: colabLoginPage(denyPage))
+            return .denied
+        }
+        writeHTTP(client, status: 400, body: "")
+        return nil
     }
 }
 
@@ -642,6 +700,7 @@ private struct HTTPRequestLine {
     var path: String
     var code: String?
     var state: String?
+    var error: String?
 }
 
 private func readHTTPRequest(_ fd: Int32) -> HTTPRequestLine? {
@@ -678,7 +737,7 @@ private func readHTTPRequest(_ fd: Int32) -> HTTPRequestLine? {
     for item in components.queryItems ?? [] {
         query[item.name] = item.value ?? ""
     }
-    return HTTPRequestLine(path: components.path, code: query["code"], state: query["state"])
+    return HTTPRequestLine(path: components.path, code: query["code"], state: query["state"], error: query["error"])
 }
 
 private func writeHTTP(_ fd: Int32, status: Int, body: String) {
@@ -762,9 +821,13 @@ private func randomBytes(_ count: Int) -> Data {
     return Data(bytes)
 }
 
-private func httpsString(_ value: Any?) -> String? {
-    guard let text = value as? String, let url = URL(string: text), url.scheme == "https" else {
+// 缺了这个字段就用 Google 的默认地址。写了别的主机就拒绝，避免把授权码和 client_secret 送到配置里的任意地址。
+private func googleOAuthURI(_ value: Any?, host: String) throws -> String? {
+    guard let text = value as? String else {
         return nil
+    }
+    guard let url = URL(string: text), url.scheme == "https", url.host == host, url.user == nil else {
+        throw AccountFailure(.colabOAuthConfigMissing)
     }
     return text
 }
