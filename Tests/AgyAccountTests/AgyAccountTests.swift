@@ -1013,6 +1013,7 @@ final class MemoryKeychain: KeychainStoring {
     var denied = false
     var writeLimit: Int?
     var onWrite: ((String) -> Void)?
+    var onBeforeRestore: (() -> Void)?
     var writeAttempts = 0
     var failOnAttempt: Int?
 
@@ -1044,6 +1045,22 @@ final class MemoryKeychain: KeychainStoring {
         missing = false
         denied = false
         onWrite?(blob)
+    }
+
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool {
+        onBeforeRestore?()
+        try checkWritable(blob)
+        let current: String
+        do {
+            current = try readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            return false
+        }
+        guard current == expected else {
+            return false
+        }
+        try writeBlob(blob)
+        return true
     }
 
     func deleteBlob() throws {

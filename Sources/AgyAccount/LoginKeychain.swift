@@ -5,8 +5,25 @@ import Security
 protocol KeychainStoring {
     func readBlob() throws -> String
     func writeBlob(_ blob: String) throws
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool
     func deleteBlob() throws
     func checkWritable(_ blob: String) throws
+}
+
+extension KeychainStoring {
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool {
+        let current: String
+        do {
+            current = try readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            return false
+        }
+        guard current == expected else {
+            return false
+        }
+        try writeBlob(blob)
+        return true
+    }
 }
 
 struct SecurityToolResult {
@@ -47,6 +64,28 @@ struct LoginKeychainStore: KeychainStoring {
             }
             throw AccountFailure(.writeMismatch)
         }
+    }
+
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool {
+        try checkWritable(blob)
+        let current: String
+        do {
+            current = try readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            return false
+        }
+        guard current == expected else {
+            return false
+        }
+        try store(blob)
+        let written = try readBlob()
+        guard written == blob else {
+            if current != written {
+                try? store(current)
+            }
+            throw AccountFailure(.writeMismatch)
+        }
+        return true
     }
 
     func deleteBlob() throws {
@@ -252,15 +291,19 @@ struct SystemProcessList: ProcessListing {
     private func isAgyProcess(pid: pid_t, info: proc_bsdinfo) -> Bool {
         var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
         let pathLength = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
-        if pathLength > 0 {
-            let path = String(cString: pathBuffer)
-            return URL(fileURLWithPath: path).lastPathComponent == "agy"
-        }
+        let path = pathLength > 0 ? String(cString: pathBuffer) : nil
         let name = withUnsafePointer(to: info.pbi_name) { pointer in
             pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) * 2) { String(cString: $0) }
         }
         let comm = withUnsafePointer(to: info.pbi_comm) { pointer in
             pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) { String(cString: $0) }
+        }
+        return Self.isAgyExecutable(path: path, name: name, comm: comm)
+    }
+
+    static func isAgyExecutable(path: String?, name: String, comm: String) -> Bool {
+        if let path, !path.isEmpty, URL(fileURLWithPath: path).lastPathComponent == "agy" {
+            return true
         }
         return name == "agy" || comm == "agy"
     }

@@ -753,8 +753,11 @@ struct AccountCommands {
         try files.setActive(checked)
         try profile.setActive(checked)
         profile.clearDismissed()
-        syncGuardAfterSave(name: checked, email: meta.email)
+        let savedGuardedPIDs = syncGuardAfterSave(name: checked, email: meta.email)
         stdout(text.line(.saved, checked, meta.email))
+        if !savedGuardedPIDs.isEmpty {
+            guarder.startDetached()
+        }
     }
 
     private func switchTo(_ name: String) throws {
@@ -762,13 +765,20 @@ struct AccountCommands {
         let target = try files.readSaved(checked)
         let (currentBlob, current) = try readKeychainLogin()
         if current.email == target.meta.email {
-            let updated = try persistCurrentRefresh(blob: currentBlob, meta: current)
+            let unrestoredWriteback = unrestoredWritebackExists(for: target.meta.email)
+            let updated = unrestoredWriteback ? [] : try persistCurrentRefresh(blob: currentBlob, meta: current)
+            if unrestoredWriteback {
+                _ = files.clearQuotaCache()
+            }
             try files.setActive(checked)
             try profile.setActive(checked)
-            syncGuardSameEmail(targetName: checked, targetEmail: target.meta.email)
+            let retargetedPIDs = syncGuardSameEmail(targetName: checked, targetEmail: target.meta.email)
             stdout(text.line(.alreadyActive, checked, current.email))
             if !updated.isEmpty {
                 stdout(text.line(.refreshedTokens, updated.joined(separator: ", ")))
+            }
+            if !retargetedPIDs.isEmpty {
+                guarder.startDetached()
             }
             return
         }
@@ -1081,16 +1091,7 @@ struct AccountCommands {
                 profile.removeGuardState()
                 return []
             }
-            var candidates: [String] = files.savedNames().compactMap { name in
-                try? files.readSaved(name).meta.email
-            }
-            if let existing = profile.readGuardState(), existing.processes.contains(where: { processes.isProcessAlive($0) }) {
-                candidates.append(contentsOf: existing.guardedEmails)
-                if !existing.targetEmail.isEmpty {
-                    candidates.append(existing.targetEmail)
-                }
-            }
-            let guarded = mergedGuardedEmails(candidates, excluding: login.meta.email)
+            let guarded = candidateGuardedEmails(excluding: login.meta.email)
             guard !guarded.isEmpty else {
                 profile.removeGuardState()
                 return []
@@ -1102,7 +1103,9 @@ struct AccountCommands {
                 processes: running,
                 updatedAt: profile.now()
             )
-            try? profile.writeGuardState(state)
+            guard (try? profile.writeGuardState(state)) != nil else {
+                return []
+            }
             return running.map { Int($0.pid) }
         }
         stdout(text.line(enabled ? .guardEnabled : .guardDisabled))
@@ -1128,17 +1131,7 @@ struct AccountCommands {
             profile.removeGuardState()
             return []
         }
-        var candidates: [String] = []
-        if let existing = profile.readGuardState(), existing.processes.contains(where: { processes.isProcessAlive($0) }) {
-            candidates.append(contentsOf: existing.guardedEmails)
-            if !existing.targetEmail.isEmpty {
-                candidates.append(existing.targetEmail)
-            }
-        }
-        if let previousEmail, !previousEmail.isEmpty {
-            candidates.append(previousEmail)
-        }
-        let guarded = mergedGuardedEmails(candidates, excluding: targetEmail)
+        let guarded = candidateGuardedEmails(including: [previousEmail], excluding: targetEmail)
         guard !guarded.isEmpty else {
             profile.removeGuardState()
             return []
@@ -1150,67 +1143,97 @@ struct AccountCommands {
             processes: running,
             updatedAt: profile.now()
         )
-        try? profile.writeGuardState(state)
+        guard (try? profile.writeGuardState(state)) != nil else {
+            return []
+        }
         return running.map { Int($0.pid) }
     }
 
-    private func syncGuardSameEmail(targetName: String, targetEmail: String) {
-        guard provider == .antigravity else {
-            return
-        }
-        guard profile.blockOldWritebackEnabled(), var existing = profile.readGuardState(),
-              existing.targetEmail == targetEmail
+    private func unrestoredWritebackExists(for email: String) -> Bool {
+        guard provider == .antigravity,
+              profile.blockOldWritebackEnabled(),
+              let existing = profile.readGuardState(),
+              existing.targetEmail != email,
+              existing.processes.contains(where: { processes.isProcessAlive($0) })
         else {
-            if !profile.blockOldWritebackEnabled() {
-                profile.removeGuardState()
-            }
-            return
+            return false
         }
-        let alive = existing.processes.filter { processes.isProcessAlive($0) }
-        guard !alive.isEmpty, !existing.guardedEmails.isEmpty else {
-            profile.removeGuardState()
-            return
-        }
-        existing.processes = alive
-        existing.targetName = targetName
-        existing.updatedAt = profile.now()
-        try? profile.writeGuardState(existing)
+        return true
     }
 
-    private func syncGuardAfterSave(name: String, email: String) {
+    private func syncGuardSameEmail(targetName: String, targetEmail: String) -> [Int] {
         guard provider == .antigravity else {
-            return
+            return []
         }
         guard profile.blockOldWritebackEnabled() else {
             profile.removeGuardState()
-            return
+            return []
         }
-        guard var existing = profile.readGuardState() else {
-            return
-        }
-        let alive = existing.processes.filter { processes.isProcessAlive($0) }
-        guard !alive.isEmpty else {
-            profile.removeGuardState()
-            return
-        }
-        if existing.targetEmail == email {
-            existing.targetName = name
+        if var existing = profile.readGuardState(), existing.targetEmail == targetEmail {
+            let alive = existing.processes.filter { processes.isProcessAlive($0) }
+            guard !alive.isEmpty, !existing.guardedEmails.isEmpty else {
+                profile.removeGuardState()
+                return []
+            }
             existing.processes = alive
+            existing.targetName = targetName
             existing.updatedAt = profile.now()
             try? profile.writeGuardState(existing)
-            return
+            return []
         }
-        let guarded = mergedGuardedEmails(existing.guardedEmails + [existing.targetEmail], excluding: email)
-        guard !guarded.isEmpty else {
+        let previousTarget = profile.readGuardState()?.targetEmail
+        return armGuardAfterEmailChange(
+            targetName: targetName,
+            targetEmail: targetEmail,
+            previousEmail: previousTarget
+        )
+    }
+
+    private func syncGuardAfterSave(name: String, email: String) -> [Int] {
+        guard provider == .antigravity else {
+            return []
+        }
+        guard profile.blockOldWritebackEnabled() else {
             profile.removeGuardState()
-            return
+            return []
         }
-        existing.targetName = name
-        existing.targetEmail = email
-        existing.guardedEmails = guarded
-        existing.processes = alive
-        existing.updatedAt = profile.now()
-        try? profile.writeGuardState(existing)
+        if var existing = profile.readGuardState() {
+            let alive = existing.processes.filter { processes.isProcessAlive($0) }
+            guard !alive.isEmpty else {
+                profile.removeGuardState()
+                return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: nil)
+            }
+            if existing.targetEmail == email {
+                existing.targetName = name
+                existing.processes = alive
+                existing.updatedAt = profile.now()
+                try? profile.writeGuardState(existing)
+                return []
+            }
+            return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: existing.targetEmail)
+        }
+        return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: nil)
+    }
+
+    private func candidateGuardedEmails(including extra: [String?] = [], excluding targetEmail: String) -> [String] {
+        var candidates: [String] = files.savedNames().compactMap { name in
+            try? files.readSaved(name).meta.email
+        }
+        candidates.append(contentsOf: profile.names().compactMap { name in
+            try? profile.read(name).email
+        })
+        if let existing = profile.readGuardState(), existing.processes.contains(where: { processes.isProcessAlive($0) }) {
+            candidates.append(contentsOf: existing.guardedEmails)
+            if !existing.targetEmail.isEmpty {
+                candidates.append(existing.targetEmail)
+            }
+        }
+        for email in extra {
+            if let email, !email.isEmpty {
+                candidates.append(email)
+            }
+        }
+        return mergedGuardedEmails(candidates, excluding: targetEmail)
     }
 
     private func syncGuardAfterRename(from source: String, to target: String) {

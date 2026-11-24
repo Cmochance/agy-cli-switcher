@@ -391,6 +391,7 @@ final class GuardTests: XCTestCase {
         )
         try profile(for: fixture).writeGuardState(state)
 
+        let ready = XCTestExpectation(description: "watcher installed initial node watchers")
         let watcher = WritebackGuardWatcher(
             home: fixture.home,
             keychain: fixture.keychain,
@@ -398,7 +399,8 @@ final class GuardTests: XCTestCase {
             now: { "2026-01-01T00:00:00Z" },
             keychainDirectory: keychainDir,
             debounceInterval: 0.05,
-            fallbackInterval: 30
+            fallbackInterval: 30,
+            onReady: { ready.fulfill() }
         )
 
         let finished = XCTestExpectation(description: "watcher exits after watched process terminates")
@@ -408,7 +410,7 @@ final class GuardTests: XCTestCase {
         }
 
         // 等 watcher 挂好监听后，模拟旧进程写回钥匙串并触发文件变化。
-        Thread.sleep(forTimeInterval: 0.2)
+        wait(for: [ready], timeout: 3.0)
         fixture.keychain.blob = alice
         try Data("v2".utf8).write(to: dbFile)
 
@@ -426,6 +428,288 @@ final class GuardTests: XCTestCase {
         child.terminate()
         child.waitUntilExit()
         wait(for: [finished], timeout: 3.0)
+        XCTAssertNil(profile(for: fixture).readGuardState())
+    }
+
+    func testWatcherStaysQuietWhenIdleWithoutPollingStorm() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+
+        let keychainDir = fixture.home.appendingPathComponent("FakeKeychains", isDirectory: true)
+        try FileManager.default.createDirectory(at: keychainDir, withIntermediateDirectories: true)
+        try Data("v1".utf8).write(to: keychainDir.appendingPathComponent("login.keychain-db"))
+
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["30"]
+        try child.run()
+        defer {
+            if child.isRunning {
+                child.terminate()
+                child.waitUntilExit()
+            }
+        }
+
+        var info = proc_bsdinfo()
+        XCTAssertEqual(
+            proc_pidinfo(child.processIdentifier, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.stride)),
+            Int32(MemoryLayout<proc_bsdinfo>.stride)
+        )
+        let tracked = TrackedProcess(
+            pid: child.processIdentifier,
+            startSec: UInt64(info.pbi_start_tvsec),
+            startUsec: UInt64(info.pbi_start_tvusec)
+        )
+        try profile(for: fixture).writeGuardState(GuardState(
+            targetName: "bob",
+            targetEmail: "bob@example.com",
+            guardedEmails: ["alice@example.com"],
+            processes: [tracked],
+            updatedAt: "2026-01-01T00:00:00Z"
+        ))
+
+        let readsBeforeStart = fixture.keychain.reads
+        let writesBeforeStart = fixture.keychain.writes.count
+        let ready = XCTestExpectation(description: "watcher ready")
+        let finished = XCTestExpectation(description: "watcher exits")
+        let watcher = WritebackGuardWatcher(
+            home: fixture.home,
+            keychain: fixture.keychain,
+            processes: SystemProcessList(),
+            now: { "2026-01-01T00:00:00Z" },
+            keychainDirectory: keychainDir,
+            debounceInterval: 0.05,
+            fallbackInterval: 300,
+            onReady: { ready.fulfill() }
+        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            watcher.run()
+            finished.fulfill()
+        }
+
+        wait(for: [ready], timeout: 3.0)
+        // 空闲窗口内不应因 lockState chmod / configDir .attrib 产生自激循环读钥匙串。
+        Thread.sleep(forTimeInterval: 0.6)
+        XCTAssertLessThanOrEqual(fixture.keychain.reads - readsBeforeStart, 2)
+        XCTAssertEqual(fixture.keychain.writes.count, writesBeforeStart)
+
+        child.terminate()
+        child.waitUntilExit()
+        wait(for: [finished], timeout: 3.0)
+    }
+
+    func testGuardRearmsOnAddAfterLogoutAndKeepsPriorSavedEmailsAfterStop() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let carol = makeBlob(email: "carol@example.com", refresh: "c")
+        let dave = makeBlob(email: "dave@example.com", refresh: "d")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+
+        fixture.processes.pids = [101]
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        let startedAfterFirstSwitch = fixture.guarder.started
+
+        // 1. /logout 清空钥匙串使 guard 停止并删除 guard.json。
+        fixture.keychain.missing = true
+        var engine = makeEngine(fixture: fixture)
+        XCTAssertEqual(engine.step(), .stopped)
+        XCTAssertNil(profile(for: fixture).readGuardState())
+
+        // 2. 在空钥匙串下 switch add 登录 carol，必须重新 arm 且仍保护 alice 与 bob。
+        fixture.terminal.isInteractive = true
+        fixture.launcher.supply = {
+            fixture.keychain.missing = false
+            fixture.keychain.blob = carol
+        }
+        XCTAssertEqual(fixture.run(["switch", "add"]).code, 0)
+        XCTAssertEqual(fixture.guarder.started, startedAfterFirstSwitch + 1)
+        let stateAfterAdd = try XCTUnwrap(profile(for: fixture).readGuardState())
+        XCTAssertEqual(stateAfterAdd.targetEmail, "carol@example.com")
+        XCTAssertEqual(Set(stateAfterAdd.guardedEmails), Set(["alice@example.com", "bob@example.com"]))
+
+        fixture.keychain.blob = alice
+        XCTAssertEqual(engine.step(), .restored("carol@example.com"))
+        XCTAssertEqual(fixture.keychain.blob, carol)
+
+        // 3. 外部新登录 dave 导致 guard 停止，之后再 switch bob 时，alice 仍在受保护集合中。
+        fixture.keychain.blob = dave
+        XCTAssertEqual(engine.step(), .stopped)
+        XCTAssertNil(profile(for: fixture).readGuardState())
+
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        let stateAfterDave = try XCTUnwrap(profile(for: fixture).readGuardState())
+        XCTAssertEqual(stateAfterDave.targetEmail, "bob@example.com")
+        XCTAssertEqual(Set(stateAfterDave.guardedEmails), Set(["alice@example.com", "carol@example.com", "dave@example.com"]))
+    }
+
+    func testExplicitSwitchToWrittenBackAccountRetargetsGuardWithoutReverting() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a-clean")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b-clean")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+
+        fixture.processes.pids = [101]
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        let writesBeforeWriteback = fixture.keychain.writes.count
+
+        // 旧会话把混合后的 alice 写回钥匙串，趁 worker 尚未恢复前，用户显式 switch alice。
+        let polluted = makeMixedBlob(email: "alice@example.com", refresh: "a-clean", access: "short", projectID: "bob-project")
+        fixture.keychain.blob = polluted
+        let explicit = fixture.run(["switch", "alice"])
+        XCTAssertEqual(explicit.code, 0)
+        XCTAssertTrue(explicit.output.contains("已经是 alice  alice@example.com"))
+        XCTAssertEqual(fixture.keychain.writes.count, writesBeforeWriteback)
+        XCTAssertEqual(stripNewlines(try String(contentsOf: fixture.locations.tokenURL("alice"), encoding: .utf8)), alice)
+
+        let retargeted = try XCTUnwrap(profile(for: fixture).readGuardState())
+        XCTAssertEqual(retargeted.targetName, "alice")
+        XCTAssertEqual(retargeted.targetEmail, "alice@example.com")
+        XCTAssertEqual(retargeted.guardedEmails, ["bob@example.com"])
+
+        var engine = makeEngine(fixture: fixture)
+        XCTAssertEqual(engine.step(), .idle)
+        XCTAssertEqual(fixture.keychain.blob, polluted)
+    }
+
+    func testReenablingGuardDuringLockWaitPreservesStateAndLockGuardRetries() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+        fixture.processes.pids = [707]
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+
+        let prof = profile(for: fixture)
+        let lockFD = try XCTUnwrap(prof.lockState(wait: 1))
+        try prof.setBlockOldWriteback(false)
+
+        var stepOutcome: GuardStepOutcome?
+        let done = XCTestExpectation(description: "step completes after lock release")
+        DispatchQueue.global(qos: .userInitiated).async {
+            var engine = WritebackGuardEngine(
+                files: AccountFiles(locations: fixture.locations, now: { "2026-01-01T00:00:00Z" }),
+                profile: ToolProfile(home: fixture.home, now: { "2026-01-01T00:00:00Z" }, preferredLanguages: ["zh-Hans"]),
+                keychain: fixture.keychain,
+                processes: fixture.processes
+            )
+            stepOutcome = engine.step()
+            done.fulfill()
+        }
+
+        // 等 step() 在关闭开关的情况下进入 lockState(wait: 0.2)，随后持锁期间重新开启并写回 guard.json。
+        Thread.sleep(forTimeInterval: 0.05)
+        try prof.setBlockOldWriteback(true)
+        try prof.writeGuardState(GuardState(
+            targetName: "bob",
+            targetEmail: "bob@example.com",
+            guardedEmails: ["alice@example.com"],
+            processes: [TrackedProcess(pid: 707, startSec: 1, startUsec: 0)],
+            updatedAt: "2026-01-01T00:00:00Z"
+        ))
+        close(lockFD)
+
+        wait(for: [done], timeout: 2.0)
+        XCTAssertEqual(stepOutcome, .idle)
+        XCTAssertNotNil(prof.readGuardState())
+
+        // 新 worker 在前任刚释放 guard.lock 时的短暂等待也应成功拿锁。
+        let firstGuardLock = try XCTUnwrap(prof.lockGuard(wait: 0.3))
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.06) {
+            close(firstGuardLock)
+        }
+        let secondGuardLock = prof.lockGuard(wait: 0.5)
+        XCTAssertNotNil(secondGuardLock)
+        if let secondGuardLock {
+            close(secondGuardLock)
+        }
+    }
+
+    func testRestoreAbortsWhenKeychainChangesBeforeWrite() throws {
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let dave = makeBlob(email: "dave@example.com", refresh: "d")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+        fixture.processes.pids = [808]
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+
+        var engine = makeEngine(fixture: fixture)
+
+        // 1. step() 读到 alice，到真正写入前钥匙串变成了 /logout 空状态：不得写回 bob。
+        fixture.keychain.blob = alice
+        fixture.keychain.onBeforeRestore = {
+            fixture.keychain.missing = true
+        }
+        XCTAssertEqual(engine.step(), .retrySoon)
+        XCTAssertTrue(fixture.keychain.missing)
+        fixture.keychain.onBeforeRestore = nil
+        XCTAssertEqual(engine.step(), .stopped)
+
+        // 2. step() 读到 alice，到真正写入前外部登录了未知 dave：不得覆盖 dave。
+        fixture.keychain.missing = false
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        fixture.keychain.onBeforeRestore = {
+            fixture.keychain.blob = dave
+        }
+        XCTAssertEqual(engine.step(), .retrySoon)
+        XCTAssertEqual(fixture.keychain.blob, dave)
+        fixture.keychain.onBeforeRestore = nil
+        XCTAssertEqual(engine.step(), .stopped)
+    }
+
+    func testSymlinkedAgyExecutableDetectionAndRollbackExitWhenProcessesGone() throws {
+        XCTAssertTrue(SystemProcessList.isAgyExecutable(path: "/usr/local/lib/agy-bin", name: "agy", comm: "agy"))
+        XCTAssertTrue(SystemProcessList.isAgyExecutable(path: "/opt/bin/agy", name: "other", comm: "other"))
+        XCTAssertFalse(SystemProcessList.isAgyExecutable(path: "/usr/local/bin/agy-cs", name: "agy-cs", comm: "agy-cs"))
+
+        let alice = makeBlob(email: "alice@example.com", refresh: "a")
+        let bob = makeBlob(email: "bob@example.com", refresh: "b")
+        let fixture = try Fixture(blob: alice)
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        fixture.keychain.blob = bob
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        fixture.keychain.blob = alice
+        XCTAssertEqual(fixture.run(["guard", "on"]).code, 0)
+        fixture.processes.pids = [909]
+        XCTAssertEqual(fixture.run(["switch", "bob"]).code, 0)
+
+        let files = AccountFiles(locations: fixture.locations, now: { "2026-01-01T00:00:00Z" })
+        try files.writeRollback(alice)
+        defer { files.removeRollback() }
+
+        fixture.processes.pids = []
+        var engine = makeEngine(fixture: fixture)
+        XCTAssertEqual(engine.step(), .stopped)
         XCTAssertNil(profile(for: fixture).readGuardState())
     }
 

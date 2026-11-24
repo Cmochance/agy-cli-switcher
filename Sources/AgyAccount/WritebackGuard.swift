@@ -66,25 +66,17 @@ struct WritebackGuardEngine {
     }
 
     mutating func step() -> GuardStepOutcome {
-        guard profile.blockOldWritebackEnabled() else {
-            if let lockFD = profile.lockState(wait: 0.2) {
-                profile.removeGuardState()
-                close(lockFD)
-            }
-            return .stopped
-        }
-        guard let lockFD = profile.lockState(wait: 0) else {
+        let waitBudget: TimeInterval = profile.blockOldWritebackEnabled() ? 0 : 0.2
+        guard let lockFD = profile.lockState(wait: waitBudget) else {
             return .retrySoon
         }
         defer { close(lockFD) }
 
-        if files.readRollback() != nil {
-            return .retrySoon
+        guard profile.blockOldWritebackEnabled() else {
+            profile.removeGuardState()
+            return .stopped
         }
-        guard profile.blockOldWritebackEnabled(), var state = profile.readGuardState() else {
-            if !profile.blockOldWritebackEnabled() {
-                profile.removeGuardState()
-            }
+        guard var state = profile.readGuardState() else {
             return .stopped
         }
 
@@ -93,6 +85,10 @@ struct WritebackGuardEngine {
             profile.removeGuardState()
             return .stopped
         }
+        if files.readRollback() != nil {
+            return .retrySoon
+        }
+
         var stateDirty = false
         if alive.count != state.processes.count {
             state.processes = alive
@@ -137,7 +133,9 @@ struct WritebackGuardEngine {
         }
 
         do {
-            try keychain.writeBlob(target.blob)
+            guard try keychain.restoreBlob(target.blob, ifCurrentEquals: currentBlob) else {
+                return .retrySoon
+            }
             _ = files.clearQuotaCache()
             restoreTimes.append(moment)
             return .restored(state.targetEmail)
@@ -169,15 +167,11 @@ struct GuardSpawner: GuardStarting {
     var executable: String = Bundle.main.executablePath ?? CommandLine.arguments[0]
 
     func startDetached() {
-        guard let pid = spawn(["guard", "--detach"], ownSession: false) else {
-            return
-        }
-        var status: Int32 = 0
-        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        spawnDetachedHandoff(executable: executable, arguments: ["guard", "--detach"])
     }
 
     func spawnWorker() {
-        _ = spawn(["guard", "--worker"], ownSession: true)
+        _ = spawnDetachedProcess(executable: executable, arguments: ["guard", "--worker"], ownSession: true)
     }
 
     func runWorker() {
@@ -189,33 +183,6 @@ struct GuardSpawner: GuardStarting {
         )
         watcher.run()
     }
-
-    private func spawn(_ arguments: [String], ownSession: Bool) -> pid_t? {
-        var actions: posix_spawn_file_actions_t?
-        guard posix_spawn_file_actions_init(&actions) == 0 else {
-            return nil
-        }
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        var attributes: posix_spawnattr_t?
-        guard posix_spawnattr_init(&attributes) == 0 else {
-            return nil
-        }
-        defer { posix_spawnattr_destroy(&attributes) }
-        for descriptor in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
-            posix_spawn_file_actions_addopen(&actions, descriptor, "/dev/null", O_RDWR, 0)
-        }
-        if ownSession {
-            posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
-        }
-        let strings = ([executable] + arguments).map { strdup($0) }
-        defer { strings.forEach { free($0) } }
-        var argv = strings + [nil]
-        var pid: pid_t = 0
-        let started = argv.withUnsafeMutableBufferPointer { buffer in
-            posix_spawn(&pid, executable, &actions, &attributes, buffer.baseAddress, environ)
-        }
-        return started == 0 ? pid : nil
-    }
 }
 
 final class WritebackGuardWatcher {
@@ -225,6 +192,7 @@ final class WritebackGuardWatcher {
     private let keychainDirectory: URL
     private let debounceInterval: TimeInterval
     private let fallbackInterval: TimeInterval
+    private let onReady: (() -> Void)?
     private var engine: WritebackGuardEngine
     private let processes: any ProcessListing
 
@@ -237,6 +205,7 @@ final class WritebackGuardWatcher {
     private var pendingEvaluate: DispatchWorkItem?
     private var retryBackoff: TimeInterval = 0.25
     private var finished = false
+    private var didNotifyReady = false
 
     init(
         home: URL,
@@ -246,7 +215,8 @@ final class WritebackGuardWatcher {
         clock: @escaping () -> Date = Date.init,
         keychainDirectory: URL? = nil,
         debounceInterval: TimeInterval = 0.15,
-        fallbackInterval: TimeInterval = 15
+        fallbackInterval: TimeInterval = 15,
+        onReady: (() -> Void)? = nil
     ) {
         self.home = home
         self.processes = processes
@@ -256,6 +226,7 @@ final class WritebackGuardWatcher {
             ?? home.appendingPathComponent("Library/Keychains", isDirectory: true)
         self.debounceInterval = debounceInterval
         self.fallbackInterval = fallbackInterval
+        self.onReady = onReady
         let files = AccountFiles(
             locations: AccountLocations(home: home, provider: .antigravity),
             now: now,
@@ -277,17 +248,43 @@ final class WritebackGuardWatcher {
         defer { close(lockFD) }
 
         withExtendedLifetime(self) {
-            queue.async { [weak self] in
-                self?.start()
+            while true {
+                queue.async { [weak self] in
+                    self?.start()
+                }
+                done.wait()
+                guard shouldContinueWatching() else {
+                    break
+                }
             }
-            done.wait()
         }
     }
 
+    private func shouldContinueWatching() -> Bool {
+        guard let lockFD = profile.lockState(wait: 0.1) else {
+            return false
+        }
+        defer { close(lockFD) }
+        guard profile.blockOldWritebackEnabled(),
+              let state = profile.readGuardState(),
+              !state.guardedEmails.isEmpty,
+              state.processes.contains(where: { processes.isProcessAlive($0) })
+        else {
+            return false
+        }
+        return true
+    }
+
     private func start() {
+        finished = false
+        retryBackoff = 0.25
         syncNodeWatchers()
         startFallbackTimer()
         evaluate()
+        if !didNotifyReady {
+            didNotifyReady = true
+            onReady?()
+        }
     }
 
     private func startFallbackTimer() {
@@ -362,12 +359,11 @@ final class WritebackGuardWatcher {
 
     private func syncNodeWatchers() {
         let targets: [(key: String, url: URL, mask: DispatchSource.FileSystemEvent, delay: TimeInterval)] = [
-            ("keychainDir", keychainDirectory, [.write, .delete, .rename, .attrib], debounceInterval),
+            ("keychainDir", keychainDirectory, [.write, .delete, .rename], debounceInterval),
             ("keychainDB", keychainDirectory.appendingPathComponent("login.keychain-db"), [.write, .extend, .attrib, .delete, .rename], debounceInterval),
-            ("keychainWAL", keychainDirectory.appendingPathComponent("login.keychain-db-wal"), [.write, .extend, .attrib, .delete, .rename], debounceInterval),
-            ("configDir", locations.globalRoot, [.write, .delete, .rename, .attrib], 0.05),
-            ("guardFile", locations.guardStateFile, [.write, .delete, .rename, .attrib], 0.05),
-            ("toggleFile", locations.blockWritebackFile, [.write, .delete, .rename, .attrib], 0.05),
+            ("configDir", locations.globalRoot, [.write, .delete, .rename], 0.05),
+            ("guardFile", locations.guardStateFile, [.write, .delete, .rename], 0.05),
+            ("toggleFile", locations.blockWritebackFile, [.write, .delete, .rename], 0.05),
         ]
         for target in targets {
             let exists = FileManager.default.fileExists(atPath: target.url.path)

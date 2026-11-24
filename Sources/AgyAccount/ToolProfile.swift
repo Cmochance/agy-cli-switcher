@@ -292,18 +292,19 @@ struct ToolProfile {
         try? manager.removeItem(at: locations.guardStateFile)
     }
 
-    func lockGuard() -> Int32? {
+    func lockGuard(wait: TimeInterval = 0.3) -> Int32? {
         try? ensureGlobalRoot()
         let descriptor = open(locations.guardLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             return nil
         }
+        let deadline = DispatchTime.now() + wait
         while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
-            if errno == EINTR {
-                continue
+            guard errno == EWOULDBLOCK || errno == EINTR, DispatchTime.now() < deadline else {
+                close(descriptor)
+                return nil
             }
-            close(descriptor)
-            return nil
+            usleep(20_000)
         }
         return descriptor
     }
@@ -458,6 +459,11 @@ struct ToolProfile {
     }
 
     private func setMode(_ url: URL, _ mode: Int) throws {
+        if let existing = (try? manager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue,
+           (existing & 0o777) == mode
+        {
+            return
+        }
         try manager.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: url.path)
     }
 }

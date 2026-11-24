@@ -15,41 +15,45 @@ struct SelfSpawner: QuotaRefreshStarting {
     var prefix: [String] = []
 
     func startDetached() {
-        guard let pid = spawn(prefix + ["refresh", "quota", "--detach"], ownSession: false) else {
-            return
-        }
-        var status: Int32 = 0
-        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        spawnDetachedHandoff(executable: executable, arguments: prefix + ["refresh", "quota", "--detach"])
     }
 
     func spawnWorker() {
-        _ = spawn(prefix + ["refresh", "quota"], ownSession: true)
+        _ = spawnDetachedProcess(executable: executable, arguments: prefix + ["refresh", "quota"], ownSession: true)
     }
+}
 
-    private func spawn(_ arguments: [String], ownSession: Bool) -> pid_t? {
-        var actions: posix_spawn_file_actions_t?
-        guard posix_spawn_file_actions_init(&actions) == 0 else {
-            return nil
-        }
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        var attributes: posix_spawnattr_t?
-        guard posix_spawnattr_init(&attributes) == 0 else {
-            return nil
-        }
-        defer { posix_spawnattr_destroy(&attributes) }
-        for descriptor in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
-            posix_spawn_file_actions_addopen(&actions, descriptor, "/dev/null", O_RDWR, 0)
-        }
-        if ownSession {
-            posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
-        }
-        let strings = ([executable] + arguments).map { strdup($0) }
-        defer { strings.forEach { free($0) } }
-        var argv = strings + [nil]
-        var pid: pid_t = 0
-        let started = argv.withUnsafeMutableBufferPointer { buffer in
-            posix_spawn(&pid, executable, &actions, &attributes, buffer.baseAddress, environ)
-        }
-        return started == 0 ? pid : nil
+func spawnDetachedHandoff(executable: String, arguments: [String]) {
+    guard let pid = spawnDetachedProcess(executable: executable, arguments: arguments, ownSession: false) else {
+        return
     }
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+}
+
+func spawnDetachedProcess(executable: String, arguments: [String], ownSession: Bool) -> pid_t? {
+    var actions: posix_spawn_file_actions_t?
+    guard posix_spawn_file_actions_init(&actions) == 0 else {
+        return nil
+    }
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    var attributes: posix_spawnattr_t?
+    guard posix_spawnattr_init(&attributes) == 0 else {
+        return nil
+    }
+    defer { posix_spawnattr_destroy(&attributes) }
+    for descriptor in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+        posix_spawn_file_actions_addopen(&actions, descriptor, "/dev/null", O_RDWR, 0)
+    }
+    if ownSession {
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+    }
+    let strings = ([executable] + arguments).map { strdup($0) }
+    defer { strings.forEach { free($0) } }
+    var argv = strings + [nil]
+    var pid: pid_t = 0
+    let started = argv.withUnsafeMutableBufferPointer { buffer in
+        posix_spawn(&pid, executable, &actions, &attributes, buffer.baseAddress, environ)
+    }
+    return started == 0 ? pid : nil
 }
