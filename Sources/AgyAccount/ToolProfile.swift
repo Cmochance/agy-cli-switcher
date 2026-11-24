@@ -18,6 +18,9 @@ struct ToolLocations {
     var appLockFile: URL
     var stateLockFile: URL
     var dismissedFile: URL
+    var blockWritebackFile: URL
+    var guardStateFile: URL
+    var guardLockFile: URL
 
     init(home: URL, provider: AccountProvider = .antigravity) {
         self.provider = provider
@@ -27,6 +30,9 @@ struct ToolLocations {
         languageFile = global.appendingPathComponent("language")
         addCommandFile = global.appendingPathComponent("add-account.command")
         appLockFile = global.appendingPathComponent("app.lock")
+        blockWritebackFile = global.appendingPathComponent("block-writeback")
+        guardStateFile = global.appendingPathComponent("guard.json")
+        guardLockFile = global.appendingPathComponent("guard.lock")
 
         let scoped = provider == .antigravity
             ? global
@@ -243,6 +249,63 @@ struct ToolProfile {
 
     func clearDismissed() {
         try? manager.removeItem(at: locations.dismissedFile)
+    }
+
+    func blockOldWritebackEnabled() -> Bool {
+        guard let text = try? readText(locations.blockWritebackFile) else {
+            return false
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+    }
+
+    func setBlockOldWriteback(_ enabled: Bool) throws {
+        try ensureGlobalRoot()
+        if enabled {
+            try AtomicFile.write(locations.blockWritebackFile, "1\n")
+            return
+        }
+        if manager.fileExists(atPath: locations.blockWritebackFile.path) {
+            do {
+                try manager.removeItem(at: locations.blockWritebackFile)
+            } catch {
+                throw AccountFailure(.writeFailed, locations.blockWritebackFile.path)
+            }
+        }
+    }
+
+    func readGuardState() -> GuardState? {
+        guard let data = try? Data(contentsOf: locations.guardStateFile) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(GuardState.self, from: data)
+    }
+
+    func writeGuardState(_ state: GuardState) throws {
+        try ensureGlobalRoot()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(state)
+        try AtomicFile.write(locations.guardStateFile, String(decoding: data, as: UTF8.self) + "\n")
+    }
+
+    func removeGuardState() {
+        try? manager.removeItem(at: locations.guardStateFile)
+    }
+
+    func lockGuard() -> Int32? {
+        try? ensureGlobalRoot()
+        let descriptor = open(locations.guardLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            return nil
+        }
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            if errno == EINTR {
+                continue
+            }
+            close(descriptor)
+            return nil
+        }
+        return descriptor
     }
 
     func writeUsageStatus(failed: [String]) throws {

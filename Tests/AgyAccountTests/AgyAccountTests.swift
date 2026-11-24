@@ -1161,6 +1161,24 @@ final class ScriptedRefresher: QuotaRefreshStarting {
     }
 }
 
+final class ScriptedGuardStarter: GuardStarting {
+    var started = 0
+    var workers = 0
+    var runs = 0
+
+    func startDetached() {
+        started += 1
+    }
+
+    func spawnWorker() {
+        workers += 1
+    }
+
+    func runWorker() {
+        runs += 1
+    }
+}
+
 func cells(_ line: String) -> [String] {
     line.components(separatedBy: "  ")
         .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -1182,6 +1200,7 @@ final class Fixture {
     let launcher = ScriptedLauncher()
     let usage = ScriptedUsage()
     let refresher = ScriptedRefresher()
+    let guarder = ScriptedGuardStarter()
     var stateWait: TimeInterval = 5
     var colab: ProviderServices?
     let locations: AccountLocations
@@ -1238,6 +1257,7 @@ final class Fixture {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
+            guarder: guarder,
             stateWait: stateWait,
             colab: colab
         ))
@@ -1256,6 +1276,7 @@ final class Fixture {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
+            guarder: guarder,
             colab: colab,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }

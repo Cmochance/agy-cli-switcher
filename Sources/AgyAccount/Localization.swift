@@ -204,6 +204,16 @@ public enum TextKey: String, CaseIterable {
     case panelColabWaiting
     case panelColabUseCode
     case panelColabCodePrompt
+    case guardUsage
+    case guardAntigravityOnly
+    case guardStatusOn
+    case guardStatusOff
+    case guardEnabled
+    case guardDisabled
+    case guardWatching
+    case guardHint
+    case agyGuardedRunning
+    case panelGuardToggle
 }
 
 struct AccountFailure: Error, Equatable {

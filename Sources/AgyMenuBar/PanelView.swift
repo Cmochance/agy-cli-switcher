@@ -171,6 +171,17 @@ struct PanelView: View {
                 Button(model.text(.panelSave)) {
                     model.ask(.save)
                 }
+                if model.provider == .antigravity {
+                    Button {
+                        model.toggleBlockOldWriteback()
+                    } label: {
+                        if model.state.blockOldWriteback {
+                            Label(model.text(.panelGuardToggle), systemImage: "checkmark")
+                        } else {
+                            Text(model.text(.panelGuardToggle))
+                        }
+                    }
+                }
                 Menu(model.text(.panelLanguage)) {
                     ForEach(AccountBoard.languages, id: \.code) { language in
                         Button {

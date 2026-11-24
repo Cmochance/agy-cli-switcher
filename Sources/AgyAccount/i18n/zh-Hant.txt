@@ -21,6 +21,8 @@
   move <名字> <位置>           把帳號移到列表的第幾位，1 是最前面
   rm <名字>                    刪除一個已保存的副本，不改目前鑰匙圈登入
   rm <名字> --force            目前記錄只剩這一份副本時，確認後刪除
+  guard                        查看是否禁止舊工作階段回寫登入
+  guard on / off               開啟或關閉禁止舊工作階段回寫登入
   language, lg                 顯示目前語言
   language <代碼>, lg <代碼>   切換語言
   help                         顯示已有的全部指令和對應功能
@@ -452,3 +454,33 @@ Colab 算力與工作階段已更新。
 
 [panelColabCodePrompt]
 瀏覽器裡會顯示一串授權碼。點頁面上的 Copy，或把授權碼貼到這裡。
+
+[guardUsage]
+用法: agy-cs guard [on|off]
+
+[guardAntigravityOnly]
+禁止舊工作階段回寫登入只支援 Antigravity，不支援 Colab。
+
+[guardStatusOn]
+禁止舊工作階段回寫登入: 已開啟
+
+[guardStatusOff]
+禁止舊工作階段回寫登入: 已關閉
+
+[guardEnabled]
+已開啟禁止舊工作階段回寫登入。
+
+[guardDisabled]
+已關閉禁止舊工作階段回寫登入。
+
+[guardWatching]
+正在監控以下舊 agy 行程的回寫: %1
+
+[guardHint]
+切換: agy-cs guard on，或 agy-cs guard off。
+
+[agyGuardedRunning]
+正在執行的 agy 仍使用舊登入: %1（已監控，回寫時會自動恢復為目前帳號）。
+
+[panelGuardToggle]
+禁止舊工作階段回寫登入

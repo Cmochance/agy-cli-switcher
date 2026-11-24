@@ -21,6 +21,8 @@ Antigravity CLI のアカウントを切り替えます。
   move <名前> <位置>           アカウントを一覧のその位置に移します。1 が先頭です
   rm <名前>                    保存したコピーを削除します。キーチェーンのログインは変えません
   rm <名前> --force            記録中のログインがこのコピーだけのとき、確認して削除します
+  guard                        旧セッションの書き戻し防止が有効か表示します
+  guard on / off               旧セッションによるキーチェーン書き戻し防止を切り替えます
   language, lg                 現在の言語を表示します
   language <コード>, lg <コード>  言語を切り替えます
   help                         すべてのコマンドと機能を表示します
@@ -452,3 +454,33 @@ Colab のログイン設定が見つかりません。
 
 [panelColabCodePrompt]
 ブラウザに認可コードが表示されます。ページの Copy を押すか、ここにコードを貼り付けてください。
+
+[guardUsage]
+使い方: agy-cs guard [on|off]
+
+[guardAntigravityOnly]
+旧セッションの書き戻し防止は Antigravity のみ対応しており、Colab では使えません。
+
+[guardStatusOn]
+旧セッションの書き戻し防止: オン
+
+[guardStatusOff]
+旧セッションの書き戻し防止: オフ
+
+[guardEnabled]
+旧セッションによるキーチェーン書き戻し防止を有効にしました。
+
+[guardDisabled]
+旧セッションによるキーチェーン書き戻し防止を無効にしました。
+
+[guardWatching]
+書き戻しを監視中の旧 agy プロセス: %1
+
+[guardHint]
+切り替え: agy-cs guard on または agy-cs guard off。
+
+[agyGuardedRunning]
+実行中の agy は旧ログインを使用中です: %1（監視中、書き戻し時は現在のアカウントに戻します）。
+
+[panelGuardToggle]
+旧セッションの書き戻し防止

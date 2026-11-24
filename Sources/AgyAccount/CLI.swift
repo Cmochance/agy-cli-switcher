@@ -21,24 +21,34 @@ struct CommandServices {
     var launcher: any AgyLaunching
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
+    var guarder: any GuardStarting
     var stateWait: TimeInterval = 5
     var provider: AccountProvider = .antigravity
     var colab: ProviderServices? = nil
 
     static func system(terminal: any LineReading, provider: AccountProvider = .antigravity) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        let processes = SystemProcessList()
+        let keychain = LoginKeychainStore()
+        let guarder = GuardSpawner(
+            home: home,
+            keychain: keychain,
+            processes: processes,
+            now: AccountClock.utcTimestamp
+        )
         switch provider {
         case .antigravity:
             return CommandServices(
                 home: home,
-                keychain: LoginKeychainStore(),
-                processes: SystemProcessList(),
+                keychain: keychain,
+                processes: processes,
                 now: AccountClock.utcTimestamp,
                 preferredLanguages: Locale.preferredLanguages,
                 terminal: terminal,
                 launcher: InteractiveAgy(),
                 usage: CloudCodeUsage(client: AgyClient(cacheURL: ToolLocations(home: home).clientFile)),
                 refresher: SelfSpawner(),
+                guarder: guarder,
                 provider: .antigravity
             )
         case .colab:
@@ -46,13 +56,14 @@ struct CommandServices {
             return CommandServices(
                 home: home,
                 keychain: ColabKeychainStore(cacheURL: colabClient),
-                processes: SystemProcessList(),
+                processes: processes,
                 now: AccountClock.utcTimestamp,
                 preferredLanguages: Locale.preferredLanguages,
                 terminal: terminal,
                 launcher: InteractiveColab(cacheURL: colabClient),
                 usage: ColabUsageFetcher(),
                 refresher: SelfSpawner(prefix: ["colab"]),
+                guarder: guarder,
                 provider: .colab
             )
         }
@@ -90,6 +101,7 @@ struct CommandServices {
                 launcher: overrides.launcher,
                 usage: overrides.usage,
                 refresher: overrides.refresher,
+                guarder: guarder,
                 stateWait: stateWait,
                 provider: .colab,
                 colab: overrides
@@ -119,6 +131,7 @@ struct CommandServices {
             launcher: launcher,
             usage: usage,
             refresher: refresher,
+            guarder: guarder,
             stateWait: stateWait,
             provider: provider,
             codec: activeCodec,
@@ -160,6 +173,7 @@ public enum AgyAccountCLI {
         launcher: any AgyLaunching,
         usage: any UsageFetching,
         refresher: any QuotaRefreshStarting,
+        guarder: any GuardStarting = NoopGuardStarter(),
         colab: ProviderServices? = nil,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
@@ -176,6 +190,7 @@ public enum AgyAccountCLI {
                 launcher: launcher,
                 usage: usage,
                 refresher: refresher,
+                guarder: guarder,
                 colab: colab
             ),
             stdout: stdout,
@@ -284,6 +299,8 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         return .next
     case "rm":
         return try parseRemove(arguments)
+    case "guard":
+        return try parseGuard(arguments)
     case "language", "lg":
         return try parseLanguage(arguments)
     default:
@@ -369,6 +386,23 @@ private func parseLanguage(_ arguments: [String]) throws -> AccountCommandKind {
         throw UsageFailure(.languageNoExtra)
     }
     return .languageSet(rest[0])
+}
+
+private func parseGuard(_ arguments: [String]) throws -> AccountCommandKind {
+    switch Array(arguments.dropFirst()) {
+    case []:
+        return .guardStatus
+    case ["on"]:
+        return .guardSet(true)
+    case ["off"]:
+        return .guardSet(false)
+    case ["--detach"]:
+        return .guardDetach
+    case ["--worker"]:
+        return .guardWorker
+    default:
+        throw UsageFailure(.guardUsage)
+    }
 }
 
 private func usageLanguage(commandArguments: [String], profile: ToolProfile, fallback: Localizer) -> Localizer {
