@@ -284,16 +284,13 @@ private struct AccountRowView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
-                            } else if usage.fiveHour != nil || usage.weekly != nil || usage.argon != nil {
+                            } else if usage.fiveHour != nil || usage.weekly != nil {
                                 HStack(spacing: 12) {
                                     if let fiveHour = usage.fiveHour {
                                         Text("5h \(fiveHour)")
                                     }
                                     if let weekly = usage.weekly {
                                         Text("7d \(weekly)")
-                                    }
-                                    if let argon = usage.argon {
-                                        Text("Argon \(argon)")
                                     }
                                 }
                                 .font(.caption.monospacedDigit())

@@ -406,8 +406,8 @@ struct AccountCommands {
             guard var snapshot = fetched[login.name], (try? profile.read(login.name).email) == login.email else {
                 return true
             }
-            // 模型列表这次没取到时，沿用上次记下的结果。
-            snapshot.argonLocked = snapshot.argonLocked ?? profile.readUsage(login.name, email: login.email)?.argonLocked
+            // 模型列表这次没取到或无法判定时，沿用上次记下的结果。
+            snapshot.modelsLocked = snapshot.modelsLocked ?? profile.readUsage(login.name, email: login.email)?.modelsLocked
             return (try? profile.writeUsage(login.name, snapshot, email: login.email)) == nil
         }.map(\.name)
         failed.sort()

@@ -48,7 +48,7 @@ final class BoardTests: XCTestCase {
 
         fixture.usage.snapshots = ["alice": UsageSnapshot(planID: "g1-pro-tier", planName: "", buckets: [
             UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-01-01T03:00:00Z"),
-        ], argonLocked: true)]
+        ], modelsLocked: true)]
         let partial = board.perform(["refresh", "quota"])
         XCTAssertEqual(partial.code, 1)
         XCTAssertEqual(partial.failure, .usageFailed)
@@ -1086,15 +1086,14 @@ final class BoardTests: XCTestCase {
             "alysechen": UsageSnapshot(planID: "g1-pro-tier", planName: "", buckets: [
                 UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-01-01T03:35:00Z"),
                 UsageBucket(id: "gemini-weekly", remaining: 0.99, resetTime: "2026-01-07T10:23:00Z"),
-                UsageBucket(id: "gemini-argon-wtu-weekly", remaining: 0.45, resetTime: "2026-01-07T10:23:00Z"),
-            ], argonLocked: false),
+            ], modelsLocked: false),
             "chenmo449": UsageSnapshot(planID: "free-tier", planName: "", buckets: [
                 UsageBucket(id: "gemini-weekly", remaining: 0.9962848, resetTime: "2026-01-07T10:23:00Z"),
-            ], argonLocked: true),
+            ], modelsLocked: true),
             "mltnchristen": UsageSnapshot(planID: "g1-pro-tier", planName: "", buckets: [
                 UsageBucket(id: "gemini-5h", remaining: 1, resetTime: "2026-01-01T05:00:00Z"),
                 UsageBucket(id: "gemini-weekly", remaining: 1, resetTime: "2026-01-08T00:00:00Z"),
-            ], argonLocked: true),
+            ], modelsLocked: true),
         ]
         XCTAssertEqual(fixture.run(["refresh", "quota"]).code, 0)
 

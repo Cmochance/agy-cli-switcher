@@ -21,7 +21,7 @@
 
 - 在多个 `agy` 或 `colab`（加 `colab` 前缀，如 `agy-cs colab ls`）登录之间切换，并记下名字、邮箱和当前项
 - Agy Switcher 在菜单栏里列出已保存的账号和额度，点一项完成切换，底栏按钮可在 Antigravity 和 Colab 之间切换
-- `agy-cs ls` 显示 Antigravity 账号的套餐，以及 Gemini 5 小时、7 天和 Argon 额度的剩余量与重置时间；`agy-cs colab ls` 显示 Colab 账号的剩余 CU 算力、消耗速率和活跃会话数
+- `agy-cs ls` 显示 Antigravity 账号的套餐，以及 Gemini 5 小时和 7 天额度的剩余量与重置时间；`agy-cs colab ls` 显示 Colab 账号的剩余 CU 算力、消耗速率和活跃会话数
 - `agy-cs switch` 在终端里选择：第 1 项是当前账号，不能选；第 2 项新增账号；之后是已保存账号。完成后在当前终端启动 `agy`（Colab 不额外重启进程）
 - `agy-cs switch add` 直接新增账号，不进入选择。Antigravity 先保住当前登录，再在终端里打开 `agy`。Colab 打开浏览器登录，允许后自动完成，不打开终端
 - `agy-cs switch <名字>` 只切换，不启动 `agy`
@@ -97,14 +97,14 @@ export PATH="$HOME/.local/bin:$PATH"
 
 点菜单栏上的图标打开面板。
 
-- 每行是一个已保存的账号：Antigravity 显示邮箱、套餐和 5h、7d、Argon 额度；Colab 显示邮箱、CU 余额、消耗速率和活跃会话数。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾，并在邮箱后面带上名字
+- 每行是一个已保存的账号：Antigravity 显示邮箱、套餐和 5h、7d 额度；Colab 显示邮箱、CU 余额、消耗速率和活跃会话数。打勾的是当前账号；同一个登录存了几个名字时，这几行都打勾，并在邮箱后面带上名字
 - 底栏“新增账号…”右侧的按钮在 **Antigravity** 和 **Colab** 之间切换当前面板显示，选择会记在 `~/.agy-cs/provider`
 - 点一行就切换过去，和 `agy-cs switch <名字>`（或 `agy-cs colab switch <名字>`）一样，只切换，不启动 `agy`
 - 按住一行上下拖可以调整顺序，和 `agy-cs move <名字> <位置>` 一样
 - 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
 - “新增账号…”：Antigravity 打开终端执行 `agy-cs switch add`。Colab 在浏览器里登录，允许后自动完成；浏览器改成显示授权码时，在面板里粘贴。登录完再点开面板就能看到新账号
-- 齿轮里可以保存当前登录、切换 Antigravity 禁止旧会话回写登录开关、换语言、退出
+- 每行右边的 `…` 里可以改名、删除。齿轮里可以保存当前登录、切换 Antigravity 禁止旧会话回写登录开关、换语言、退出
 - 右键点菜单栏图标也可以退出
 - 打开面板只读记下来的结果和钥匙串里当前登录的邮箱，不联网
 
@@ -134,14 +134,14 @@ export PATH="$HOME/.local/bin:$PATH"
 ## 套餐和额度
 
 ```
-* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%  Argon 100%
+* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%
   bob    bob@example.com    Free  7d 99% 11-28 18:23
 ```
 
 - 每一项是剩余的百分比，后面是重置时间（本机时区）。剩余 100% 时不显示重置时间
 - 过了重置时间的项按 100% 显示
-- 账号没有的额度不显示，也不留空位。免费账号通常只显示 7 日额度；Argon 只在这个账号有对应额度时出现
-- `Pro（非付费）` 表示套餐是 Pro，但 Google 没有把它算作付费订阅。这样的账号用不了 Gemini 4 的 Neon、Hydrogen 和 Argon，也没有 Argon 额度
+- 账号没有的额度不显示，也不留空位。免费账号通常只显示 7 日额度
+- `Pro（非付费）` 表示套餐是 Pro，但 Google 没有把它算作付费订阅，用不了付费订阅才开放的 Gemini 4 模型（Carbon、Neon 等）
 - `ls` 只读记下来的结果，不联网
 - `agy-cs refresh quota` 立刻把所有账号查一遍并列出来
 - `switch`、`next` 和新增账号成功之后，会另起一个后台进程去查。切换不等它，也不受它影响；通常几秒后 `ls` 就是新的。后台那次有账号没查到时，下一次 `ls` 会提示
