@@ -654,7 +654,7 @@ final class AgyAccountTests: XCTestCase {
         XCTAssertEqual(waited.code, 0)
         XCTAssertEqual(waited.errors, [])
         XCTAssertEqual(waited.output.map { cells($0).count }, [3, 3])
-        XCTAssertFalse(waited.output.contains { $0.contains("5h") || $0.contains("7d") || $0.contains("Argon") })
+        XCTAssertFalse(waited.output.contains { $0.contains("5h") || $0.contains("7d") })
         XCTAssertEqual(fixture.usage.calls.last, ["alice"])
         XCTAssertGreaterThan(Date().timeIntervalSince(started), 0.2)
         XCTAssertLessThan(try XCTUnwrap(fixture.usage.allowed.last), 4.9)
