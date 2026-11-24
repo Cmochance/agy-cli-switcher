@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.4
+
+### 简体中文
+
+- 新增可选设置“禁止旧会话回写登录”（`agy-cs guard on` / `off` 及 Antigravity 面板齿轮开关）。开启后，切换或新增账号会监控当时仍在运行的 `agy` 进程；旧会话刷新 token 并写回钥匙串时，自动恢复为当前选中的账号，不覆盖旧账号已保存的副本。
+- `agy-cs ls` 和菜单栏面板不再显示账号没有的 Antigravity 额度项，移除已下线的 Argon 专属额度显示。
+- 付费与非付费 `Pro` 套餐改为按 `fetchAvailableModels` 里付费订阅才开放的 Gemini 4 模型（Carbon、Neon 等）是否锁定来区分，并兼容读取旧额度记录里的 `argon_locked`。
+
+### English
+
+- Optional "Block old sessions from overwriting login" setting (`agy-cs guard on` / `off` and the Antigravity panel gear menu). When enabled, switching or adding an account watches existing `agy` processes and restores the selected saved login if an old session writes its refreshed token back to the keychain, without overwriting saved backups.
+- `agy-cs ls` and the menu bar panel now omit Antigravity quotas the account does not have, and drop the retired Argon quota display.
+- Paid and non-paid `Pro` plans are now distinguished by whether `fetchAvailableModels` locks the Gemini 4 models reserved for paid subscribers (Carbon, Neon, etc.), while remaining compatible with `argon_locked` in existing records.
+
 ## 0.2.3
 
 ### 简体中文

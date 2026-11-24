@@ -15,7 +15,7 @@
 
 **agy-cli-switcher** switches Antigravity CLI (`agy`) and Google Colab CLI (`colab`) logins on macOS. It comes in two forms: the `agy-cs` command for the terminal, and the menu bar tool Agy Switcher. Both are the same program and use the same data. Install either one, or both.
 
-Current version **v0.2.3** (see [Changelog](documents/CHANGELOG.md)).
+Current version **v0.2.4** (see [Changelog](documents/CHANGELOG.md)).
 
 ## What it does
 
@@ -36,14 +36,14 @@ Requires macOS 13 or later, on Apple silicon or Intel. Pick either form below.
 
 ### The menu bar tool, Agy Switcher
 
-1. Download `Agy-Switcher-v0.2.3-macOS-universal.dmg` from [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest), open it, and drag `Agy Switcher.app` onto the Applications folder next to it
+1. Download `Agy-Switcher-v0.2.4-macOS-universal.dmg` from [Releases](https://github.com/Cmochance/agy-cli-switcher/releases/latest), open it, and drag `Agy Switcher.app` onto the Applications folder next to it
 2. The first time you open it, macOS blocks it, because it is not notarized by Apple. Go to System Settings → Privacy & Security and click Open Anyway
 
 You can also download it in the terminal. A file downloaded this way has no `com.apple.quarantine` mark, so there is nothing to allow in System Settings:
 
 ```bash
 tmp="$(mktemp -d)" && \
-  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.3/Agy-Switcher-v0.2.3-macOS-universal.dmg && \
+  curl -fL -o "$tmp/Agy-Switcher.dmg" https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.4/Agy-Switcher-v0.2.4-macOS-universal.dmg && \
   hdiutil attach -quiet -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/Agy-Switcher.dmg" && \
   { ditto "$tmp/mnt/Agy Switcher.app" "/Applications/Agy Switcher.app"; copied=$?; hdiutil detach -quiet "$tmp/mnt"; [ "$copied" -eq 0 ]; } && \
   open "/Applications/Agy Switcher.app"
@@ -59,7 +59,7 @@ The prebuilt command is a single file:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.3/agy-cs-v0.2.3-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
+curl -fL https://github.com/Cmochance/agy-cli-switcher/releases/download/v0.2.4/agy-cs-v0.2.4-macOS-universal.tar.gz | tar -xz -C ~/.local/bin
 ```
 
 If Agy Switcher is already installed, there is nothing more to download. The app contains the same program:
@@ -85,7 +85,7 @@ The terminal needs `~/.local/bin` on `PATH`:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Each download has a file of the same name plus `.sha256` on the same page. Put the two side by side to check it, for example `shasum -a 256 -c Agy-Switcher-v0.2.3-macOS-universal.dmg.sha256`.
+Each download has a file of the same name plus `.sha256` on the same page. Put the two side by side to check it, for example `shasum -a 256 -c Agy-Switcher-v0.2.4-macOS-universal.dmg.sha256`.
 
 ## Quick start
 
