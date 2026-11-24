@@ -104,7 +104,7 @@ Click the icon in the menu bar to open the panel.
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…": Antigravity opens a terminal that runs `agy-cs switch add`. Colab signs in through the browser and finishes after you allow access; if the browser shows a code instead, paste it in the panel. Open the panel again afterwards to see the new account
-- The `…` at the end of a row renames or deletes it. The gear saves the current login, changes the language, and quits
+- The `…` at the end of a row renames or deletes it. The gear saves the current login, toggles blocking old Antigravity session write-backs, changes the language, and quits
 - Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results and the email of the current login in the keychain. It makes no request
 
@@ -126,6 +126,8 @@ Click the icon in the menu bar to open the panel.
 | `rename <old> <new>` | Rename one saved account |
 | `move <name> <position>` | Move an account to that position in the list. 1 is the top. `ls`, the `switch` menu, `next` and the menu bar panel all follow this order |
 | `rm <name>` | Delete a saved copy. The current login stays |
+| `guard` | Show whether blocking old Antigravity session write-backs is enabled |
+| `guard on` / `off` | Enable or disable blocking old-session write-backs. When on, switching watches existing `agy` processes and restores the target login if an old session writes back |
 | `language` | Show or change the interface language. `lg` is the same |
 | `help` | Show every command |
 
@@ -149,7 +151,7 @@ Click the icon in the menu bar to open the panel.
 
 | Location | Contents |
 |---|---|
-| `~/.agy-cs/` | Antigravity names, emails, the active record, the order, the language, `provider`, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", lives here too |
+| `~/.agy-cs/` | Antigravity names, emails, the active record, the order, the language, `provider`, `block-writeback`/`guard.json` state, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", lives here too |
 | `~/.agy-cs/colab/` | Colab non-secret account records, order, CU usage cache, and locks |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
 | `~/.config/colab-cli/accounts/` | Colab saved login copies and per-account `sessions.json` / `sessions.attached.json` backups (`history/` and `colab.log` stay untouched) |

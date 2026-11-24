@@ -13,6 +13,10 @@ enum AccountCommandKind {
     case rename(from: String?, to: String)
     case move(String, to: String)
     case remove(String, force: Bool, expecting: String?)
+    case guardStatus
+    case guardSet(Bool)
+    case guardDetach
+    case guardWorker
     case help
     case languageShow
     case languageSet(String)
@@ -27,6 +31,7 @@ struct AccountCommands {
     var launcher: any AgyLaunching
     var usage: any UsageFetching
     var refresher: any QuotaRefreshStarting
+    var guarder: any GuardStarting = NoopGuardStarter()
     var stateWait: TimeInterval = 5
     var provider: AccountProvider = .antigravity
     var codec: any LoginDecoding = AntigravityLoginCodec()
@@ -104,6 +109,16 @@ struct AccountCommands {
             try locked { try move(name, to: position) }
         case .remove(let name, let force, let expecting):
             try locked { try remove(name, force: force, expecting: expecting) }
+        case .guardStatus:
+            try guardStatus()
+        case .guardSet(let enabled):
+            try guardSet(enabled)
+        case .guardDetach:
+            try guardProviderOnly()
+            guarder.spawnWorker()
+        case .guardWorker:
+            try guardProviderOnly()
+            guarder.runWorker()
         case .help:
             stdout(text.line(.help))
         case .languageShow:
@@ -285,7 +300,7 @@ struct AccountCommands {
     // 从移开钥匙串那一项到新登录存好（或者原来的登录写回去）一直拿着锁：这段时间钥匙串是空的或者是还没存的新登录，
     // 别的进程不能切换，面板的自动保存也不能抢在前面把新登录存掉。重新启动 agy 之前放开。
     private func addAccount() throws {
-        let (name, observed, notices): (String, ObservedLogin, [ProviderNotice]) = try locked {
+        let (name, observed, notices, guardedPIDs): (String, ObservedLogin, [ProviderNotice], [Int]) = try locked {
             let snapshot = try captureLogin()
             var previousNames: [String] = []
             if let snapshot {
@@ -322,7 +337,12 @@ struct AccountCommands {
                 } else {
                     notices = []
                 }
-                return (name, login, notices)
+                let guarded = armGuardAfterEmailChange(
+                    targetName: name,
+                    targetEmail: login.meta.email,
+                    previousEmail: snapshot?.meta.email
+                )
+                return (name, login, notices, guarded)
             } catch {
                 if let snapshot {
                     try keychain.writeBlob(snapshot.blob)
@@ -336,7 +356,12 @@ struct AccountCommands {
         }
         emitProviderNotices(notices)
         stdout(text.line(.saved, name, observed.meta.email))
-        reportOtherAgyIfNeeded()
+        if !guardedPIDs.isEmpty {
+            stdout(text.line(.agyGuardedRunning, guardedPIDs.map(String.init).joined(separator: ", ")))
+            guarder.startDetached()
+        } else {
+            reportOtherAgyIfNeeded()
+        }
         refresher.startDetached()
         try launchToolIfNeeded()
     }
@@ -483,6 +508,7 @@ struct AccountCommands {
         if filesWereActive {
             try files.setActive(target)
         }
+        syncGuardAfterRename(from: source, to: target)
         stdout(text.line(.renamed, source, target, meta.email))
     }
 
@@ -727,7 +753,11 @@ struct AccountCommands {
         try files.setActive(checked)
         try profile.setActive(checked)
         profile.clearDismissed()
+        let savedGuardedPIDs = syncGuardAfterSave(name: checked, email: meta.email)
         stdout(text.line(.saved, checked, meta.email))
+        if !savedGuardedPIDs.isEmpty {
+            guarder.startDetached()
+        }
     }
 
     private func switchTo(_ name: String) throws {
@@ -735,12 +765,20 @@ struct AccountCommands {
         let target = try files.readSaved(checked)
         let (currentBlob, current) = try readKeychainLogin()
         if current.email == target.meta.email {
-            let updated = try persistCurrentRefresh(blob: currentBlob, meta: current)
+            let unrestoredWriteback = unrestoredWritebackExists(for: target.meta.email)
+            let updated = unrestoredWriteback ? [] : try persistCurrentRefresh(blob: currentBlob, meta: current)
+            if unrestoredWriteback {
+                _ = files.clearQuotaCache()
+            }
             try files.setActive(checked)
             try profile.setActive(checked)
+            let retargetedPIDs = syncGuardSameEmail(targetName: checked, targetEmail: target.meta.email)
             stdout(text.line(.alreadyActive, checked, current.email))
             if !updated.isEmpty {
                 stdout(text.line(.refreshedTokens, updated.joined(separator: ", ")))
+            }
+            if !retargetedPIDs.isEmpty {
+                guarder.startDetached()
             }
             return
         }
@@ -765,8 +803,19 @@ struct AccountCommands {
             stdout(text.line(.refreshedBeforeSwitch, updated.joined(separator: ", ")))
         }
         if provider == .antigravity {
-            reportOtherAgy()
-            stdout(text.line(.reopenAgy))
+            let guardedPIDs = armGuardAfterEmailChange(
+                targetName: checked,
+                targetEmail: target.meta.email,
+                previousEmail: current.email
+            )
+            if !guardedPIDs.isEmpty {
+                stdout(text.line(.agyGuardedRunning, guardedPIDs.map(String.init).joined(separator: ", ")))
+                stdout(text.line(.reopenAgy))
+                guarder.startDetached()
+            } else {
+                reportOtherAgy()
+                stdout(text.line(.reopenAgy))
+            }
         }
         refresher.startDetached()
     }
@@ -840,6 +889,7 @@ struct AccountCommands {
         }
         try profile.remove(checked)
         stateSync.removeAuxiliary(checked)
+        syncGuardAfterRemove(removedName: checked, email: meta.email)
         stdout(text.line(.removed, checked, meta.email))
         stdout(text.line(.keychainUnchanged))
     }
@@ -1000,5 +1050,225 @@ struct AccountCommands {
             }
         }
         return updated
+    }
+
+    private func guardProviderOnly() throws {
+        guard provider == .antigravity else {
+            throw UsageFailure(.guardAntigravityOnly)
+        }
+    }
+
+    private func guardStatus() throws {
+        try guardProviderOnly()
+        let enabled = profile.blockOldWritebackEnabled()
+        stdout(text.line(enabled ? .guardStatusOn : .guardStatusOff))
+        if enabled, let state = profile.readGuardState() {
+            let alive = state.processes.filter { processes.isProcessAlive($0) }
+            if !alive.isEmpty {
+                stdout(text.line(.guardWatching, alive.map { String($0.pid) }.joined(separator: ", ")))
+            }
+        }
+        stdout(text.line(.guardHint))
+    }
+
+    private func guardSet(_ enabled: Bool) throws {
+        try guardProviderOnly()
+        let armedPIDs: [Int] = try locked {
+            try profile.setBlockOldWriteback(enabled)
+            guard enabled else {
+                profile.removeGuardState()
+                return []
+            }
+            let running = processes.runningAgyProcesses()
+            guard !running.isEmpty, let login = try? captureLogin() else {
+                profile.removeGuardState()
+                return []
+            }
+            if profile.slots(forEmail: login.meta.email).isEmpty, profile.dismissedEmail() != login.meta.email {
+                try? saveUnsaved(login)
+            }
+            guard let targetName = files.slots(forEmail: login.meta.email).first else {
+                profile.removeGuardState()
+                return []
+            }
+            let guarded = candidateGuardedEmails(excluding: login.meta.email)
+            guard !guarded.isEmpty else {
+                profile.removeGuardState()
+                return []
+            }
+            let state = GuardState(
+                targetName: targetName,
+                targetEmail: login.meta.email,
+                guardedEmails: guarded,
+                processes: running,
+                updatedAt: profile.now()
+            )
+            guard (try? profile.writeGuardState(state)) != nil else {
+                return []
+            }
+            return running.map { Int($0.pid) }
+        }
+        stdout(text.line(enabled ? .guardEnabled : .guardDisabled))
+        if !armedPIDs.isEmpty {
+            stdout(text.line(.guardWatching, armedPIDs.map(String.init).joined(separator: ", ")))
+            guarder.startDetached()
+        }
+    }
+
+    private func armGuardAfterEmailChange(
+        targetName: String,
+        targetEmail: String,
+        previousEmail: String?
+    ) -> [Int] {
+        guard provider == .antigravity, profile.blockOldWritebackEnabled() else {
+            if provider == .antigravity {
+                profile.removeGuardState()
+            }
+            return []
+        }
+        let running = processes.runningAgyProcesses()
+        guard !running.isEmpty else {
+            profile.removeGuardState()
+            return []
+        }
+        let guarded = candidateGuardedEmails(including: [previousEmail], excluding: targetEmail)
+        guard !guarded.isEmpty else {
+            profile.removeGuardState()
+            return []
+        }
+        let state = GuardState(
+            targetName: targetName,
+            targetEmail: targetEmail,
+            guardedEmails: guarded,
+            processes: running,
+            updatedAt: profile.now()
+        )
+        guard (try? profile.writeGuardState(state)) != nil else {
+            return []
+        }
+        return running.map { Int($0.pid) }
+    }
+
+    private func unrestoredWritebackExists(for email: String) -> Bool {
+        guard provider == .antigravity,
+              profile.blockOldWritebackEnabled(),
+              let existing = profile.readGuardState(),
+              existing.targetEmail != email,
+              existing.processes.contains(where: { processes.isProcessAlive($0) })
+        else {
+            return false
+        }
+        return true
+    }
+
+    private func syncGuardSameEmail(targetName: String, targetEmail: String) -> [Int] {
+        guard provider == .antigravity else {
+            return []
+        }
+        guard profile.blockOldWritebackEnabled() else {
+            profile.removeGuardState()
+            return []
+        }
+        if var existing = profile.readGuardState(), existing.targetEmail == targetEmail {
+            let alive = existing.processes.filter { processes.isProcessAlive($0) }
+            guard !alive.isEmpty, !existing.guardedEmails.isEmpty else {
+                profile.removeGuardState()
+                return []
+            }
+            existing.processes = alive
+            existing.targetName = targetName
+            existing.updatedAt = profile.now()
+            try? profile.writeGuardState(existing)
+            return []
+        }
+        let previousTarget = profile.readGuardState()?.targetEmail
+        return armGuardAfterEmailChange(
+            targetName: targetName,
+            targetEmail: targetEmail,
+            previousEmail: previousTarget
+        )
+    }
+
+    private func syncGuardAfterSave(name: String, email: String) -> [Int] {
+        guard provider == .antigravity else {
+            return []
+        }
+        guard profile.blockOldWritebackEnabled() else {
+            profile.removeGuardState()
+            return []
+        }
+        if var existing = profile.readGuardState() {
+            let alive = existing.processes.filter { processes.isProcessAlive($0) }
+            guard !alive.isEmpty else {
+                profile.removeGuardState()
+                return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: nil)
+            }
+            if existing.targetEmail == email {
+                existing.targetName = name
+                existing.processes = alive
+                existing.updatedAt = profile.now()
+                try? profile.writeGuardState(existing)
+                return []
+            }
+            return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: existing.targetEmail)
+        }
+        return armGuardAfterEmailChange(targetName: name, targetEmail: email, previousEmail: nil)
+    }
+
+    private func candidateGuardedEmails(including extra: [String?] = [], excluding targetEmail: String) -> [String] {
+        var candidates: [String] = files.savedNames().compactMap { name in
+            try? files.readSaved(name).meta.email
+        }
+        candidates.append(contentsOf: profile.names().compactMap { name in
+            try? profile.read(name).email
+        })
+        if let existing = profile.readGuardState(), existing.processes.contains(where: { processes.isProcessAlive($0) }) {
+            candidates.append(contentsOf: existing.guardedEmails)
+            if !existing.targetEmail.isEmpty {
+                candidates.append(existing.targetEmail)
+            }
+        }
+        for email in extra {
+            if let email, !email.isEmpty {
+                candidates.append(email)
+            }
+        }
+        return mergedGuardedEmails(candidates, excluding: targetEmail)
+    }
+
+    private func syncGuardAfterRename(from source: String, to target: String) {
+        guard provider == .antigravity, var existing = profile.readGuardState(), existing.targetName == source else {
+            return
+        }
+        existing.targetName = target
+        existing.updatedAt = profile.now()
+        try? profile.writeGuardState(existing)
+    }
+
+    private func syncGuardAfterRemove(removedName: String, email: String) {
+        guard provider == .antigravity, var existing = profile.readGuardState(), existing.targetEmail == email else {
+            return
+        }
+        let remaining = files.slots(forEmail: email)
+        guard let fallback = remaining.first else {
+            profile.removeGuardState()
+            return
+        }
+        if existing.targetName == removedName {
+            existing.targetName = fallback
+            existing.updatedAt = profile.now()
+            try? profile.writeGuardState(existing)
+        }
+    }
+
+    private func mergedGuardedEmails(_ candidates: [String], excluding targetEmail: String) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for email in candidates where !email.isEmpty && email != targetEmail {
+            if seen.insert(email).inserted {
+                result.append(email)
+            }
+        }
+        return result
     }
 }

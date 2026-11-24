@@ -21,6 +21,8 @@
   move <名字> <位置>           把账号移到列表的第几位，1 是最前面
   rm <名字>                    删除一个已保存的副本，不改当前钥匙串登录
   rm <名字> --force            当前记录只剩这一份副本时，确认后删除
+  guard                        查看是否禁止旧会话回写登录
+  guard on / off               开启或关闭禁止旧会话回写登录
   language, lg                 显示当前语言
   language <代码>, lg <代码>   切换语言
   help                         显示已有的全部指令和对应功能
@@ -452,3 +454,33 @@ Colab 算力与会话已更新。
 
 [panelColabCodePrompt]
 浏览器里会显示一串授权码。点页面上的 Copy，或把授权码粘贴到这里。
+
+[guardUsage]
+用法: agy-cs guard [on|off]
+
+[guardAntigravityOnly]
+禁止旧会话回写登录只支持 Antigravity，不支持 Colab。
+
+[guardStatusOn]
+禁止旧会话回写登录: 已开启
+
+[guardStatusOff]
+禁止旧会话回写登录: 已关闭
+
+[guardEnabled]
+已开启禁止旧会话回写登录。
+
+[guardDisabled]
+已关闭禁止旧会话回写登录。
+
+[guardWatching]
+正在监控以下旧 agy 进程的回写: %1
+
+[guardHint]
+切换: agy-cs guard on，或 agy-cs guard off。
+
+[agyGuardedRunning]
+正在运行的 agy 仍使用旧登录: %1（已监控，回写时会自动恢复为当前账号）。
+
+[panelGuardToggle]
+禁止旧会话回写登录

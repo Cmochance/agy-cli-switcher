@@ -1,11 +1,29 @@
+import Darwin
 import Foundation
 import Security
 
 protocol KeychainStoring {
     func readBlob() throws -> String
     func writeBlob(_ blob: String) throws
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool
     func deleteBlob() throws
     func checkWritable(_ blob: String) throws
+}
+
+extension KeychainStoring {
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool {
+        let current: String
+        do {
+            current = try readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            return false
+        }
+        guard current == expected else {
+            return false
+        }
+        try writeBlob(blob)
+        return true
+    }
 }
 
 struct SecurityToolResult {
@@ -46,6 +64,28 @@ struct LoginKeychainStore: KeychainStoring {
             }
             throw AccountFailure(.writeMismatch)
         }
+    }
+
+    func restoreBlob(_ blob: String, ifCurrentEquals expected: String) throws -> Bool {
+        try checkWritable(blob)
+        let current: String
+        do {
+            current = try readBlob()
+        } catch let error as AccountFailure where error.key == .keychainMissing {
+            return false
+        }
+        guard current == expected else {
+            return false
+        }
+        try store(blob)
+        let written = try readBlob()
+        guard written == blob else {
+            if current != written {
+                try? store(current)
+            }
+            throw AccountFailure(.writeMismatch)
+        }
+        return true
     }
 
     func deleteBlob() throws {
@@ -164,32 +204,108 @@ func securityFailure(exitStatus: Int32) -> AccountFailure {
     }
 }
 
+struct TrackedProcess: Equatable, Codable, Sendable {
+    var pid: Int32
+    var startSec: UInt64
+    var startUsec: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case pid
+        case startSec = "start_sec"
+        case startUsec = "start_usec"
+    }
+}
+
 protocol ProcessListing {
     func runningAgyPIDs() -> [Int]
+    func runningAgyProcesses() -> [TrackedProcess]
+    func isProcessAlive(_ process: TrackedProcess) -> Bool
+}
+
+extension ProcessListing {
+    func runningAgyProcesses() -> [TrackedProcess] {
+        runningAgyPIDs().map { TrackedProcess(pid: Int32($0), startSec: 1, startUsec: 0) }
+    }
+
+    func isProcessAlive(_ process: TrackedProcess) -> Bool {
+        runningAgyProcesses().contains(process)
+    }
 }
 
 struct SystemProcessList: ProcessListing {
     func runningAgyPIDs() -> [Int] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-x", "agy"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
+        runningAgyProcesses().map { Int($0.pid) }
+    }
+
+    func runningAgyProcesses() -> [TrackedProcess] {
+        let estimate = proc_listallpids(nil, 0)
+        guard estimate > 0 else {
             return []
         }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
+        var pids = [pid_t](repeating: 0, count: Int(estimate) + 64)
+        let count = pids.withUnsafeMutableBufferPointer { buffer in
+            proc_listallpids(buffer.baseAddress, Int32(buffer.count * MemoryLayout<pid_t>.stride))
+        }
+        guard count > 0 else {
             return []
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard let text = String(data: data, encoding: .utf8) else {
-            return []
+        let uid = getuid()
+        let limit = min(pids.count, Int(count))
+        var found: [TrackedProcess] = []
+        var seen = Set<pid_t>()
+        for pid in pids.prefix(limit) where pid > 0 && seen.insert(pid).inserted {
+            var info = proc_bsdinfo()
+            let got = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.stride))
+            guard got == MemoryLayout<proc_bsdinfo>.stride,
+                  info.pbi_uid == uid,
+                  info.pbi_status != UInt32(SZOMB),
+                  isAgyProcess(pid: pid, info: info)
+            else {
+                continue
+            }
+            found.append(TrackedProcess(
+                pid: pid,
+                startSec: UInt64(info.pbi_start_tvsec),
+                startUsec: UInt64(info.pbi_start_tvusec)
+            ))
         }
-        return text.split(whereSeparator: \.isNewline).compactMap { Int($0) }
+        return found.sorted { $0.pid < $1.pid }
+    }
+
+    func isProcessAlive(_ process: TrackedProcess) -> Bool {
+        guard process.pid > 0 else {
+            return false
+        }
+        var info = proc_bsdinfo()
+        let got = proc_pidinfo(process.pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.stride))
+        guard got == MemoryLayout<proc_bsdinfo>.stride,
+              info.pbi_uid == getuid(),
+              info.pbi_status != UInt32(SZOMB)
+        else {
+            return false
+        }
+        return UInt64(info.pbi_start_tvsec) == process.startSec
+            && UInt64(info.pbi_start_tvusec) == process.startUsec
+    }
+
+    private func isAgyProcess(pid: pid_t, info: proc_bsdinfo) -> Bool {
+        var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        let pathLength = proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count))
+        let path = pathLength > 0 ? String(cString: pathBuffer) : nil
+        let name = withUnsafePointer(to: info.pbi_name) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) * 2) { String(cString: $0) }
+        }
+        let comm = withUnsafePointer(to: info.pbi_comm) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) { String(cString: $0) }
+        }
+        return Self.isAgyExecutable(path: path, name: name, comm: comm)
+    }
+
+    static func isAgyExecutable(path: String?, name: String, comm: String) -> Bool {
+        if let path, !path.isEmpty, URL(fileURLWithPath: path).lastPathComponent == "agy" {
+            return true
+        }
+        return name == "agy" || comm == "agy"
     }
 }
 

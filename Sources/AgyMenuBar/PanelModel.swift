@@ -177,6 +177,14 @@ final class PanelModel: ObservableObject {
         run(["language", code], saying: text(.panelWorking)) { $0.succeeded ? Array($0.output.suffix(1)) : $0.errors }
     }
 
+    func toggleBlockOldWriteback() {
+        guard provider == .antigravity else {
+            return
+        }
+        let next = state.blockOldWriteback ? "off" : "on"
+        run(["guard", next], saying: text(.panelWorking)) { $0.output + $0.errors }
+    }
+
     func addAccount() {
         guard busy == nil, !loggingIn else {
             return
@@ -344,6 +352,7 @@ final class PanelModel: ObservableObject {
     private func differs(_ fresh: BoardState) -> Bool {
         fresh.rows != state.rows || fresh.notices != state.notices || fresh.failed != state.failed
             || fresh.language != state.language || fresh.provider != state.provider
+            || fresh.blockOldWriteback != state.blockOldWriteback
     }
 
     private func tick() {

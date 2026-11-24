@@ -104,7 +104,7 @@ export PATH="$HOME/.local/bin:$PATH"
 - 保存当前登录时，名字下面已经存着别的账号的话，会先问要不要替换
 - “刷新额度”和 `agy-cs refresh quota` 一样
 - “新增账号…”：Antigravity 打开终端执行 `agy-cs switch add`。Colab 在浏览器里登录，允许后自动完成；浏览器改成显示授权码时，在面板里粘贴。登录完再点开面板就能看到新账号
-- 每行右边的 `…` 里可以改名、删除。齿轮里可以保存当前登录、换语言、退出
+- 齿轮里可以保存当前登录、切换 Antigravity 禁止旧会话回写登录开关、换语言、退出
 - 右键点菜单栏图标也可以退出
 - 打开面板只读记下来的结果和钥匙串里当前登录的邮箱，不联网
 
@@ -126,6 +126,8 @@ export PATH="$HOME/.local/bin:$PATH"
 | `rename <旧名字> <新名字>` | 把指定账号改名 |
 | `move <名字> <位置>` | 把账号移到列表的第几位，1 是最前面。`ls`、`switch` 的选择、`next` 和菜单栏面板都按这个顺序 |
 | `rm <名字>` | 删除一个已保存的副本，不改当前登录 |
+| `guard` | 查看是否禁止旧 Antigravity 会话回写登录 |
+| `guard on` / `off` | 开启或关闭禁止旧会话回写登录。开启后切号会监控旧 `agy` 进程，发现回写旧账号时自动恢复当前账号 |
 | `language` | 显示或切换界面语言。`lg` 相同 |
 | `help` | 显示全部指令 |
 
@@ -149,7 +151,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 位置 | 内容 |
 |---|---|
-| `~/.agy-cs/` | Antigravity 的名字、邮箱、顺序、语言、provider 选择，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里 |
+| `~/.agy-cs/` | Antigravity 的名字、邮箱、顺序、语言、provider 选择、`block-writeback`/`guard.json` 状态，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里 |
 | `~/.agy-cs/colab/` | Colab 的非密钥账号记录、排序、CU 额度缓存和锁 |
 | `~/.gemini/antigravity-cli/accounts/` | `agy` 自己的登录副本 |
 | `~/.config/colab-cli/accounts/` | Colab 账号副本与按账号隔离的 `sessions.json` / `sessions.attached.json` 备份（`history/` 和 `colab.log` 保持不动） |

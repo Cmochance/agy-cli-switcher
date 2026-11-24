@@ -31,6 +31,7 @@ public struct BoardState {
     public var text: Localizer
     public var language: String
     public var provider: AccountProvider = .antigravity
+    public var blockOldWriteback: Bool = false
 }
 
 public struct ActionOutcome {
@@ -85,7 +86,8 @@ public struct AccountBoard: @unchecked Sendable {
                 failed: failed,
                 text: text,
                 language: text.language.rawValue,
-                provider: provider
+                provider: provider,
+                blockOldWriteback: provider == .antigravity ? profile.blockOldWritebackEnabled() : false
             )
         }
         do {

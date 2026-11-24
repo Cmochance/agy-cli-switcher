@@ -21,6 +21,8 @@ Commands
   move <name> <position>       Move an account to that position in the list. 1 is the top
   rm <name>                    Delete a saved copy. The keychain login stays
   rm <name> --force            Delete the only remaining copy of the recorded login
+  guard                        Show whether old-session keychain write-back blocking is on
+  guard on / off               Enable or disable blocking old-session write-backs
   language, lg                 Show the current language
   language <code>, lg <code>   Change the language
   help                         Show every command and what it does
@@ -452,3 +454,33 @@ Use a code
 
 [panelColabCodePrompt]
 The browser shows an authorization code. Click Copy on that page, or paste the code here.
+
+[guardUsage]
+Usage: agy-cs guard [on|off]
+
+[guardAntigravityOnly]
+Blocking old-session write-backs is only supported for Antigravity, not Colab.
+
+[guardStatusOn]
+Block old-session write-backs: on
+
+[guardStatusOff]
+Block old-session write-backs: off
+
+[guardEnabled]
+Enabled blocking old-session keychain write-backs.
+
+[guardDisabled]
+Disabled blocking old-session keychain write-backs.
+
+[guardWatching]
+Watching old agy processes for write-backs: %1
+
+[guardHint]
+Change: agy-cs guard on, or agy-cs guard off.
+
+[agyGuardedRunning]
+Running agy still uses the old login: %1 (guarded; any write-back will restore the current account).
+
+[panelGuardToggle]
+Block old-session write-backs
