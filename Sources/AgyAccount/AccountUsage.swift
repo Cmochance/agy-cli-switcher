@@ -16,8 +16,8 @@ struct UsageSnapshot: Equatable {
     var planID: String
     var planName: String
     var buckets: [UsageBucket]
-    // Gemini 4 Argon 对这个账号是不是锁着的。nil 表示没取到模型列表。
-    var argonLocked: Bool? = nil
+    // 付费订阅才开放的 Gemini 4 模型对这个账号是不是锁着的。nil 表示没取到模型列表或无法判定。
+    var modelsLocked: Bool? = nil
     // 这个账号在 Cloud Code 那边的 project。下次查询用它提前发额度请求。
     var project = ""
     var colab: ColabUsageData? = nil
@@ -80,18 +80,35 @@ func parseBuckets(_ data: Data) -> [UsageBucket]? {
     return buckets
 }
 
-// fetchAvailableModels 的回答。套餐同样是 Pro，Google 只给付费订阅开放 Gemini 4 的几个模型；
-// 没开放的账号，列表里对应的是带 disabled 的占位项（实测）。loadCodeAssist 分不出这两种账号。
-func parseArgonLocked(_ data: Data) -> Bool? {
+// fetchAvailableModels 的回答。套餐同样是 Pro，Google 只给付费订阅开放 Gemini 4 的 Carbon、Neon 等模型；
+// 没开放的账号，列表里对应的是带 disabled 的占位项（实测；锁定账号里另有未禁用的内部项 gemini-4-hydrogen-sonar，所以不按 hydrogen 判）。
+// loadCodeAssist 分不出这两种账号。
+func parsePaidModelsLocked(_ data: Data) -> Bool? {
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let models = object["models"] as? [String: Any]
     else {
         return nil
     }
-    let argon = models.filter { $0.key.lowercased().contains("argon") }.values.map { entry in
-        (entry as? [String: Any])?["disabled"] as? Bool == true
+    let primary = models.compactMap { key, raw -> Bool? in
+        let lower = key.lowercased()
+        guard lower.hasPrefix("gemini-4-carbon") || lower.hasPrefix("gemini-4-neon") else {
+            return nil
+        }
+        return (raw as? [String: Any])?["disabled"] as? Bool == true
     }
-    return argon.isEmpty ? nil : !argon.contains(false)
+    if !primary.isEmpty {
+        return !primary.contains(false)
+    }
+    let taggedPaidProLock = models.values.contains { raw in
+        guard let entry = raw as? [String: Any],
+              entry["disabled"] as? Bool == true,
+              let description = entry["tagDescription"] as? String
+        else {
+            return false
+        }
+        return description.lowercased().contains("paid pro")
+    }
+    return taggedPaidProLock ? true : nil
 }
 
 // 记录带着邮箱。同一个名字后来存成了另一个登录时，旧记录不再显示。
@@ -104,8 +121,8 @@ func encodeUsage(_ snapshot: UsageSnapshot, email: String, fetchedAt: String) ->
         "project": snapshot.project,
         "buckets": snapshot.buckets.map { ["id": $0.id, "remaining": $0.remaining, "reset_time": $0.resetTime] },
     ]
-    if let locked = snapshot.argonLocked {
-        object["argon_locked"] = locked
+    if let locked = snapshot.modelsLocked {
+        object["models_locked"] = locked
     }
     if let colab = snapshot.colab {
         object["colab_balance"] = colab.balance
@@ -139,7 +156,7 @@ func decodeUsage(_ data: Data, email: String) -> UsageSnapshot? {
         planID: plain(object["plan_id"] as? String ?? ""),
         planName: plain(object["plan_name"] as? String ?? ""),
         buckets: buckets,
-        argonLocked: object["argon_locked"] as? Bool,
+        modelsLocked: (object["models_locked"] as? Bool) ?? (object["argon_locked"] as? Bool),
         project: plain(object["project"] as? String ?? ""),
         colab: colab
     )
@@ -195,7 +212,6 @@ public struct UsageText: Equatable {
     public var plan: String
     public var fiveHour: String?
     public var weekly: String?
-    public var argon: String?
     public var colabBalance: String?
     public var colabRate: String?
     public var colabActive: String?
@@ -206,7 +222,6 @@ public struct UsageText: Equatable {
         plan: String,
         fiveHour: String? = nil,
         weekly: String? = nil,
-        argon: String? = nil,
         colabBalance: String? = nil,
         colabRate: String? = nil,
         colabActive: String? = nil,
@@ -216,7 +231,6 @@ public struct UsageText: Equatable {
         self.plan = plan
         self.fiveHour = fiveHour
         self.weekly = weekly
-        self.argon = argon
         self.colabBalance = colabBalance
         self.colabRate = colabRate
         self.colabActive = colabActive
@@ -232,7 +246,6 @@ public struct UsageText: Equatable {
         let quotas = [
             fiveHour.map { "5h \($0)" },
             weekly.map { "7d \($0)" },
-            argon.map { "Argon \($0)" },
         ].compactMap { $0 }
         if !quotas.isEmpty {
             row.append(quotas.joined(separator: "  "))
@@ -241,7 +254,7 @@ public struct UsageText: Equatable {
     }
 }
 
-// unpaid 给套餐名加上“非付费”的标记：套餐不是免费档，但付费订阅才有的 Argon 锁着。
+// unpaid 给套餐名加上“非付费”的标记：套餐不是免费档，但付费订阅才开放的模型锁着。
 func usageText(
     _ snapshot: UsageSnapshot,
     now: Date,
@@ -269,10 +282,9 @@ func usageText(
         return bucketText(bucket, now: now, timeZone: timeZone)
     }
     return UsageText(
-        plan: snapshot.argonLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,
+        plan: snapshot.modelsLocked == true && snapshot.planID != "free-tier" ? unpaid(label) : label,
         fiveHour: text { $0 == "gemini-5h" },
-        weekly: text { $0 == "gemini-weekly" },
-        argon: text { $0.contains("argon") }
+        weekly: text { $0 == "gemini-weekly" }
     )
 }
 

@@ -529,7 +529,7 @@ final class AgyAccountTests: XCTestCase {
 
         let reads = fixture.keychain.reads
         let expected = [
-            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%", "Argon 100%"],
+            ["* alice", "alice@example.com", "Pro", "5h 62% \(localTime("2026-01-01T03:00:00Z"))", "7d 100%"],
             ["bob", "bob@example.com", "Free", "7d 99% \(localTime("2026-01-07T10:23:00Z"))"],
         ]
         let refreshed = fixture.run(["refresh", "quota"])
@@ -596,7 +596,7 @@ final class AgyAccountTests: XCTestCase {
         defer { fixture.cleanup() }
         XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
         func plan(_ id: String, _ locked: Bool?) throws -> String {
-            fixture.usage.snapshots = ["alice": UsageSnapshot(planID: id, planName: "", buckets: [], argonLocked: locked, project: "p-\(id)")]
+            fixture.usage.snapshots = ["alice": UsageSnapshot(planID: id, planName: "", buckets: [], modelsLocked: locked, project: "p-\(id)")]
             let shown = fixture.run(["refresh", "quota"])
             XCTAssertEqual(shown.code, 0)
             return try XCTUnwrap(shown.output.first.map(cells))[2]

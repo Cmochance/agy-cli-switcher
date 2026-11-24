@@ -21,20 +21,38 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(parsePlan(Data("nope".utf8)))
 
         let buckets = try XCTUnwrap(parseBuckets(Data(summaryJSON.utf8)))
-        XCTAssertEqual(buckets.map(\.id), ["gemini-weekly", "gemini-5h", "3p-weekly", "gemini-argon-wtu-weekly"])
+        XCTAssertEqual(buckets.map(\.id), ["gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h"])
         XCTAssertEqual(buckets[0], UsageBucket(id: "gemini-weekly", remaining: 0.9962848, resetTime: "2026-11-28T10:23:13Z"))
         XCTAssertEqual(buckets[1].remaining, 0.62)
         XCTAssertEqual(parseBuckets(Data("{}".utf8)), [])
         XCTAssertNil(parseBuckets(Data("nope".utf8)))
     }
 
-    func testArgonLockIsReadFromTheModelList() {
+    func testPaidModelLockIsReadFromTheModelList() {
         func locked(_ json: String) -> Bool? {
-            parseArgonLocked(Data(json.utf8))
+            parsePaidModelsLocked(Data(json.utf8))
         }
-        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-disabled":{"disabled":true},"gemini-3.8-flash-high":{}}}"#), true)
-        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{"recommended":true},"gemini-4-carbon-disabled":{"disabled":true}}}"#), false)
-        XCTAssertEqual(locked(#"{"models":{"gemini-4-argon-high":{},"gemini-4-argon-disabled":{"disabled":true}}}"#), false)
+        XCTAssertEqual(
+            locked(#"{"models":{"gemini-4-carbon-disabled":{"disabled":true,"tagDescription":"Gemini 4 Carbon is currently available to Ultra and paid Pro plan subscribers."},"gemini-4-neon-disabled":{"disabled":true},"gemini-4-hydrogen-disabled":{"disabled":true},"gemini-4-hydrogen-sonar":{"recommended":true},"gemini-3.8-flash-high":{}}}"#),
+            true
+        )
+        XCTAssertEqual(
+            locked(#"{"models":{"gemini-4-carbon-high":{"recommended":true},"gemini-4-neon-high":{"recommended":true},"gemini-4-hydrogen-high":{"recommended":true}}}"#),
+            false
+        )
+        XCTAssertEqual(
+            locked(#"{"models":{"gemini-4-carbon-disabled":{"disabled":true},"gemini-4-neon-high":{"recommended":true}}}"#),
+            false
+        )
+        XCTAssertEqual(
+            locked(#"{"models":{"gemini-4-neon-high":{},"gemini-4-neon-disabled":{"disabled":true}}}"#),
+            false
+        )
+        XCTAssertEqual(
+            locked(#"{"models":{"gemini-4-future-disabled":{"disabled":true,"tagDescription":"Available to paid Pro and Ultra subscribers."}}}"#),
+            true
+        )
+        XCTAssertNil(locked(#"{"models":{"gemini-5-alpha-disabled":{"disabled":true,"tagDescription":"Available to Ultra plan subscribers."}}}"#))
         XCTAssertNil(locked(#"{"models":{"gemini-3.8-flash-high":{}}}"#))
         XCTAssertNil(locked("{}"))
         XCTAssertNil(locked("nope"))
@@ -91,11 +109,19 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(
             usageText(pro, now: now, timeZone: utc),
-            UsageText(plan: "Pro", fiveHour: "62% 11-21 15:35", weekly: "99% 11-28 10:23", argon: "100%")
+            UsageText(plan: "Pro", fiveHour: "62% 11-21 15:35", weekly: "99% 11-28 10:23")
         )
         XCTAssertEqual(usageText(pro, now: now, timeZone: utc).cells, [
             "Pro",
-            "5h 62% 11-21 15:35  7d 99% 11-28 10:23  Argon 100%",
+            "5h 62% 11-21 15:35  7d 99% 11-28 10:23",
+        ])
+        let legacyWithArgon = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [
+            UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-11-21T15:35:35.5Z"),
+            UsageBucket(id: "gemini-argon-wtu-weekly", remaining: 1, resetTime: "2026-11-28T10:35:35Z"),
+        ])
+        XCTAssertEqual(usageText(legacyWithArgon, now: now, timeZone: utc).cells, [
+            "Pro",
+            "5h 62% 11-21 15:35",
         ])
         XCTAssertEqual(
             usageText(free, now: now, timeZone: utc),
@@ -106,14 +132,13 @@ final class UsageTests: XCTestCase {
             UsageBucket(id: "gemini-5h", remaining: 0.62, resetTime: "2026-11-21T15:35:35.5Z"),
             UsageBucket(id: "gemini-weekly", remaining: 1, resetTime: "2026-11-28T10:00:00Z"),
             UsageBucket(id: "3p-5h", remaining: 0.1, resetTime: "2026-11-21T15:35:35.5Z"),
-        ], argonLocked: false)
+        ], modelsLocked: false)
         let ultraText = usageText(ultra, now: now, timeZone: utc)
         XCTAssertEqual(ultraText.plan, "Ultra")
         XCTAssertEqual(ultraText.fiveHour, "62% 11-21 15:35")
         XCTAssertEqual(ultraText.weekly, "100%")
-        XCTAssertNil(ultraText.argon)
         XCTAssertFalse(ultraText.cells.joined().contains("3p"))
-        let empty = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true)
+        let empty = UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], modelsLocked: true)
         let hidden = usageText(empty, now: now, timeZone: utc) { "\($0)（非付费）" }
         XCTAssertEqual(hidden, UsageText(plan: "Pro（非付费）"))
         XCTAssertEqual(hidden.cells, ["Pro（非付费）"])
@@ -122,12 +147,12 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(usageText(zero, now: now, timeZone: utc).weekly, "0% 11-28 10:23")
         var marked = pro
-        marked.argonLocked = true
+        marked.modelsLocked = true
         XCTAssertEqual(usageText(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Pro（非付费）")
-        marked.argonLocked = false
+        marked.modelsLocked = false
         XCTAssertEqual(usageText(marked, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Pro")
         var starter = free
-        starter.argonLocked = true
+        starter.modelsLocked = true
         XCTAssertEqual(usageText(starter, now: now, timeZone: utc) { "\($0)（非付费）" }.plan, "Free")
         XCTAssertEqual(displayWidth("Pro（非付费）"), 13)
         XCTAssertEqual(alignedRows([["* a", "a@b.c", "Pro（非付费）", "5h 100%"], ["  b", "b@b.c", "Free", "5h —"]]), [
@@ -141,12 +166,12 @@ final class UsageTests: XCTestCase {
         ])
         XCTAssertEqual(
             alignedRows([
-                ["* alice", "alice@example.com", "Pro", "5h 62% 11-21 15:35  7d 100%  Argon 100%"],
+                ["* alice", "alice@example.com", "Pro", "5h 62% 11-21 15:35  7d 100%"],
                 ["  bo", "bo@example.com", "Free", "7d 99% 11-28 10:23"],
                 ["  carol", "carol@example.com"],
             ]),
             [
-                "* alice  alice@example.com  Pro   5h 62% 11-21 15:35  7d 100%  Argon 100%",
+                "* alice  alice@example.com  Pro   5h 62% 11-21 15:35  7d 100%",
                 "  bo     bo@example.com     Free  7d 99% 11-28 10:23",
                 "  carol  carol@example.com",
             ]
@@ -160,11 +185,18 @@ final class UsageTests: XCTestCase {
         let text = encodeUsage(snapshot, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
         XCTAssertTrue(text.contains("\"fetched_at\""))
         XCTAssertEqual(decodeUsage(Data(text.utf8), email: "alice@example.com"), snapshot)
+        XCTAssertFalse(text.contains("models_locked"))
         XCTAssertFalse(text.contains("argon_locked"))
         var locked = snapshot
-        locked.argonLocked = true
+        locked.modelsLocked = true
         let lockedText = encodeUsage(locked, email: "alice@example.com", fetchedAt: "2026-11-21T10:00:00Z")
+        XCTAssertTrue(lockedText.contains("\"models_locked\""))
+        XCTAssertFalse(lockedText.contains("argon_locked"))
         XCTAssertEqual(decodeUsage(Data(lockedText.utf8), email: "alice@example.com"), locked)
+        let legacyLockedText = """
+        {"email":"alice@example.com","fetched_at":"2026-11-21T10:00:00Z","plan_id":"g1-pro-tier","plan_name":"Google AI Pro","project":"","buckets":[{"id":"gemini-5h","remaining":0.62,"reset_time":"2026-11-21T15:35:35Z"}],"argon_locked":true}
+        """
+        XCTAssertEqual(decodeUsage(Data(legacyLockedText.utf8), email: "alice@example.com"), locked)
         XCTAssertNil(decodeUsage(Data(text.utf8), email: "bob@example.com"))
         XCTAssertNil(decodeUsage(Data("[]".utf8), email: "alice@example.com"))
     }
@@ -225,7 +257,7 @@ final class UsageTests: XCTestCase {
         let asked = http.requests.filter { $0.url.host == "daily-cloudcode-pa.googleapis.com" }
         XCTAssertEqual(asked.count, 6)
         XCTAssertEqual(asked.filter { $0.url.absoluteString.hasSuffix(":fetchAvailableModels") }.count, 2)
-        XCTAssertEqual(fetched["alice"]?.argonLocked, true)
+        XCTAssertEqual(fetched["alice"]?.modelsLocked, true)
         for request in asked {
             XCTAssertTrue(request.headers["User-Agent"]?.hasPrefix("antigravity/cli/9.9.9 (aidev_client; os_type=darwin; arch=") == true)
             XCTAssertTrue(request.headers["Authorization"]?.hasPrefix("Bearer access-1//") == true)
@@ -277,11 +309,11 @@ final class UsageTests: XCTestCase {
 
         XCTAssertEqual(usage.fetch([(name: "gone", blob: blob(refresh: "revoked")), logins[0]]).keys.sorted(), ["alice"])
         http.summaryStatus = 403
-        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], argonLocked: true, project: "project-1"))
+        XCTAssertEqual(usage.fetch([logins[0]])["alice"], UsageSnapshot(planID: "g1-pro-tier", planName: "Google AI Pro", buckets: [], modelsLocked: true, project: "project-1"))
         http.modelsStatus = 500
         http.summaryStatus = 200
         XCTAssertEqual(usage.fetch([logins[0]])["alice"]?.buckets.count, 4)
-        XCTAssertNil(usage.fetch([logins[0]])["alice"]?.argonLocked)
+        XCTAssertNil(usage.fetch([logins[0]])["alice"]?.modelsLocked)
         http.summaryStatus = 500
         XCTAssertTrue(usage.fetch([logins[0]]).isEmpty)
         http.offline = true
@@ -397,7 +429,7 @@ final class UsageTests: XCTestCase {
         for (index, login) in logins.enumerated() {
             let snapshot = try XCTUnwrap(fetched[login.name])
             XCTAssertFalse(snapshot.planID.isEmpty)
-            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) argonLocked=\(String(describing: snapshot.argonLocked)) buckets=\(snapshot.buckets.map(\.id))")
+            print("LIVE usage account \(index + 1): plan=\(planLabel(id: snapshot.planID, name: snapshot.planName)) modelsLocked=\(String(describing: snapshot.modelsLocked)) buckets=\(snapshot.buckets.map(\.id))")
         }
         print("LIVE usage: \(logins.count) accounts in \(seconds)s, cold cache")
     }
@@ -429,9 +461,8 @@ final class UsageTests: XCTestCase {
     {"bucketId":"gemini-weekly","window":"weekly","resetTime":"2026-11-28T10:23:13Z","remainingFraction":0.9962848},\
     {"bucketId":"gemini-5h","window":"5h","resetTime":"2026-11-21T15:35:35.5Z","remainingFraction":0.62}]},\
     {"displayName":"Claude and GPT models","buckets":[\
-    {"bucketId":"3p-weekly","window":"weekly","resetTime":"2026-11-28T10:36:28Z","remainingFraction":1}]},\
-    {"displayName":"Gemini 4 Argon","buckets":[\
-    {"bucketId":"gemini-argon-wtu-weekly","window":"weekly","resetTime":"2026-11-28T10:35:35Z","remainingFraction":1},\
+    {"bucketId":"3p-weekly","window":"weekly","resetTime":"2026-11-28T10:36:28Z","remainingFraction":1},\
+    {"bucketId":"3p-5h","window":"5h","resetTime":"2026-11-21T15:35:35Z","remainingFraction":1},\
     {"bucketId":"switched-off","disabled":true,"remainingFraction":1}]}]}
     """
 }
@@ -493,7 +524,7 @@ private final class ScriptedHTTP: HTTPPosting {
         case "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary":
             return HTTPResponse(status: summaryStatus, body: Data(summary.utf8))
         case "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels":
-            return HTTPResponse(status: modelsStatus, body: Data(#"{"models":{"gemini-4-argon-disabled":{"disabled":true}}}"#.utf8))
+            return HTTPResponse(status: modelsStatus, body: Data(#"{"models":{"gemini-4-carbon-disabled":{"disabled":true},"gemini-4-neon-disabled":{"disabled":true},"gemini-4-hydrogen-sonar":{"recommended":true}}}"#.utf8))
         default:
             return HTTPResponse(status: 404, body: Data())
         }

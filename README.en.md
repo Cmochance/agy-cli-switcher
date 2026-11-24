@@ -21,7 +21,7 @@ Current version **v0.2.3** (see [Changelog](documents/CHANGELOG.md)).
 
 - Switch between `agy` or `colab` (`agy-cs colab <command>`) logins, and keep the name, email, and active record
 - Agy Switcher lists the saved accounts and their quota in the menu bar. Click one to switch, or use the bottom-bar button to toggle between Antigravity and Colab
-- `agy-cs ls` shows each Antigravity account's plan and Gemini 5-hour, 7-day and Argon quota; `agy-cs colab ls` shows Colab CU balance, hourly burn rate, and active assignments
+- `agy-cs ls` shows each Antigravity account's plan and Gemini 5-hour and 7-day quota; `agy-cs colab ls` shows Colab CU balance, hourly burn rate, and active assignments
 - `agy-cs switch` chooses in the terminal. Item 1 is the current account and cannot be selected. Item 2 adds an account. Later items are saved accounts. `agy` then starts in this terminal (Colab exits cleanly without spawning a nested shell)
 - `agy-cs switch add` adds an account directly, without the menu. Antigravity keeps the current login, then opens `agy` in the terminal. Colab opens a browser and finishes after you allow access, without a terminal
 - `agy-cs switch <name>` only switches. It does not start `agy`
@@ -97,7 +97,7 @@ Each download has a file of the same name plus `.sha256` on the same page. Put t
 
 Click the icon in the menu bar to open the panel.
 
-- Each row is one saved account: Antigravity shows email, plan, and the 5h, 7d and Argon quota; Colab shows email, CU balance, hourly burn rate, and active assignments. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
+- Each row is one saved account: Antigravity shows email, plan, and the 5h and 7d quota; Colab shows email, CU balance, hourly burn rate, and active assignments. The ticked row is the current account; when one login is saved under several names, all of those rows are ticked and show the name after the email
 - The button to the right of "Add account…" switches the active panel provider between **Antigravity** and **Colab**, persisted in `~/.agy-cs/provider`
 - Click a row to switch to it. This is the same as `agy-cs switch <name>` (or `agy-cs colab switch <name>`): it only switches and does not start `agy`
 - Press a row and drag it up or down to change the order. This is the same as `agy-cs move <name> <position>`
@@ -134,14 +134,14 @@ Click the icon in the menu bar to open the panel.
 ## Plan and quota
 
 ```
-* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%  Argon 100%
+* alice  alice@example.com  Pro   5h 62% 11-21 23:35  7d 100%
   bob    bob@example.com    Free  7d 99% 11-28 18:23
 ```
 
 - Each entry is the percentage left, followed by the reset time in the local time zone. At 100% the reset time is not shown
 - An entry whose reset time has passed is shown as 100%
-- A quota the account does not have is left out, with no placeholder. A free account usually shows only the 7-day quota, and Argon appears only when that account has an Argon bucket
-- `Pro (non-paid)` means the plan is Pro but Google does not count it as a paid subscription. Such an account cannot use Gemini 4 Neon, Hydrogen or Argon, and has no Argon quota
+- A quota the account does not have is left out, with no placeholder. A free account usually shows only the 7-day quota
+- `Pro (non-paid)` means the plan is Pro but Google does not count it as a paid subscription. Such an account cannot use Gemini 4 models reserved for paid subscribers (Carbon, Neon, etc.)
 - `ls` only reads the recorded results and makes no request
 - `agy-cs refresh quota` asks for every account right away and lists the result
 - After a `switch`, `next`, or a new account, a separate background process does the lookup. The switch does not wait for it and is not affected by it; `ls` is usually up to date a few seconds later. If that background lookup missed an account, the next `ls` says so

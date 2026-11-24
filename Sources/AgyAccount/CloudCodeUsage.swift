@@ -217,12 +217,12 @@ struct CloudCodeUsage: UsageFetching {
             }
             return send(Self.summaryURL, headers, body, deadline: deadline)
         }
-        // 模型列表只用来判断 Argon 能不能用，取不到不算这个账号失败。
+        // 模型列表用来判断付费订阅专属模型能不能用，取不到不算这个账号失败。
         let locked = Shared<Bool?>(nil)
         let models = DispatchGroup()
         DispatchQueue.global().async(group: models) {
             if let answer = send(Self.modelsURL, headers, Data("{}".utf8), deadline: deadline), answer.status == 200 {
-                locked.set(parseArgonLocked(answer.body))
+                locked.set(parsePaidModelsLocked(answer.body))
             }
         }
         let early = Shared<HTTPResponse?>(nil)
@@ -253,7 +253,7 @@ struct CloudCodeUsage: UsageFetching {
         guard let answer else {
             return nil
         }
-        var snapshot = UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [], argonLocked: locked.value)
+        var snapshot = UsageSnapshot(planID: plan.id, planName: plan.name, buckets: [], modelsLocked: locked.value)
         snapshot.project = plan.project
         // 403 表示这个账号不提供额度数据，套餐仍然记下来。
         if answer.status == 403 {
