@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.5
+
+### 简体中文
+
+- 新增 Antigravity 本地会话遥测与用量概览功能，完全离线只读解析本地 SQLite 会话数据库与 `transcript.jsonl`，不写回会话库、不读钥匙串、不额外联网。
+- 命令行新增 `agy-cs session`（支持 `--source`、`--pricing`、`--json`）查看实时上下文窗口分类拆分、`/compact` 压后估算、Orchestrator 多模型上下文条、输出速度（`tok/s` / 首 Token 延迟 / 合并工具用时）、5 分钟缓存观察倒计时与子智能体汇总；新增 `agy-cs stats`（支持 `--range`、`--account`、`--source`、`--pricing`、`--json`）查看按周额度周期/日期范围统计的请求次数、累计 Token、费用估算、371 格用量热力图与 Top-8 模型健康时间线。
+- 菜单栏工具 Agy Switcher 的 Antigravity 模式新增顶栏三页签切换（`账号` / `会话` / `统计`），支持来源与定价模式切换、实时 1 秒缓存倒计时、热力图悬停读数和可选的菜单栏顶栏实时上下文/速度徽标（`agy-cs statusbar on` / `off` 及齿轮菜单开关，使用 `EVFILT_VNODE` 防抖监听）。
+
+### English
+
+- Added offline, read-only Antigravity live session telemetry and local usage overview analytics built on local SQLite conversation databases and `transcript.jsonl`, without modifying conversation databases, reading the keychain, or making network requests.
+- Added `agy-cs session` (`--source`, `--pricing`, `--json`) for context window category breakdown, post-`/compact` estimates, Orchestrator multi-model bars, throughput (`tok/s`, TTFT, merged tool time), 5-minute cache observation countdown, and subagent totals; added `agy-cs stats` (`--range`, `--account`, `--source`, `--pricing`, `--json`) for weekly-quota and date-range KPIs, token and cost estimates, 371-cell usage heatmap, and top-8 model health timelines.
+- Added three top-bar tabs (`Accounts` / `Session` / `Stats`) to Agy Switcher in Antigravity mode, with source and pricing filters, live 1-second cache countdown, interactive heatmap hover details, and an optional menu bar status item badge (`agy-cs statusbar on` / `off` and gear menu toggle, backed by debounced `EVFILT_VNODE` watching).
+
 ## 0.2.4
 
 ### 简体中文
