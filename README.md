@@ -128,6 +128,9 @@ export PATH="$HOME/.local/bin:$PATH"
 | `rm <名字>` | 删除一个已保存的副本，不改当前登录 |
 | `guard` | 查看是否禁止旧 Antigravity 会话回写登录 |
 | `guard on` / `off` | 开启或关闭禁止旧会话回写登录。开启后切号会监控旧 `agy` 进程，发现回写旧账号时自动恢复当前账号 |
+| `stats` | 查看本机 Antigravity（合并桌面端与 CLI）用量概览、热力图和模型健康时间线 |
+| `session` | 查看当前或指定 Antigravity 会话的上下文窗口拆解、缓存命中和生成速度 |
+| `statusbar [on\|off]` | 开启或关闭菜单栏实时显示上下文与速度 |
 | `language` | 显示或切换界面语言。`lg` 相同 |
 | `help` | 显示全部指令 |
 
@@ -151,7 +154,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 位置 | 内容 |
 |---|---|
-| `~/.agy-cs/` | Antigravity 的名字、邮箱、顺序、语言、provider 选择、`block-writeback`/`guard.json` 状态，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里 |
+| `~/.agy-cs/` | Antigravity 的名字、邮箱、顺序、语言、provider 选择、`block-writeback`/`guard.json`、`status-telemetry`、`account-timeline.json`、脱敏遥测缓存与 90 天历史归档，以及套餐和额度记录。不含登录密钥。“新增账号…”用的 `add-account.command` 也在这里 |
 | `~/.agy-cs/colab/` | Colab 的非密钥账号记录、排序、CU 额度缓存和锁 |
 | `~/.gemini/antigravity-cli/accounts/` | `agy` 自己的登录副本 |
 | `~/.config/colab-cli/accounts/` | Colab 账号副本与按账号隔离的 `sessions.json` / `sessions.attached.json` 备份（`history/` 和 `colab.log` 保持不动） |

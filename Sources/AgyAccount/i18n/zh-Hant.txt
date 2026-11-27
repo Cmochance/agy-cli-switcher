@@ -23,6 +23,9 @@
   rm <名字> --force            目前記錄只剩這一份副本時，確認後刪除
   guard                        查看是否禁止舊工作階段回寫登入
   guard on / off               開啟或關閉禁止舊工作階段回寫登入
+  stats [選項]                 查看本機 Antigravity 用量概覽、熱力圖與模型健康時間線
+  session [<工作階段ID>] [選項] 查看工作階段上下文視窗拆解與即時速度統計
+  statusbar [on|off]           開啟或關閉選單列即時顯示上下文與速度
   language, lg                 顯示目前語言
   language <代碼>, lg <代碼>   切換語言
   help                         顯示已有的全部指令和對應功能
@@ -484,3 +487,234 @@ Colab 算力與工作階段已更新。
 
 [panelGuardToggle]
 禁止舊工作階段回寫登入
+
+[telemetryAntigravityOnly]
+本機用量與工作階段遙測僅支援 Antigravity，不支援 Colab。
+
+[statsUsage]
+用法: agy-cs stats [--range weekly|today|24h|yesterday|week|month|30d|all] [--account <名字|電子郵件|all|unattributed>] [--source all|cli|app] [--pricing standard|promo] [--json]
+
+[sessionUsage]
+用法: agy-cs session [<工作階段ID>] [--source auto|cli|app] [--pricing standard|promo] [--json]
+
+[sessionNotFound]
+沒有找到指定的 Antigravity 工作階段記錄。
+
+[telemetryNoSessions]
+暫無本機 Antigravity 工作階段記錄。
+
+[statusBarUsage]
+用法: agy-cs statusbar [on|off]
+
+[statusBarStatusOn]
+選單列顯示上下文與速度: 已開啟
+
+[statusBarStatusOff]
+選單列顯示上下文與速度: 已關閉
+
+[statusBarEnabled]
+已開啟選單列顯示上下文與速度。
+
+[statusBarDisabled]
+已關閉選單列顯示上下文與速度。
+
+[statusBarHint]
+切換: agy-cs statusbar on，或 agy-cs statusbar off。
+
+[telemetryModelLabel]
+模型
+
+[telemetryContextHeader]
+上下文視窗
+
+[telemetryCompactedEst]
+剛完成壓縮（估）
+
+[telemetryCompactedCount]
+已壓縮 %1 次
+
+[telemetryCachedContext]
+快取複用上下文
+
+[telemetryNewInput]
+本步新增輸入
+
+[telemetryOrchestrator]
+Orchestrator 上下文
+
+[telemetryRoleExec]
+執行
+
+[telemetryRolePlan]
+規劃
+
+[telemetryStatsHeader]
+工作階段統計
+
+[telemetryTurnsSteps]
+輪次 / 步數
+
+[telemetryTotalTokens]
+累計 Token
+
+[telemetryApiCost]
+API 參考費用
+
+[telemetryAvgSpeed]
+平均速度
+
+[telemetryPeakSpeed]
+峰值速度
+
+[telemetryLatestSpeed]
+最近速度
+
+[telemetryCacheHit]
+快取命中
+
+[telemetryCacheWindow]
+快取觀察
+
+[telemetryCacheUnconfirmed]
+待確認
+
+[telemetryModelTime]
+模型用時
+
+[telemetryToolTime]
+工具用時
+
+[telemetryTtft]
+首 Token 延遲
+
+[telemetrySubagentsHeader]
+子智能體上下文
+
+[telemetrySubagentTokens]
+子智能體 Token
+
+[telemetryCombinedTokens]
+含子智能體總計
+
+[telemetryReqTools]
+請求 / 工具呼叫
+
+[telemetrySubagentCache]
+子智能體快取命中
+
+[telemetrySubagentCost]
+子智能體參考費用
+
+[telemetryCombinedCost]
+含子智能體總費用
+
+[telemetryCatMessages]
+訊息
+
+[telemetryCatSystem]
+系統提示
+
+[telemetryCatTools]
+系統工具
+
+[telemetryCatSkills]
+技能
+
+[telemetryCatSubagents]
+子智能體
+
+[telemetryCatPlugins]
+外掛
+
+[telemetryCatRules]
+規則
+
+[telemetryCatMemories]
+記憶檔案
+
+[telemetryCatOther]
+其他開銷
+
+[telemetryCatInput]
+輸入上下文
+
+[telemetryCatFree]
+剩餘空間
+
+[telemetryDurationMinSec]
+%1分%2秒
+
+[telemetryDurationSec]
+%1秒
+
+[telemetryAllAccounts]
+全部帳號
+
+[telemetryUnattributed]
+歷史未歸屬
+
+[telemetryOverviewHeader]
+用量概覽
+
+[telemetryReqCount]
+請求次數
+
+[telemetrySuccess]
+成功
+
+[telemetryError]
+錯誤
+
+[telemetryInput]
+輸入
+
+[telemetryOutput]
+輸出
+
+[telemetryCostLabel]
+費用
+
+[telemetryAvgPerReq]
+單次均價 %1
+
+[telemetryHeatmapHeader]
+用量熱力圖
+
+[telemetryHealthHeader]
+模型健康時間線
+
+[telemetryNoRequests]
+此時間範圍內暫無請求
+
+[telemetryRangeWeekly]
+本輪週限額內用量
+
+[telemetryRangeToday]
+今天
+
+[telemetryRange24h]
+最近 24 小時
+
+[telemetryRangeYesterday]
+昨天
+
+[telemetryRangeWeek]
+本週
+
+[telemetryRangeMonth]
+本月
+
+[telemetryRange30d]
+最近 30 天
+
+[telemetryRangeAll]
+全部時間
+
+[telemetryWeeklyActive]
+%1 - 現在（%2 重置）
+
+[telemetryWeeklyUnstarted]
+本輪週限額尚未開始消耗（剩餘 100%）
+
+[telemetryWeeklyFallback]
+最近 7 天（暫未讀取到週限額週期）

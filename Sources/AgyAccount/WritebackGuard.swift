@@ -137,6 +137,7 @@ struct WritebackGuardEngine {
                 return .retrySoon
             }
             _ = files.clearQuotaCache()
+            profile.recordAccountTimeline(email: state.targetEmail, nowMs: Int64(moment.timeIntervalSince1970 * 1000.0))
             restoreTimes.append(moment)
             return .restored(state.targetEmail)
         } catch {

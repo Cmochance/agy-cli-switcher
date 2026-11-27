@@ -17,6 +17,21 @@ enum AccountCommandKind {
     case guardSet(Bool)
     case guardDetach
     case guardWorker
+    case stats(
+        range: UsageRangePreset,
+        accountFilter: String?,
+        sourceFilter: TelemetrySourceFilter,
+        pricingMode: PricingMode,
+        jsonOutput: Bool
+    )
+    case session(
+        conversationId: String?,
+        sourceFilter: TelemetrySourceFilter,
+        pricingMode: PricingMode,
+        jsonOutput: Bool
+    )
+    case statusBarStatus
+    case statusBarSet(Bool)
     case help
     case languageShow
     case languageSet(String)
@@ -37,6 +52,8 @@ struct AccountCommands {
     var codec: any LoginDecoding = AntigravityLoginCodec()
     var stateSync: any ProviderStateSyncing
     var signer: (any ColabSigning)? = nil
+    var environment: [String: String] = ProcessInfo.processInfo.environment
+    var clock: () -> Date = Date.init
     var text: Localizer
     var stdout: (String) -> Void
     var stderr: (String) -> Void
@@ -78,6 +95,7 @@ struct AccountCommands {
         try profile.write(name: name, meta: meta)
         try files.setActive(name)
         try profile.setActive(name)
+        profile.recordAccountTimeline(email: meta.email)
         try profile.markInitialized()
         stdout(text.line(.initializedSaved, name, meta.email))
     }
@@ -119,6 +137,25 @@ struct AccountCommands {
         case .guardWorker:
             try guardProviderOnly()
             guarder.runWorker()
+        case .stats(let range, let accountFilter, let sourceFilter, let pricingMode, let jsonOutput):
+            try runStats(
+                range: range,
+                accountFilter: accountFilter,
+                sourceFilter: sourceFilter,
+                pricingMode: pricingMode,
+                jsonOutput: jsonOutput
+            )
+        case .session(let conversationId, let sourceFilter, let pricingMode, let jsonOutput):
+            try runSession(
+                conversationId: conversationId,
+                sourceFilter: sourceFilter,
+                pricingMode: pricingMode,
+                jsonOutput: jsonOutput
+            )
+        case .statusBarStatus:
+            try statusBarStatus()
+        case .statusBarSet(let enabled):
+            try statusBarSet(enabled)
         case .help:
             stdout(text.line(.help))
         case .languageShow:
@@ -326,6 +363,7 @@ struct AccountCommands {
                 }
                 let name = try availableDefaultName(login.meta.email)
                 try storeLogin(name: name, blob: login.blob, meta: login.meta)
+                profile.recordAccountTimeline(email: login.meta.email)
                 files.removeRollback()
                 let notices: [ProviderNotice]
                 if let snapshot {
@@ -582,6 +620,16 @@ struct AccountCommands {
             return result
         }
         result.email = login.meta.email
+        if provider == .antigravity,
+           profile.accountTimelineLastEmail() != login.meta.email.lowercased()
+        {
+            if holdingLock {
+                profile.recordAccountTimeline(email: login.meta.email)
+            } else if let tlDescriptor = profile.lockState(wait: 0) {
+                profile.recordAccountTimeline(email: login.meta.email)
+                close(tlDescriptor)
+            }
+        }
         if profile.dismissedEmail() != "", profile.dismissedEmail() != login.meta.email {
             profile.clearDismissed()
         }
@@ -752,6 +800,7 @@ struct AccountCommands {
         }
         try files.setActive(checked)
         try profile.setActive(checked)
+        profile.recordAccountTimeline(email: meta.email)
         profile.clearDismissed()
         let savedGuardedPIDs = syncGuardAfterSave(name: checked, email: meta.email)
         stdout(text.line(.saved, checked, meta.email))
@@ -772,6 +821,7 @@ struct AccountCommands {
             }
             try files.setActive(checked)
             try profile.setActive(checked)
+            profile.recordAccountTimeline(email: target.meta.email)
             let retargetedPIDs = syncGuardSameEmail(targetName: checked, targetEmail: target.meta.email)
             stdout(text.line(.alreadyActive, checked, current.email))
             if !updated.isEmpty {
@@ -796,6 +846,7 @@ struct AccountCommands {
         try keychain.writeBlob(target.blob)
         try files.setActive(checked)
         try profile.setActive(checked)
+        profile.recordAccountTimeline(email: target.meta.email)
         let notices = stateSync.afterSwitch(from: previousNames, to: checked, sameEmail: false)
         emitProviderNotices(notices)
         stdout(text.line(.switched, checked, target.meta.email))
@@ -1013,6 +1064,7 @@ struct AccountCommands {
         try profile.write(name: checked, meta: meta)
         try files.setActive(checked)
         try profile.setActive(checked)
+        profile.recordAccountTimeline(email: meta.email)
         profile.clearDismissed()
     }
 
@@ -1270,5 +1322,92 @@ struct AccountCommands {
             }
         }
         return result
+    }
+
+    private func telemetryAntigravityOnly() throws {
+        guard provider == .antigravity else {
+            throw UsageFailure(.telemetryAntigravityOnly)
+        }
+    }
+
+    private func runStats(
+        range: UsageRangePreset,
+        accountFilter: String?,
+        sourceFilter: TelemetrySourceFilter,
+        pricingMode: PricingMode,
+        jsonOutput: Bool
+    ) throws {
+        try telemetryAntigravityOnly()
+        let snapshot = UsageAnalyticsEngine.loadOverview(
+            home: profile.home,
+            profile: profile,
+            environment: environment,
+            range: range,
+            accountFilter: accountFilter,
+            sourceFilter: sourceFilter,
+            pricingMode: pricingMode,
+            now: clock()
+        )
+        if jsonOutput {
+            stdout(try encodeTelemetryJSON(snapshot))
+        } else {
+            formatUsageOverview(snapshot, text: text).forEach(stdout)
+        }
+    }
+
+    private func runSession(
+        conversationId: String?,
+        sourceFilter: TelemetrySourceFilter,
+        pricingMode: PricingMode,
+        jsonOutput: Bool
+    ) throws {
+        try telemetryAntigravityOnly()
+        let locations = ToolLocations(home: profile.home, provider: .antigravity)
+        let result = SessionTelemetryEngine.load(
+            requestedId: conversationId,
+            home: profile.home,
+            environment: environment,
+            sourceFilter: sourceFilter,
+            pricingMode: pricingMode,
+            pricingFile: locations.pricingFile,
+            now: clock()
+        )
+        switch result {
+        case .loaded(let snapshot):
+            if jsonOutput {
+                stdout(try encodeTelemetryJSON(snapshot))
+            } else {
+                formatSessionTelemetry(snapshot, text: text).forEach(stdout)
+            }
+        case .empty, .unchanged:
+            if conversationId != nil {
+                throw AccountFailure(.sessionNotFound)
+            }
+            if jsonOutput {
+                stdout("{}")
+            } else {
+                stdout(text.line(.telemetryNoSessions))
+            }
+        }
+    }
+
+    private func statusBarStatus() throws {
+        try telemetryAntigravityOnly()
+        let enabled = profile.statusTelemetryEnabled()
+        stdout(text.line(enabled ? .statusBarStatusOn : .statusBarStatusOff))
+        stdout(text.line(.statusBarHint))
+    }
+
+    private func statusBarSet(_ enabled: Bool) throws {
+        try telemetryAntigravityOnly()
+        try profile.setStatusTelemetry(enabled)
+        stdout(text.line(enabled ? .statusBarEnabled : .statusBarDisabled))
+    }
+
+    private func encodeTelemetryJSON<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(value)
+        return String(decoding: data, as: UTF8.self)
     }
 }

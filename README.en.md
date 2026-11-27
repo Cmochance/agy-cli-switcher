@@ -128,6 +128,9 @@ Click the icon in the menu bar to open the panel.
 | `rm <name>` | Delete a saved copy. The current login stays |
 | `guard` | Show whether blocking old Antigravity session write-backs is enabled |
 | `guard on` / `off` | Enable or disable blocking old-session write-backs. When on, switching watches existing `agy` processes and restores the target login if an old session writes back |
+| `stats` | Show local Antigravity usage overview, heatmap, and model health timeline (merges Desktop and CLI) |
+| `session` | Show context window breakdown, cache observation, and token generation speed for an Antigravity session |
+| `statusbar [on\|off]` | Enable or disable live context and speed display in the menu bar |
 | `language` | Show or change the interface language. `lg` is the same |
 | `help` | Show every command |
 
@@ -151,7 +154,7 @@ Click the icon in the menu bar to open the panel.
 
 | Location | Contents |
 |---|---|
-| `~/.agy-cs/` | Antigravity names, emails, the active record, the order, the language, `provider`, `block-writeback`/`guard.json` state, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", lives here too |
+| `~/.agy-cs/` | Antigravity names, emails, the active record, the order, the language, `provider`, `block-writeback`/`guard.json`, `status-telemetry`, `account-timeline.json`, sanitized telemetry cache/90-day archive, and the plan and quota records. No login secrets. `add-account.command`, used by "Add account…", lives here too |
 | `~/.agy-cs/colab/` | Colab non-secret account records, order, CU usage cache, and locks |
 | `~/.gemini/antigravity-cli/accounts/` | `agy`'s own login copies |
 | `~/.config/colab-cli/accounts/` | Colab saved login copies and per-account `sessions.json` / `sessions.attached.json` backups (`history/` and `colab.log` stay untouched) |
