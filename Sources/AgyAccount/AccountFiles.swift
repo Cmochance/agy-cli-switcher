@@ -302,17 +302,16 @@ enum AtomicFile {
             [.posixPermissions: NSNumber(value: 0o700)],
             ofItemAtPath: directory.path
         )
-        let temporary = url.appendingPathExtension("tmp")
-        if FileManager.default.fileExists(atPath: temporary.path) {
-            try? FileManager.default.removeItem(at: temporary)
-        }
-        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        let temporary = directory.appendingPathComponent(
+            ".\(url.lastPathComponent).tmp.\(getpid()).\(UUID().uuidString)"
+        )
+        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             throw AccountFailure(.writeFailed, url.path)
         }
         do {
             try writeAll(descriptor, content, url)
-            guard fsync(descriptor) == 0 else {
+            guard fchmod(descriptor, 0o600) == 0, fsync(descriptor) == 0 else {
                 throw AccountFailure(.writeFailed, url.path)
             }
         } catch {
@@ -324,23 +323,10 @@ enum AtomicFile {
             unlink(temporary.path)
             throw AccountFailure(.writeFailed, url.path)
         }
-        do {
-            try FileManager.default.setAttributes(
-                [.posixPermissions: NSNumber(value: 0o600)],
-                ofItemAtPath: temporary.path
-            )
-        } catch {
-            unlink(temporary.path)
-            throw error
-        }
         if rename(temporary.path, url.path) != 0 {
             unlink(temporary.path)
             throw AccountFailure(.writeFailed, url.path)
         }
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: 0o600)],
-            ofItemAtPath: url.path
-        )
     }
 
     private static func writeAll(_ descriptor: Int32, _ content: String, _ url: URL) throws {
@@ -352,6 +338,9 @@ enum AtomicFile {
                     return -1
                 }
                 return Darwin.write(descriptor, base.advanced(by: offset), bytes.count - offset)
+            }
+            if written < 0, errno == EINTR {
+                continue
             }
             if written <= 0 {
                 throw AccountFailure(.writeFailed, url.path)

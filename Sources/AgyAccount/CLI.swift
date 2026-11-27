@@ -222,9 +222,14 @@ public enum AgyAccountCLI {
         let text = Localizer(language: profile.resolvedLanguage())
         let commands = scoped.commands(text: text, stdout: stdout, stderr: stderr)
         do {
+            let command = try parse(route.arguments)
+            if isTelemetryCommand(command) {
+                try commands.run(command)
+                return (0, nil, [])
+            }
             try profile.prepare()
             try commands.initializeIfNeeded()
-            try commands.run(try parse(route.arguments))
+            try commands.run(command)
             return (0, nil, [])
         } catch let error as AccountFailure {
             let key = providerTextKey(error.key, provider: scoped.provider)
@@ -239,6 +244,15 @@ public enum AgyAccountCLI {
             stderr(text.line(.operationFailed))
             return (1, .operationFailed, [])
         }
+    }
+}
+
+private func isTelemetryCommand(_ command: AccountCommandKind) -> Bool {
+    switch command {
+    case .stats, .session, .statusBarStatus, .statusBarSet:
+        return true
+    default:
+        return false
     }
 }
 

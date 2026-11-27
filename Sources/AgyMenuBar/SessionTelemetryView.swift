@@ -14,7 +14,7 @@ struct SessionTelemetryView: View {
                     statsCard(snapshot)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-            } else if model.loadingTelemetry {
+            } else if model.loadingSession {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -79,7 +79,7 @@ struct SessionTelemetryView: View {
 
     private var selectedSessionTitle: String {
         guard let snapshot = model.sessionSnapshot else {
-            return model.text(.panelSessionAutoFollow)
+            return model.selectedSessionId ?? model.text(.panelSessionAutoFollow)
         }
         if model.selectedSessionId == nil {
             return snapshot.title

@@ -929,12 +929,13 @@ enum SessionTelemetryEngine {
             conversationId: conversationId,
             source: root.source
         )
-        if totalInput + totalCache + totalOutput == 0, !requests.isEmpty {
-            for r in requests {
-                totalInput += r.inputTokens
-                totalCache += r.cacheReadTokens
-                totalOutput += r.outputTokens
-            }
+        let dbInput = requests.reduce(0) { $0 + $1.inputTokens }
+        let dbCache = requests.reduce(0) { $0 + $1.cacheReadTokens }
+        let dbOutput = requests.reduce(0) { $0 + $1.outputTokens }
+        if dbInput + dbCache + dbOutput > 0 {
+            totalInput = dbInput
+            totalCache = dbCache
+            totalOutput = dbOutput
         }
         let totalInputAndCache = totalInput + totalCache
         let totalTokens = totalInputAndCache + totalOutput

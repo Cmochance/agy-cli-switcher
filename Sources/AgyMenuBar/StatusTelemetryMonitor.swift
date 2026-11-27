@@ -19,6 +19,14 @@ final class StatusTelemetryMonitor: @unchecked Sendable {
         self.onUpdate = onUpdate
     }
 
+    deinit {
+        debounceWork?.cancel()
+        resyncTimer?.cancel()
+        for source in sources.values {
+            source.cancel()
+        }
+    }
+
     func start() {
         queue.async { [weak self] in
             self?.stopped = false

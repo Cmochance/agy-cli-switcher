@@ -58,7 +58,8 @@ final class PanelModel: ObservableObject {
     @Published private(set) var statsSourceFilter: TelemetrySourceFilter = .all
     @Published var heatmapMetric: HeatmapMetric = .tokens
     @Published var hoveredHeatmapCell: HeatmapCell?
-    @Published private(set) var loadingTelemetry = false
+    @Published private(set) var loadingSession = false
+    @Published private(set) var loadingStats = false
     var onKeepsOpenChanged: ((Bool) -> Void)?
     var onStatusTelemetryChanged: (() -> Void)?
 
@@ -71,6 +72,8 @@ final class PanelModel: ObservableObject {
     private var watcher: Timer?
     private var cacheCountdownTimer: Timer?
     private var sessionStamp: String?
+    private var sessionRequestID: UInt64 = 0
+    private var statsRequestID: UInt64 = 0
     private var lastStatsLoadedAt: Date?
     private var lastStatsKey: String?
     private let exit: @MainActor () -> Void
@@ -130,6 +133,21 @@ final class PanelModel: ObservableObject {
         busyLabel != nil || loggingIn
     }
 
+    var loadingTelemetry: Bool {
+        loadingSession || loadingStats
+    }
+
+    var loadingCurrentTelemetry: Bool {
+        switch tab {
+        case .session:
+            return loadingSession
+        case .stats:
+            return loadingStats
+        case .accounts:
+            return false
+        }
+    }
+
     func text(_ key: TextKey, _ arguments: String...) -> String {
         let mapped = providerTextKey(key, provider: state.provider)
         return state.text.line(mapped, argumentList: arguments)
@@ -144,7 +162,12 @@ final class PanelModel: ObservableObject {
         if next != .antigravity {
             tab = .accounts
             stopCacheCountdown()
+            sessionRequestID &+= 1
+            statsRequestID &+= 1
+            loadingSession = false
+            loadingStats = false
         }
+        lastStatsLoadedAt = nil
         prompt = nil
         draft = ""
         messages = []
@@ -157,6 +180,7 @@ final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = nil
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
                 self.onStatusTelemetryChanged?()
             }
         }
@@ -184,7 +208,12 @@ final class PanelModel: ObservableObject {
     }
 
     func setSessionSource(_ filter: TelemetrySourceFilter) {
+        guard sessionSourceFilter != filter else {
+            return
+        }
         sessionSourceFilter = filter
+        selectedSessionId = nil
+        sessionStamp = nil
         reloadSession(force: true)
     }
 
@@ -420,6 +449,7 @@ final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = nil
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
                 if let again = retry(outcome) {
                     self.messages = []
                     self.failed = false
@@ -429,6 +459,12 @@ final class PanelModel: ObservableObject {
                     self.failed = !outcome.succeeded
                 }
                 self.onStatusTelemetryChanged?()
+                if self.provider == .antigravity, self.tab == .stats, outcome.succeeded,
+                   let first = arguments.first,
+                   ["switch", "save", "rename", "rm", "refresh"].contains(first)
+                {
+                    self.reloadStats(force: true)
+                }
             }
         }
     }
@@ -437,12 +473,14 @@ final class PanelModel: ObservableObject {
         guard provider == .antigravity else {
             return
         }
+        sessionRequestID &+= 1
+        let reqID = sessionRequestID
         let targetId = selectedSessionId
         let source = sessionSourceFilter
         let pricing = pricingMode
         let stamp = force ? nil : sessionStamp
-        if sessionSnapshot == nil {
-            loadingTelemetry = true
+        if sessionSnapshot == nil || force {
+            loadingSession = true
         }
         let board = board
         work.async {
@@ -453,13 +491,15 @@ final class PanelModel: ObservableObject {
                 knownStamp: stamp
             )
             DispatchQueue.main.async {
-                guard self.selectedSessionId == targetId,
+                guard self.sessionRequestID == reqID,
+                      self.provider == .antigravity,
+                      self.selectedSessionId == targetId,
                       self.sessionSourceFilter == source,
                       self.pricingMode == pricing
                 else {
                     return
                 }
-                self.loadingTelemetry = false
+                self.loadingSession = false
                 switch result {
                 case .unchanged:
                     break
@@ -490,9 +530,13 @@ final class PanelModel: ObservableObject {
            let lastAt = lastStatsLoadedAt,
            Date().timeIntervalSince(lastAt) < 30
         {
+            statsRequestID &+= 1
+            loadingStats = false
             return
         }
-        loadingTelemetry = true
+        statsRequestID &+= 1
+        let reqID = statsRequestID
+        loadingStats = true
         let board = board
         work.async {
             let snap = board.loadUsageOverview(
@@ -502,14 +546,27 @@ final class PanelModel: ObservableObject {
                 pricingMode: pricing
             )
             DispatchQueue.main.async {
-                guard self.statsRange == range,
+                guard self.statsRequestID == reqID,
+                      self.provider == .antigravity,
+                      self.statsRange == range,
                       self.statsAccountFilter == account,
                       self.statsSourceFilter == source,
                       self.pricingMode == pricing
                 else {
                     return
                 }
-                self.loadingTelemetry = false
+                if let selected = self.statsAccountFilter,
+                   selected != "all",
+                   selected != "__unattributed__",
+                   snap.totalRequests == 0,
+                   !snap.accountOptions.contains(where: { $0.key.caseInsensitiveCompare(selected) == .orderedSame })
+                {
+                    self.statsAccountFilter = nil
+                    self.lastStatsLoadedAt = nil
+                    self.reloadStats(force: true)
+                    return
+                }
+                self.loadingStats = false
                 self.usageSnapshot = snap
                 self.lastStatsLoadedAt = Date()
                 self.lastStatsKey = cacheKey
@@ -677,6 +734,7 @@ final class PanelModel: ObservableObject {
                     return
                 }
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
                 self.onStatusTelemetryChanged?()
             }
         }

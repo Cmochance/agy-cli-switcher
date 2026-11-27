@@ -11,7 +11,7 @@ struct UsageOverviewView: View {
                 kpiRow(snapshot)
                 heatmapCard(snapshot)
                 healthTimelineCard(snapshot)
-            } else if model.loadingTelemetry {
+            } else if model.loadingStats {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -98,7 +98,14 @@ struct UsageOverviewView: View {
         if let match = accountOptions.first(where: { $0.key == currentAccountKey }) {
             return localizedAccountOption(match)
         }
-        return model.text(.telemetryAllAccounts)
+        switch currentAccountKey {
+        case "all":
+            return model.text(.telemetryAllAccounts)
+        case "__unattributed__":
+            return model.text(.telemetryUnattributed)
+        default:
+            return currentAccountKey
+        }
     }
 
     private func localizedAccountOption(_ option: AccountFilterOption) -> String {

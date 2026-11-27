@@ -1256,8 +1256,36 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(model.sessionSnapshot?.conversationId, "panel-conv-main")
         XCTAssertEqual(model.sessionSnapshot?.subagentTotals.count, 1)
 
+        // Pinning a CLI session and switching source to App must clear the pinned ID instead of trapping on it.
+        model.selectSession("panel-conv-main")
+        await settleTelemetry(model)
+        XCTAssertEqual(model.selectedSessionId, "panel-conv-main")
+        model.setSessionSource(.app)
+        await settleTelemetry(model)
+        XCTAssertNil(model.selectedSessionId)
+        model.setSessionSource(.auto)
+        await settleTelemetry(model)
+        XCTAssertEqual(model.sessionSnapshot?.conversationId, "panel-conv-main")
+
         model.selectTab(.stats)
         await settleTelemetry(model)
+        XCTAssertEqual(model.usageSnapshot?.totalRequests, 3)
+
+        // Switching accounts in Accounts tab must invalidate the 30s stats cache immediately.
+        fixture.keychain.blob = makeBlob(email: "bob@example.com", refresh: "b")
+        XCTAssertEqual(fixture.run(["save", "bob"]).code, 0)
+        let bobRow = try XCTUnwrap(fixture.board.load(provider: .antigravity).rows.first(where: { $0.name == "bob" }))
+        model.selectTab(.accounts)
+        model.switchTo(bobRow)
+        await settle(model)
+        model.selectTab(.stats)
+        await settleTelemetry(model)
+        XCTAssertTrue(model.usageSnapshot?.accountOptions.contains(where: { $0.key == "bob@example.com" }) == true)
+
+        // Filtering on a zero-history account and then deleting it must not leave a dangling filter.
+        model.setStatsAccount("ghost@example.com")
+        await settleTelemetry(model)
+        XCTAssertNil(model.statsAccountFilter)
         XCTAssertEqual(model.usageSnapshot?.totalRequests, 3)
 
         model.toggleProvider()

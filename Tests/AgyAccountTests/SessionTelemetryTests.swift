@@ -255,6 +255,63 @@ final class SessionTelemetryTests: XCTestCase {
         XCTAssertEqual(missingExplicit, 1)
     }
 
+    func testSessionPrefersDatabaseTokenTotalsOverPartialTranscript() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agy-db-tokens-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let cliRoot = home.appendingPathComponent(".gemini/antigravity-cli", isDirectory: true)
+        let cid = "partial-transcript-conv"
+        let logsDir = cliRoot.appendingPathComponent("brain/\(cid)/.system_generated/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        try writeJSONL([
+            ["step_index": 0, "type": "USER_INPUT", "content": "Check totals"],
+            ["step_index": 1, "type": "PLANNER_RESPONSE", "model": "Gemini 4 Carbon (High)", "input_tokens": 1_000, "cache_read_tokens": 0, "output_tokens": 100, "content": "Partial"],
+            ["step_index": 2, "type": "ERROR_MESSAGE", "content": "Transient failure"],
+        ], to: logsDir.appendingPathComponent("transcript.jsonl"))
+
+        try SQLiteTestBuilder.createConversationDB(at: cliRoot.appendingPathComponent("conversations/\(cid).db")) { db in
+            let g1 = ProtobufEncoder.makeGeneration(
+                requestId: "r-ok",
+                model: "Gemini 4 Carbon (High)",
+                input: 1_000,
+                cache: 0,
+                output: 100,
+                ttftSeconds: 1,
+                streamingSeconds: 2,
+                stepIndices: [1]
+            )
+            let g2 = ProtobufEncoder.makeGeneration(
+                requestId: "r-err-or-checkpoint",
+                model: "Gemini 4 Carbon (High)",
+                input: 5_000,
+                cache: 10_000,
+                output: 200,
+                ttftSeconds: 1,
+                streamingSeconds: 2,
+                stepIndices: [2],
+                error: "interrupted"
+            )
+            try SQLiteTestBuilder.insertGeneration(db, idx: 0, data: g1)
+            try SQLiteTestBuilder.insertGeneration(db, idx: 1, data: g2)
+        }
+
+        let loaded = SessionTelemetryEngine.load(
+            home: home,
+            environment: [:],
+            now: parseTimestamp("2026-11-26T10:01:00Z")!,
+            reader: AntigravityDatabaseReader()
+        )
+        guard case .loaded(let snap) = loaded else {
+            return XCTFail("Expected loaded session snapshot")
+        }
+        XCTAssertEqual(snap.telemetry.requestCount, 2)
+        XCTAssertEqual(snap.telemetry.inputTokens, 6_000)
+        XCTAssertEqual(snap.telemetry.cacheReadTokens, 10_000)
+        XCTAssertEqual(snap.telemetry.outputTokens, 300)
+        XCTAssertEqual(snap.telemetry.totalTokens, 16_300)
+    }
+
     private func writeJSONL(_ items: [[String: Any]], to url: URL) throws {
         let lines = try items.map { item -> String in
             let data = try JSONSerialization.data(withJSONObject: item, options: [.sortedKeys])

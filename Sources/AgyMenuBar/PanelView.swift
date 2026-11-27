@@ -39,14 +39,14 @@ struct PanelView: View {
             switch activeTab {
             case .accounts:
                 accounts
-                if model.busyLabel != nil || !model.lines.isEmpty {
-                    Divider()
-                    status
-                }
             case .session:
                 SessionTelemetryView(model: model)
             case .stats:
                 UsageOverviewView(model: model)
+            }
+            if model.busyLabel != nil || !model.lines.isEmpty {
+                Divider()
+                status
             }
             Divider()
             if let prompt = model.prompt {
@@ -80,7 +80,8 @@ struct PanelView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.borderless)
-                .disabled(model.loadingTelemetry)
+                .accessibilityLabel(model.text(.panelRefresh))
+                .disabled(model.loadingCurrentTelemetry)
             }
         }
         .padding(.horizontal, 12)
