@@ -2,6 +2,12 @@ import AgyAccount
 import AppKit
 import Foundation
 
+enum PanelTab: String, CaseIterable, Equatable {
+    case accounts
+    case session
+    case stats
+}
+
 enum PanelPrompt: Equatable {
     case save
     // 要存的名字下面已经存着别的邮箱 holder。
@@ -39,15 +45,37 @@ final class PanelModel: ObservableObject {
     @Published private(set) var prompt: PanelPrompt?
     @Published private(set) var loggingIn = false
     @Published var draft = ""
+    @Published private(set) var tab: PanelTab = .accounts
+    @Published private(set) var sessionSnapshot: SessionTelemetrySnapshot?
+    @Published private(set) var selectedSessionId: String?
+    @Published private(set) var sessionSourceFilter: TelemetrySourceFilter = .auto
+    @Published private(set) var pricingMode: PricingMode = .standard
+    @Published var expandedMoreStats = false
+    @Published private(set) var cacheNowMs: Double = Date().timeIntervalSince1970 * 1000.0
+    @Published private(set) var usageSnapshot: UsageOverviewSnapshot?
+    @Published private(set) var statsRange: UsageRangePreset = .weekly
+    @Published private(set) var statsAccountFilter: String?
+    @Published private(set) var statsSourceFilter: TelemetrySourceFilter = .all
+    @Published var heatmapMetric: HeatmapMetric = .tokens
+    @Published var hoveredHeatmapCell: HeatmapCell?
+    @Published private(set) var loadingSession = false
+    @Published private(set) var loadingStats = false
     var onKeepsOpenChanged: ((Bool) -> Void)?
+    var onStatusTelemetryChanged: (() -> Void)?
 
-    private let board: AccountBoard
+    let board: AccountBoard
     private let executable: String
     private let open: (URL) -> Bool
     private let rereadEvery: TimeInterval
     private let shown: @MainActor () -> Bool
     private let work = DispatchQueue(label: "agy-cs.panel", qos: .userInitiated)
     private var watcher: Timer?
+    private var cacheCountdownTimer: Timer?
+    private var sessionStamp: String?
+    private var sessionRequestID: UInt64 = 0
+    private var statsRequestID: UInt64 = 0
+    private var lastStatsLoadedAt: Date?
+    private var lastStatsKey: String?
     private let exit: @MainActor () -> Void
     private var leaving = false
     private let loginRunner: any PanelLoginRunning
@@ -105,6 +133,21 @@ final class PanelModel: ObservableObject {
         busyLabel != nil || loggingIn
     }
 
+    var loadingTelemetry: Bool {
+        loadingSession || loadingStats
+    }
+
+    var loadingCurrentTelemetry: Bool {
+        switch tab {
+        case .session:
+            return loadingSession
+        case .stats:
+            return loadingStats
+        case .accounts:
+            return false
+        }
+    }
+
     func text(_ key: TextKey, _ arguments: String...) -> String {
         let mapped = providerTextKey(key, provider: state.provider)
         return state.text.line(mapped, argumentList: arguments)
@@ -116,6 +159,15 @@ final class PanelModel: ObservableObject {
         }
         let next = provider.next
         provider = next
+        if next != .antigravity {
+            tab = .accounts
+            stopCacheCountdown()
+            sessionRequestID &+= 1
+            statsRequestID &+= 1
+            loadingSession = false
+            loadingStats = false
+        }
+        lastStatsLoadedAt = nil
         prompt = nil
         draft = ""
         messages = []
@@ -128,8 +180,81 @@ final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = nil
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
+                self.onStatusTelemetryChanged?()
             }
         }
+    }
+
+    func selectTab(_ next: PanelTab) {
+        guard next == .accounts || provider == .antigravity else {
+            return
+        }
+        tab = next
+        if next == .session {
+            startCacheCountdown()
+            reloadSession(force: sessionSnapshot == nil)
+        } else {
+            stopCacheCountdown()
+            if next == .stats {
+                reloadStats(force: false)
+            }
+        }
+    }
+
+    func selectSession(_ conversationId: String?) {
+        selectedSessionId = conversationId
+        reloadSession(force: true)
+    }
+
+    func setSessionSource(_ filter: TelemetrySourceFilter) {
+        guard sessionSourceFilter != filter else {
+            return
+        }
+        sessionSourceFilter = filter
+        selectedSessionId = nil
+        sessionStamp = nil
+        reloadSession(force: true)
+    }
+
+    func setPricingMode(_ mode: PricingMode) {
+        pricingMode = mode
+        if tab == .session {
+            reloadSession(force: true)
+        } else if tab == .stats {
+            reloadStats(force: true)
+        }
+    }
+
+    func setStatsRange(_ range: UsageRangePreset) {
+        statsRange = range
+        reloadStats(force: true)
+    }
+
+    func setStatsAccount(_ key: String) {
+        statsAccountFilter = key
+        reloadStats(force: true)
+    }
+
+    func setStatsSource(_ filter: TelemetrySourceFilter) {
+        statsSourceFilter = filter
+        reloadStats(force: true)
+    }
+
+    func refreshTelemetry() {
+        if tab == .session {
+            reloadSession(force: true)
+        } else if tab == .stats {
+            reloadStats(force: true)
+        }
+    }
+
+    func toggleStatusBarTelemetry() {
+        guard provider == .antigravity else {
+            return
+        }
+        let next = state.statusTelemetry ? "off" : "on"
+        run(["statusbar", next], saying: text(.panelWorking)) { $0.output + $0.errors }
     }
 
     // 名字是给命令行选账号用的，面板上只显示邮箱。同一个邮箱存了几个名字时才带上名字，不然这几行分不出来。
@@ -140,6 +265,10 @@ final class PanelModel: ObservableObject {
     // 面板打开期间每两秒重读一次记录：切换之后的额度查询在另一个进程里，查完才写进来。
     func panelOpened() {
         reload()
+        if provider == .antigravity && tab == .session {
+            startCacheCountdown()
+            reloadSession(force: false)
+        }
         guard watcher == nil else {
             return
         }
@@ -320,6 +449,7 @@ final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = nil
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
                 if let again = retry(outcome) {
                     self.messages = []
                     self.failed = false
@@ -328,8 +458,137 @@ final class PanelModel: ObservableObject {
                     self.messages = report(outcome)
                     self.failed = !outcome.succeeded
                 }
+                self.onStatusTelemetryChanged?()
+                if self.provider == .antigravity, self.tab == .stats, outcome.succeeded,
+                   let first = arguments.first,
+                   ["switch", "save", "rename", "rm", "refresh"].contains(first)
+                {
+                    self.reloadStats(force: true)
+                }
             }
         }
+    }
+
+    func reloadSession(force: Bool) {
+        guard provider == .antigravity else {
+            return
+        }
+        sessionRequestID &+= 1
+        let reqID = sessionRequestID
+        let targetId = selectedSessionId
+        let source = sessionSourceFilter
+        let pricing = pricingMode
+        let stamp = force ? nil : sessionStamp
+        if sessionSnapshot == nil || force {
+            loadingSession = true
+        }
+        let board = board
+        work.async {
+            let result = board.loadSessionTelemetry(
+                conversationId: targetId,
+                sourceFilter: source,
+                pricingMode: pricing,
+                knownStamp: stamp
+            )
+            DispatchQueue.main.async {
+                guard self.sessionRequestID == reqID,
+                      self.provider == .antigravity,
+                      self.selectedSessionId == targetId,
+                      self.sessionSourceFilter == source,
+                      self.pricingMode == pricing
+                else {
+                    return
+                }
+                self.loadingSession = false
+                switch result {
+                case .unchanged:
+                    break
+                case .empty:
+                    self.sessionSnapshot = nil
+                    self.sessionStamp = nil
+                case .loaded(let snap):
+                    self.sessionSnapshot = snap
+                    self.sessionStamp = snap.stateStamp
+                    self.cacheNowMs = Date().timeIntervalSince1970 * 1000.0
+                }
+            }
+        }
+    }
+
+    func reloadStats(force: Bool) {
+        guard provider == .antigravity else {
+            return
+        }
+        let range = statsRange
+        let account = statsAccountFilter
+        let source = statsSourceFilter
+        let pricing = pricingMode
+        let cacheKey = "\(range.rawValue)|\(account ?? "")|\(source.rawValue)|\(pricing.rawValue)"
+        if !force,
+           usageSnapshot != nil,
+           lastStatsKey == cacheKey,
+           let lastAt = lastStatsLoadedAt,
+           Date().timeIntervalSince(lastAt) < 30
+        {
+            statsRequestID &+= 1
+            loadingStats = false
+            return
+        }
+        statsRequestID &+= 1
+        let reqID = statsRequestID
+        loadingStats = true
+        let board = board
+        work.async {
+            let snap = board.loadUsageOverview(
+                range: range,
+                accountFilter: account,
+                sourceFilter: source,
+                pricingMode: pricing
+            )
+            DispatchQueue.main.async {
+                guard self.statsRequestID == reqID,
+                      self.provider == .antigravity,
+                      self.statsRange == range,
+                      self.statsAccountFilter == account,
+                      self.statsSourceFilter == source,
+                      self.pricingMode == pricing
+                else {
+                    return
+                }
+                if let selected = self.statsAccountFilter,
+                   selected != "all",
+                   selected != "__unattributed__",
+                   snap.totalRequests == 0,
+                   !snap.accountOptions.contains(where: { $0.key.caseInsensitiveCompare(selected) == .orderedSame })
+                {
+                    self.statsAccountFilter = nil
+                    self.lastStatsLoadedAt = nil
+                    self.reloadStats(force: true)
+                    return
+                }
+                self.loadingStats = false
+                self.usageSnapshot = snap
+                self.lastStatsLoadedAt = Date()
+                self.lastStatsKey = cacheKey
+            }
+        }
+    }
+
+    private func startCacheCountdown() {
+        cacheNowMs = Date().timeIntervalSince1970 * 1000.0
+        guard cacheCountdownTimer == nil else {
+            return
+        }
+        cacheCountdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.cacheNowMs = Date().timeIntervalSince1970 * 1000.0
+            }
+        }
+    }
+
+    private func stopCacheCountdown() {
+        cacheCountdownTimer?.invalidate()
+        cacheCountdownTimer = nil
     }
 
     private func reload() {
@@ -353,11 +612,16 @@ final class PanelModel: ObservableObject {
         fresh.rows != state.rows || fresh.notices != state.notices || fresh.failed != state.failed
             || fresh.language != state.language || fresh.provider != state.provider
             || fresh.blockOldWriteback != state.blockOldWriteback
+            || fresh.statusTelemetry != state.statusTelemetry
     }
 
     private func tick() {
         if shown() {
-            reload()
+            if provider == .antigravity && tab == .session {
+                reloadSession(force: false)
+            } else {
+                reload()
+            }
         } else {
             panelClosed()
         }
@@ -367,6 +631,11 @@ final class PanelModel: ObservableObject {
     func panelClosed() {
         watcher?.invalidate()
         watcher = nil
+        stopCacheCountdown()
+        hoveredHeatmapCell = nil
+        if tab != .accounts {
+            tab = .accounts
+        }
         guard busy == nil, !loggingIn else {
             return
         }
@@ -465,6 +734,8 @@ final class PanelModel: ObservableObject {
                     return
                 }
                 self.state = fresh
+                self.lastStatsLoadedAt = nil
+                self.onStatusTelemetryChanged?()
             }
         }
     }

@@ -1220,6 +1220,7 @@ final class Fixture {
     let guarder = ScriptedGuardStarter()
     var stateWait: TimeInterval = 5
     var colab: ProviderServices?
+    var environment: [String: String] = [:]
     let locations: AccountLocations
     let tool: ToolLocations
     let quota: URL
@@ -1276,7 +1277,8 @@ final class Fixture {
             refresher: refresher,
             guarder: guarder,
             stateWait: stateWait,
-            colab: colab
+            colab: colab,
+            environment: environment
         ))
     }
 
@@ -1295,6 +1297,7 @@ final class Fixture {
             refresher: refresher,
             guarder: guarder,
             colab: colab,
+            environment: environment,
             stdout: { capture.output.append($0) },
             stderr: { capture.errors.append($0) }
         )

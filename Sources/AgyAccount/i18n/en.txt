@@ -718,3 +718,57 @@ Current weekly quota untouched (100% remaining)
 
 [telemetryWeeklyFallback]
 Last 7 days (weekly quota window unavailable)
+
+[panelTabAccounts]
+Accounts
+
+[panelTabSession]
+Session
+
+[panelTabStats]
+Stats
+
+[panelStatusBarToggle]
+Show context & speed in menu bar
+
+[panelSessionAutoFollow]
+Follow latest active session
+
+[panelSourceAll]
+All sources
+
+[panelSourceCLI]
+CLI
+
+[panelSourceApp]
+Desktop App
+
+[panelPricingStandard]
+Standard pricing
+
+[panelPricingPromo]
+Promo pricing
+
+[panelContextUsed]
+Used %1
+
+[panelMoreStats]
+More stats
+
+[panelSubagentSummaryHeader]
+Subagent summary
+
+[panelHeatmapTokens]
+Tokens
+
+[panelHeatmapRequests]
+Requests
+
+[panelHeatmapCost]
+Cost
+
+[panelThinkingTokens]
+Thinking tokens
+
+[panelRequestErrors]
+Requests / errors

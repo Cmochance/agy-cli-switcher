@@ -627,20 +627,31 @@ enum SessionTelemetryEngine {
                 subagentIDs.insert(childID)
             }
 
-            let brainURL = root.brainDirectory
-            guard let entries = try? manager.contentsOfDirectory(
-                at: brainURL,
+            var candidateIDs = Set<String>()
+            if let brainEntries = try? manager.contentsOfDirectory(
+                at: root.brainDirectory,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
-            ) else {
-                continue
-            }
-            for dir in entries {
-                let cid = dir.lastPathComponent
-                guard isValidConversationID(cid) else {
-                    continue
+            ) {
+                for dir in brainEntries where isValidConversationID(dir.lastPathComponent) {
+                    candidateIDs.insert(dir.lastPathComponent)
                 }
-                let transcriptURL = dir.appendingPathComponent(".system_generated/logs/transcript.jsonl")
+            }
+            if let dbFiles = try? manager.contentsOfDirectory(
+                at: root.conversationsDirectory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) {
+                for file in dbFiles where file.pathExtension == "db" {
+                    let cid = file.deletingPathExtension().lastPathComponent
+                    if isValidConversationID(cid) {
+                        candidateIDs.insert(cid)
+                    }
+                }
+            }
+
+            for cid in candidateIDs {
+                let transcriptURL = root.brainDirectory.appendingPathComponent("\(cid)/.system_generated/logs/transcript.jsonl")
                 let dbURL = root.conversationsDirectory.appendingPathComponent("\(cid).db")
                 let transcriptMod = modificationMs(transcriptURL)
                 let dbMod = max(modificationMs(dbURL), modificationMs(URL(fileURLWithPath: dbURL.path + "-wal")))
@@ -918,12 +929,13 @@ enum SessionTelemetryEngine {
             conversationId: conversationId,
             source: root.source
         )
-        if totalInput + totalCache + totalOutput == 0, !requests.isEmpty {
-            for r in requests {
-                totalInput += r.inputTokens
-                totalCache += r.cacheReadTokens
-                totalOutput += r.outputTokens
-            }
+        let dbInput = requests.reduce(0) { $0 + $1.inputTokens }
+        let dbCache = requests.reduce(0) { $0 + $1.cacheReadTokens }
+        let dbOutput = requests.reduce(0) { $0 + $1.outputTokens }
+        if dbInput + dbCache + dbOutput > 0 {
+            totalInput = dbInput
+            totalCache = dbCache
+            totalOutput = dbOutput
         }
         let totalInputAndCache = totalInput + totalCache
         let totalTokens = totalInputAndCache + totalOutput
@@ -1313,7 +1325,7 @@ func formatSessionTelemetry(_ snapshot: SessionTelemetrySnapshot, text: Localize
     lines.append(cwHeader)
 
     for category in cw.categories {
-        let name = localizedCategoryName(category.label, text: text)
+        let name = localizedTelemetryCategory(category.label, text: text)
         let pct = category.percent.map { formatPercent($0) } ?? "—"
         lines.append("  \(name): \(formatCompactTokens(category.tokens)) (\(pct))")
     }
@@ -1388,7 +1400,7 @@ func formatSessionTelemetry(_ snapshot: SessionTelemetrySnapshot, text: Localize
     return lines
 }
 
-private func localizedCategoryName(_ raw: String, text: Localizer) -> String {
+public func localizedTelemetryCategory(_ raw: String, text: Localizer) -> String {
     switch raw {
     case "Chat Messages": return text.line(.telemetryCatMessages)
     case "System Prompt": return text.line(.telemetryCatSystem)
@@ -1406,7 +1418,7 @@ private func localizedCategoryName(_ raw: String, text: Localizer) -> String {
     }
 }
 
-func formatCompactTokens(_ count: Int) -> String {
+public func formatCompactTokens(_ count: Int) -> String {
     let value = Double(max(0, count))
     if value >= 1_000_000_000 {
         return String(format: "%.2fB", value / 1_000_000_000.0)
@@ -1420,22 +1432,22 @@ func formatCompactTokens(_ count: Int) -> String {
     return "\(max(0, count))"
 }
 
-func formatPercent(_ pct: Double) -> String {
+public func formatPercent(_ pct: Double) -> String {
     String(format: "%.1f%%", pct)
 }
 
-func formatOneDecimal(_ value: Double) -> String {
+public func formatOneDecimal(_ value: Double) -> String {
     String(format: "%.1f", value)
 }
 
-func formatUSD(_ value: Double) -> String {
+public func formatUSD(_ value: Double) -> String {
     if value != 0, abs(value) < 0.01 {
         return String(format: "$%.4f", value)
     }
     return String(format: "$%.2f", value)
 }
 
-func formatDurationMs(_ ms: Double?, text: Localizer) -> String {
+public func formatDurationMs(_ ms: Double?, text: Localizer) -> String {
     guard let ms, ms.isFinite, ms >= 0 else {
         return "—"
     }

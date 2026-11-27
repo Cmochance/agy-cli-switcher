@@ -134,6 +134,11 @@ public struct AccountFilterOption: Equatable, Codable, Identifiable, Sendable {
     public var label: String
 
     public var id: String { key }
+
+    public init(key: String, label: String) {
+        self.key = key
+        self.label = label
+    }
 }
 
 public struct UsageOverviewSnapshot: Equatable, Codable, Sendable {
@@ -370,6 +375,16 @@ enum UsageAnalyticsEngine {
 
     // MARK: - Collection, incremental DB cache & 90-day archive
 
+    private struct ConversationSourceKey: Hashable {
+        var source: TelemetrySource
+        var conversationId: String
+    }
+
+    private struct ArchiveEventKey: Hashable {
+        var source: TelemetrySource
+        var id: String
+    }
+
     private static func collectEvents(
         roots: [AntigravityDataRoot],
         locations: ToolLocations,
@@ -379,9 +394,10 @@ enum UsageAnalyticsEngine {
         var dbCache = loadDBCache(from: locations.telemetryCacheFile)
         var dbCacheDirty = false
         var activeCacheKeys = Set<String>()
+        let scannedSources = Set(roots.map(\.source))
 
         var uniqueById: [String: RequestEventRecord] = [:]
-        var parsedConversationIDs = Set<String>()
+        var parsedConversations = Set<ConversationSourceKey>()
         var liveEvents: [RequestEventRecord] = []
 
         let manager = FileManager.default
@@ -417,7 +433,7 @@ enum UsageAnalyticsEngine {
                     continue
                 }
 
-                parsedConversationIDs.insert(cid)
+                parsedConversations.insert(ConversationSourceKey(source: root.source, conversationId: cid))
                 liveEvents.append(contentsOf: events)
                 for event in events {
                     if let existing = uniqueById[event.id] {
@@ -431,19 +447,33 @@ enum UsageAnalyticsEngine {
             }
         }
 
-        let trimmedCache = dbCache.filter { activeCacheKeys.contains($0.key) }
+        let trimmedCache = dbCache.filter { key, entry in
+            if scannedSources.contains(entry.source) {
+                return activeCacheKeys.contains(key)
+            }
+            return manager.fileExists(atPath: key)
+        }
         if dbCacheDirty || trimmedCache.count != dbCache.count {
             saveDBCache(trimmedCache, to: locations.telemetryCacheFile)
         }
 
         let archived = mergeHistoryArchive(
             archiveURL: locations.usageHistoryArchiveFile,
-            parsedConversationIDs: parsedConversationIDs,
-            liveEvents: Array(uniqueById.values),
+            scannedSources: scannedSources,
+            parsedConversations: parsedConversations,
+            liveEvents: liveEvents,
             nowMs: nowMs
         )
-        for event in archived where !parsedConversationIDs.contains(event.conversationId) {
-            if uniqueById[event.id] == nil {
+        for event in archived where scannedSources.contains(event.source) {
+            let key = ConversationSourceKey(source: event.source, conversationId: event.conversationId)
+            guard !parsedConversations.contains(key) else {
+                continue
+            }
+            if let existing = uniqueById[event.id] {
+                if richnessScore(event) > richnessScore(existing) {
+                    uniqueById[event.id] = event
+                }
+            } else {
                 uniqueById[event.id] = event
             }
         }
@@ -480,7 +510,8 @@ enum UsageAnalyticsEngine {
 
     private static func mergeHistoryArchive(
         archiveURL: URL,
-        parsedConversationIDs: Set<String>,
+        scannedSources: Set<TelemetrySource>,
+        parsedConversations: Set<ConversationSourceKey>,
         liveEvents: [RequestEventRecord],
         nowMs: Double
     ) -> [RequestEventRecord] {
@@ -496,10 +527,26 @@ enum UsageAnalyticsEngine {
             guard let ts = event.timestampMs, ts >= cutoff else {
                 return false
             }
-            return !parsedConversationIDs.contains(event.conversationId)
+            if !scannedSources.contains(event.source) {
+                return true
+            }
+            return !parsedConversations.contains(
+                ConversationSourceKey(source: event.source, conversationId: event.conversationId)
+            )
         }
         let fresh = liveEvents.filter { ($0.timestampMs ?? 0) >= cutoff }
-        let combined = (fresh + retained)
+        var dedupedBySource: [ArchiveEventKey: RequestEventRecord] = [:]
+        for event in fresh + retained {
+            let key = ArchiveEventKey(source: event.source, id: event.id)
+            if let existing = dedupedBySource[key] {
+                if richnessScore(event) > richnessScore(existing) {
+                    dedupedBySource[key] = event
+                }
+            } else {
+                dedupedBySource[key] = event
+            }
+        }
+        let combined = dedupedBySource.values
             .sorted { ($0.timestampMs ?? 0) > ($1.timestampMs ?? 0) }
         let capped = combined.count > archiveMaxRequests
             ? Array(combined.prefix(archiveMaxRequests))
@@ -1122,8 +1169,8 @@ func formatUsageOverview(
     let scopeLabel = snapshot.accountFilter == "all"
         ? text.line(.telemetryAllAccounts)
         : (snapshot.accountFilter == "__unattributed__" ? text.line(.telemetryUnattributed) : snapshot.accountFilter)
-    lines.append("\(text.line(.telemetryOverviewHeader))  [\(rangeDisplayName(snapshot.range, text: text))]  [\(scopeLabel)]")
-    lines.append(formatRangeWindowLine(snapshot, text: text, timeZone: timeZone))
+    lines.append("\(text.line(.telemetryOverviewHeader))  [\(telemetryRangeDisplayName(snapshot.range, text: text))]  [\(scopeLabel)]")
+    lines.append(telemetryRangeWindowSubtitle(snapshot, text: text, timeZone: timeZone))
     lines.append("")
 
     lines.append(
@@ -1181,7 +1228,7 @@ func formatUsageOverview(
     return lines
 }
 
-private func rangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> String {
+public func telemetryRangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> String {
     switch range {
     case .weekly: return text.line(.telemetryRangeWeekly)
     case .today: return text.line(.telemetryRangeToday)
@@ -1194,10 +1241,10 @@ private func rangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> Str
     }
 }
 
-private func formatRangeWindowLine(
+public func telemetryRangeWindowSubtitle(
     _ snapshot: UsageOverviewSnapshot,
     text: Localizer,
-    timeZone: TimeZone
+    timeZone: TimeZone = .current
 ) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")

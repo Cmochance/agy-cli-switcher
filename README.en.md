@@ -104,7 +104,8 @@ Click the icon in the menu bar to open the panel.
 - When you save the current login under a name that already holds another account, the panel asks before replacing it
 - "Refresh quota" is the same as `agy-cs refresh quota`
 - "Add account…": Antigravity opens a terminal that runs `agy-cs switch add`. Colab signs in through the browser and finishes after you allow access; if the browser shows a code instead, paste it in the panel. Open the panel again afterwards to see the new account
-- The `…` at the end of a row renames or deletes it. The gear saves the current login, toggles blocking old Antigravity session write-backs, changes the language, and quits
+- In Antigravity mode, the top bar switches between **Accounts / Session / Stats**: **Session** shows the live context window breakdown, compaction badge, generation speed, 5-minute cache observation countdown, and subagent rollups; **Stats** shows request/token/API-reference cost sparklines, the 53-week heatmap, and the model health timeline across weekly quota or preset time ranges (closing the panel resets to **Accounts**)
+- The `…` at the end of a row renames or deletes it. The gear saves the current login, toggles blocking old Antigravity session write-backs, toggles showing live context & speed in the menu bar, changes the language, and quits
 - Right-clicking the menu bar icon also lets you quit
 - Opening the panel only reads the recorded results and the email of the current login in the keychain. It makes no request
 

@@ -374,21 +374,33 @@ final class AntigravityDatabaseReader {
         }
         defer { sqlite3_close_v2(db) }
 
+        guard let genColumns = tableColumns(db, table: "gen_metadata") else {
+            return nil
+        }
         var generations: [DecodedGeneration] = []
-        if let stmt = prepare(db, "SELECT idx, data FROM gen_metadata ORDER BY idx") {
+        if genColumns.contains("idx"), genColumns.contains("data") {
+            guard let stmt = prepare(db, "SELECT idx, data FROM gen_metadata ORDER BY idx") else {
+                return nil
+            }
             defer { sqlite3_finalize(stmt) }
-            while sqlite3_step(stmt) == SQLITE_ROW {
+            var rc = sqlite3_step(stmt)
+            while rc == SQLITE_ROW {
                 let idx = Int(sqlite3_column_int64(stmt, 0))
-                guard let blob = columnData(stmt, 1) else {
-                    continue
-                }
-                if let decoded = try? decodeGeneration(index: idx, data: blob) {
+                if let blob = columnData(stmt, 1),
+                   let decoded = try? decodeGeneration(index: idx, data: blob)
+                {
                     generations.append(decoded)
                 }
+                rc = sqlite3_step(stmt)
+            }
+            guard rc == SQLITE_DONE else {
+                return nil
             }
         }
 
-        let stepColumns = tableColumns(db, table: "steps")
+        guard let stepColumns = tableColumns(db, table: "steps") else {
+            return nil
+        }
         let hasStepType = stepColumns.contains("step_type")
         let hasStatus = stepColumns.contains("status")
         let hasPayload = stepColumns.contains("step_payload")
@@ -403,47 +415,57 @@ final class AntigravityDatabaseReader {
             if hasStatus { selectCols.append("status") }
             selectCols.append("metadata")
             let sql = "SELECT \(selectCols.joined(separator: ", ")) FROM steps ORDER BY idx"
-            if let stmt = prepare(db, sql) {
-                defer { sqlite3_finalize(stmt) }
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    var col: Int32 = 0
-                    let idx = Int(sqlite3_column_int64(stmt, col)); col += 1
-                    let stepType = hasStepType ? Int(sqlite3_column_int64(stmt, col)) : 0
-                    if hasStepType { col += 1 }
-                    let status = hasStatus ? Int(sqlite3_column_int64(stmt, col)) : 3
-                    if hasStatus { col += 1 }
-                    let metadataBlob = columnData(stmt, col)
+            guard let stmt = prepare(db, sql) else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+            var rc = sqlite3_step(stmt)
+            while rc == SQLITE_ROW {
+                var col: Int32 = 0
+                let idx = Int(sqlite3_column_int64(stmt, col)); col += 1
+                let stepType = hasStepType ? Int(sqlite3_column_int64(stmt, col)) : 0
+                if hasStepType { col += 1 }
+                let status = hasStatus ? Int(sqlite3_column_int64(stmt, col)) : 3
+                if hasStatus { col += 1 }
+                let metadataBlob = columnData(stmt, col)
 
-                    if hasStepType, stepType == 23 {
-                        checkpointSteps.append(idx)
-                        if !hasStatus || status == 3 {
-                            latestCompletedCpIdx = idx
-                        }
-                    }
-
-                    if let metadataBlob, let meta = try? ProtobufMessage(data: metadataBlob) {
-                        times[idx] = StepTiming(
-                            createdMs: ProtobufMessage.milliseconds(meta.data(1)),
-                            viewableMs: ProtobufMessage.milliseconds(meta.data(6)),
-                            finishedMs: ProtobufMessage.milliseconds(meta.data(7)),
-                            completedMs: ProtobufMessage.milliseconds(meta.data(8)),
-                            startedMs: ProtobufMessage.milliseconds(meta.data(32))
-                        )
+                if hasStepType, stepType == 23 {
+                    checkpointSteps.append(idx)
+                    if !hasStatus || status == 3 {
+                        latestCompletedCpIdx = idx
                     }
                 }
+
+                if let metadataBlob, let meta = try? ProtobufMessage(data: metadataBlob) {
+                    times[idx] = StepTiming(
+                        createdMs: ProtobufMessage.milliseconds(meta.data(1)),
+                        viewableMs: ProtobufMessage.milliseconds(meta.data(6)),
+                        finishedMs: ProtobufMessage.milliseconds(meta.data(7)),
+                        completedMs: ProtobufMessage.milliseconds(meta.data(8)),
+                        startedMs: ProtobufMessage.milliseconds(meta.data(32))
+                    )
+                }
+                rc = sqlite3_step(stmt)
+            }
+            guard rc == SQLITE_DONE else {
+                return nil
             }
         }
 
         var latestCheckpoint: CheckpointSummary?
         if latestCompletedCpIdx >= 0 {
             var summaryTokens = 0
-            if hasPayload,
-               let stmt = prepare(db, "SELECT step_payload FROM steps WHERE idx = ?")
-            {
+            if hasPayload {
+                guard let stmt = prepare(db, "SELECT step_payload FROM steps WHERE idx = ?") else {
+                    return nil
+                }
                 defer { sqlite3_finalize(stmt) }
                 sqlite3_bind_int64(stmt, 1, Int64(latestCompletedCpIdx))
-                if sqlite3_step(stmt) == SQLITE_ROW {
+                let rc = sqlite3_step(stmt)
+                if rc == SQLITE_ROW {
                     summaryTokens = decodeCheckpointTokens(columnData(stmt, 0))
+                } else if rc != SQLITE_DONE {
+                    return nil
                 }
             }
             latestCheckpoint = CheckpointSummary(stepIndex: latestCompletedCpIdx, summaryTokens: summaryTokens)
@@ -477,26 +499,27 @@ final class AntigravityDatabaseReader {
         defer { sqlite3_finalize(stmt) }
 
         var records: [String: ConversationSummaryRecord] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
             let cid = Self.columnText(stmt, 0)
-            guard isValidConversationID(cid) else {
-                continue
+            if isValidConversationID(cid) {
+                records[cid] = ConversationSummaryRecord(
+                    conversationId: cid,
+                    title: Self.columnText(stmt, 1),
+                    workspaceUris: Self.columnText(stmt, 2),
+                    source: Self.columnText(stmt, 3),
+                    agentName: Self.columnText(stmt, 4),
+                    parentConversationId: Self.columnText(stmt, 5),
+                    nestingDepth: Int(sqlite3_column_int64(stmt, 6)),
+                    notFullyIdle: sqlite3_column_int64(stmt, 7) != 0,
+                    killed: sqlite3_column_int64(stmt, 8) != 0,
+                    stepCount: Int(sqlite3_column_int64(stmt, 9)),
+                    lastModifiedIso: Self.columnText(stmt, 10)
+                )
             }
-            records[cid] = ConversationSummaryRecord(
-                conversationId: cid,
-                title: Self.columnText(stmt, 1),
-                workspaceUris: Self.columnText(stmt, 2),
-                source: Self.columnText(stmt, 3),
-                agentName: Self.columnText(stmt, 4),
-                parentConversationId: Self.columnText(stmt, 5),
-                nestingDepth: Int(sqlite3_column_int64(stmt, 6)),
-                notFullyIdle: sqlite3_column_int64(stmt, 7) != 0,
-                killed: sqlite3_column_int64(stmt, 8) != 0,
-                stepCount: Int(sqlite3_column_int64(stmt, 9)),
-                lastModifiedIso: Self.columnText(stmt, 10)
-            )
+            rc = sqlite3_step(stmt)
         }
-        return records
+        return rc == SQLITE_DONE ? records : [:]
     }
 
     func readConversationChildren(at summariesDB: URL) -> [String: [String]] {
@@ -513,26 +536,34 @@ final class AntigravityDatabaseReader {
         defer { sqlite3_finalize(stmt) }
 
         var children: [String: [String]] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
             let child = Self.columnText(stmt, 0)
             let parent = Self.columnText(stmt, 1)
-            guard isValidConversationID(child), isValidConversationID(parent) else {
-                continue
+            if isValidConversationID(child), isValidConversationID(parent) {
+                children[parent, default: []].append(child)
             }
-            children[parent, default: []].append(child)
+            rc = sqlite3_step(stmt)
         }
-        return children
+        return rc == SQLITE_DONE ? children : [:]
     }
 
     private static func openReadOnlyDatabase(at url: URL) -> OpaquePointer? {
         var db: OpaquePointer?
         let directFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_EXRESCODE
-        if sqlite3_open_v2(url.path, &db, directFlags, nil) == SQLITE_OK, let opened = db {
+        let openRc = sqlite3_open_v2(url.path, &db, directFlags, nil)
+        var failureCode: Int32 = openRc & 0xFF
+        if openRc == SQLITE_OK, let opened = db {
             sqlite3_busy_timeout(opened, 500)
-            if sqlite3_exec(opened, "PRAGMA query_only = ON;", nil, nil, nil) == SQLITE_OK,
-               hasReadableSchema(opened)
-            {
-                return opened
+            let pragmaRc = sqlite3_exec(opened, "PRAGMA query_only = ON;", nil, nil, nil)
+            if pragmaRc == SQLITE_OK {
+                let schemaRc = checkReadableSchema(opened)
+                if schemaRc == SQLITE_OK {
+                    return opened
+                }
+                failureCode = schemaRc & 0xFF
+            } else {
+                failureCode = pragmaRc & 0xFF
             }
         }
         if let opened = db {
@@ -540,13 +571,25 @@ final class AntigravityDatabaseReader {
             db = nil
         }
 
+        // 仅在只读文件系统无法建 -shm 且无活跃 WAL/journal 时降级 immutable=1；
+        // SQLITE_BUSY / SQLITE_LOCKED 绝不绕过锁机制读取活跃 WAL 库。
+        let canFallbackImmutable = (failureCode == SQLITE_READONLY || failureCode == SQLITE_CANTOPEN)
+            && !FileManager.default.fileExists(atPath: url.path + "-wal")
+            && !FileManager.default.fileExists(atPath: url.path + "-journal")
+        guard canFallbackImmutable else {
+            return nil
+        }
+
         let escaped = escapeSQLiteURIPath(url.path)
         let uri = "file:\(escaped)?immutable=1"
         let uriFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_EXRESCODE
         if sqlite3_open_v2(uri, &db, uriFlags, nil) == SQLITE_OK, let opened = db {
             sqlite3_busy_timeout(opened, 500)
-            _ = sqlite3_exec(opened, "PRAGMA query_only = ON;", nil, nil, nil)
-            return opened
+            if sqlite3_exec(opened, "PRAGMA query_only = ON;", nil, nil, nil) == SQLITE_OK,
+               checkReadableSchema(opened) == SQLITE_OK
+            {
+                return opened
+            }
         }
         if let opened = db {
             sqlite3_close_v2(opened)
@@ -554,12 +597,18 @@ final class AntigravityDatabaseReader {
         return nil
     }
 
-    private static func hasReadableSchema(_ db: OpaquePointer) -> Bool {
-        guard let stmt = prepare(db, "SELECT count(*) FROM sqlite_master") else {
-            return false
+    private static func checkReadableSchema(_ db: OpaquePointer) -> Int32 {
+        var stmt: OpaquePointer?
+        let prepRc = sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master", -1, &stmt, nil)
+        guard prepRc == SQLITE_OK, let stmt else {
+            if let stmt {
+                sqlite3_finalize(stmt)
+            }
+            return prepRc
         }
         defer { sqlite3_finalize(stmt) }
-        return sqlite3_step(stmt) == SQLITE_ROW
+        let stepRc = sqlite3_step(stmt)
+        return stepRc == SQLITE_ROW ? SQLITE_OK : stepRc
     }
 
     private static func escapeSQLiteURIPath(_ path: String) -> String {
@@ -568,19 +617,21 @@ final class AntigravityDatabaseReader {
             .replacingOccurrences(of: "#", with: "%23")
     }
 
-    private static func tableColumns(_ db: OpaquePointer, table: String) -> Set<String> {
+    private static func tableColumns(_ db: OpaquePointer, table: String) -> Set<String>? {
         guard let stmt = prepare(db, "PRAGMA table_info(\(table))") else {
-            return []
+            return nil
         }
         defer { sqlite3_finalize(stmt) }
         var columns = Set<String>()
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
             let name = columnText(stmt, 1)
             if !name.isEmpty {
                 columns.insert(name)
             }
+            rc = sqlite3_step(stmt)
         }
-        return columns
+        return rc == SQLITE_DONE ? columns : nil
     }
 
     private static func prepare(_ db: OpaquePointer, _ sql: String) -> OpaquePointer? {
