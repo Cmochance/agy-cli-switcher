@@ -134,6 +134,11 @@ public struct AccountFilterOption: Equatable, Codable, Identifiable, Sendable {
     public var label: String
 
     public var id: String { key }
+
+    public init(key: String, label: String) {
+        self.key = key
+        self.label = label
+    }
 }
 
 public struct UsageOverviewSnapshot: Equatable, Codable, Sendable {
@@ -1122,8 +1127,8 @@ func formatUsageOverview(
     let scopeLabel = snapshot.accountFilter == "all"
         ? text.line(.telemetryAllAccounts)
         : (snapshot.accountFilter == "__unattributed__" ? text.line(.telemetryUnattributed) : snapshot.accountFilter)
-    lines.append("\(text.line(.telemetryOverviewHeader))  [\(rangeDisplayName(snapshot.range, text: text))]  [\(scopeLabel)]")
-    lines.append(formatRangeWindowLine(snapshot, text: text, timeZone: timeZone))
+    lines.append("\(text.line(.telemetryOverviewHeader))  [\(telemetryRangeDisplayName(snapshot.range, text: text))]  [\(scopeLabel)]")
+    lines.append(telemetryRangeWindowSubtitle(snapshot, text: text, timeZone: timeZone))
     lines.append("")
 
     lines.append(
@@ -1181,7 +1186,7 @@ func formatUsageOverview(
     return lines
 }
 
-private func rangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> String {
+public func telemetryRangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> String {
     switch range {
     case .weekly: return text.line(.telemetryRangeWeekly)
     case .today: return text.line(.telemetryRangeToday)
@@ -1194,10 +1199,10 @@ private func rangeDisplayName(_ range: UsageRangePreset, text: Localizer) -> Str
     }
 }
 
-private func formatRangeWindowLine(
+public func telemetryRangeWindowSubtitle(
     _ snapshot: UsageOverviewSnapshot,
     text: Localizer,
-    timeZone: TimeZone
+    timeZone: TimeZone = .current
 ) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")

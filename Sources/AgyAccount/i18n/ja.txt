@@ -718,3 +718,57 @@ API 参考コスト
 
 [telemetryWeeklyFallback]
 直近 7 日間（週間利用枠ウィンドウ未取得）
+
+[panelTabAccounts]
+アカウント
+
+[panelTabSession]
+セッション
+
+[panelTabStats]
+統計
+
+[panelStatusBarToggle]
+メニューバーにコンテキストと速度を表示
+
+[panelSessionAutoFollow]
+最新のアクティブセッションを追跡
+
+[panelSourceAll]
+すべてのソース
+
+[panelSourceCLI]
+CLI
+
+[panelSourceApp]
+デスクトップ App
+
+[panelPricingStandard]
+標準単価
+
+[panelPricingPromo]
+割引単価
+
+[panelContextUsed]
+使用中 %1
+
+[panelMoreStats]
+詳細統計
+
+[panelSubagentSummaryHeader]
+サブエージェント集計
+
+[panelHeatmapTokens]
+トークン
+
+[panelHeatmapRequests]
+リクエスト
+
+[panelHeatmapCost]
+コスト
+
+[panelThinkingTokens]
+思考トークン
+
+[panelRequestErrors]
+リクエスト / エラー

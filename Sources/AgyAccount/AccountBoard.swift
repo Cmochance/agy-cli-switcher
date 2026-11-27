@@ -124,10 +124,12 @@ public struct AccountBoard: @unchecked Sendable {
         knownStamp: String? = nil
     ) -> SessionTelemetryLoadResult {
         let locations = ToolLocations(home: services.home, provider: .antigravity)
+        var environment = services.environment
+        environment.removeValue(forKey: "ANTIGRAVITY_CONVERSATION_ID")
         return SessionTelemetryEngine.load(
             requestedId: conversationId,
             home: services.home,
-            environment: services.environment,
+            environment: environment,
             sourceFilter: sourceFilter,
             pricingMode: pricingMode,
             pricingFile: locations.pricingFile,
@@ -153,6 +155,52 @@ public struct AccountBoard: @unchecked Sendable {
             pricingMode: pricingMode,
             now: services.clock()
         )
+    }
+
+    public func watchedTelemetryDirectories() -> [URL] {
+        var dirs = [ToolLocations(home: services.home).globalRoot]
+        for root in AntigravityDataRoots.resolve(home: services.home, environment: services.environment, filter: .all) {
+            dirs.append(root.url)
+            dirs.append(root.conversationsDirectory)
+            dirs.append(root.brainDirectory)
+        }
+        return dirs
+    }
+
+    public func isStatusTelemetryActive() -> Bool {
+        selectedProvider() == .antigravity
+            && services.forProvider(.antigravity).profile.statusTelemetryEnabled()
+    }
+
+    public func loadStatusBarSummary(knownStamp: String? = nil) -> (changed: Bool, stamp: String, badge: String?) {
+        guard isStatusTelemetryActive() else {
+            return (changed: true, stamp: "", badge: nil)
+        }
+        let result = loadSessionTelemetry(
+            conversationId: nil,
+            sourceFilter: .auto,
+            pricingMode: .standard,
+            knownStamp: knownStamp
+        )
+        switch result {
+        case .unchanged(let stamp):
+            return (changed: false, stamp: stamp, badge: nil)
+        case .empty:
+            return (changed: true, stamp: "", badge: nil)
+        case .loaded(let snapshot):
+            var parts: [String] = []
+            if let pct = snapshot.contextWindow.usedPercent {
+                let prefix = snapshot.contextWindow.compactedPending ? "≈" : ""
+                parts.append("\(prefix)\(Int(pct.rounded()))%")
+            } else if snapshot.contextWindow.usedTokens > 0 {
+                parts.append(formatCompactTokens(snapshot.contextWindow.usedTokens))
+            }
+            if let tps = snapshot.telemetry.latestTps ?? snapshot.telemetry.tps, tps > 0 {
+                parts.append("\(formatOneDecimal(tps))t/s")
+            }
+            let badge = parts.isEmpty ? nil : parts.joined(separator: " · ")
+            return (changed: true, stamp: snapshot.stateStamp, badge: badge)
+        }
     }
 
     // agy / colab 的登录界面要一个终端，面板里登录不了。这里写一个两行的 .command 文件，由面板交给系统默认的终端程序打开。

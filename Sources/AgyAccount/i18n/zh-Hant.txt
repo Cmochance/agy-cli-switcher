@@ -718,3 +718,57 @@ API 參考費用
 
 [telemetryWeeklyFallback]
 最近 7 天（暫未讀取到週限額週期）
+
+[panelTabAccounts]
+帳號
+
+[panelTabSession]
+工作階段
+
+[panelTabStats]
+統計
+
+[panelStatusBarToggle]
+選單列顯示上下文與速度
+
+[panelSessionAutoFollow]
+自動跟隨最近活躍工作階段
+
+[panelSourceAll]
+全部來源
+
+[panelSourceCLI]
+CLI 終端機
+
+[panelSourceApp]
+桌面版 App
+
+[panelPricingStandard]
+標準單價
+
+[panelPricingPromo]
+優惠單價
+
+[panelContextUsed]
+已使用 %1
+
+[panelMoreStats]
+更多統計
+
+[panelSubagentSummaryHeader]
+子智能體彙總
+
+[panelHeatmapTokens]
+Token
+
+[panelHeatmapRequests]
+請求
+
+[panelHeatmapCost]
+費用
+
+[panelThinkingTokens]
+思考 Token
+
+[panelRequestErrors]
+請求 / 錯誤

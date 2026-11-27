@@ -971,6 +971,28 @@ final class BoardTests: XCTestCase {
         XCTAssertNil(model.prompt)
         let closed = await height()
         XCTAssertEqual(closed, plain)
+
+        model.selectTab(.session)
+        let sessionWidth = await {
+            _ = await height()
+            return host.preferredContentSize.width
+        }()
+        XCTAssertEqual(sessionWidth, 580)
+
+        model.selectTab(.stats)
+        let statsWidth = await {
+            _ = await height()
+            return host.preferredContentSize.width
+        }()
+        XCTAssertEqual(statsWidth, 580)
+
+        controller.popoverDidClose(Notification(name: NSPopover.didCloseNotification))
+        XCTAssertEqual(model.tab, .accounts)
+        let resetWidth = await {
+            _ = await height()
+            return host.preferredContentSize.width
+        }()
+        XCTAssertEqual(resetWidth, 420)
     }
 
     // 把真的鼠标事件送进面板：点一行是切换，按住往下拖是排序。改了行上的手势之后跑一遍：
@@ -1001,8 +1023,9 @@ final class BoardTests: XCTestCase {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         }
         await pause(0.4)
-        // 三行一样高，从面板顶上往下排。面板的高度会随提示变，所以每次送事件之前重新量。
-        let rowHeight = (host.fittingSize.height - 45) / 3
+        // 顶部多出页签栏（约 35pt），三行从页签栏下面往下排。
+        let topInset: CGFloat = 35
+        let rowHeight = (host.fittingSize.height - 45 - topInset) / 3
         var number = 0
         func send(_ kind: NSEvent.EventType, row: Int, down: CGFloat = 0) {
             host.layoutSubtreeIfNeeded()
@@ -1011,7 +1034,7 @@ final class BoardTests: XCTestCase {
                 host.layoutSubtreeIfNeeded()
             }
             number += 1
-            let point = NSPoint(x: 150, y: host.bounds.height - (CGFloat(row) + 0.5) * rowHeight - down)
+            let point = NSPoint(x: 150, y: host.bounds.height - topInset - (CGFloat(row) + 0.5) * rowHeight - down)
             let event = NSEvent.mouseEvent(
                 with: kind, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1, pressure: kind == .leftMouseUp ? 0 : 1
@@ -1179,6 +1202,68 @@ final class BoardTests: XCTestCase {
         colabModel.cancel()
         colabModel.ask(.colabCode)
         try picture(PanelView(model: colabModel), to: output.appendingPathComponent("16-colab-code.png"))
+
+        // 会话遥测页与本地用量概览页渲染快照
+        let telFixture = try Fixture(blob: makeBlob(email: "telemetry@example.com", refresh: "t"))
+        defer { telFixture.cleanup() }
+        XCTAssertEqual(telFixture.run(["save", "telemetry"]).code, 0)
+        try seedSampleTelemetry(in: telFixture.home)
+        let telModel = PanelModel(board: telFixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        telModel.selectTab(.session)
+        await settleTelemetry(telModel)
+        try picture(PanelView(model: telModel), to: output.appendingPathComponent("17-session-telemetry.png"), width: 580)
+        telModel.selectTab(.stats)
+        await settleTelemetry(telModel)
+        try picture(PanelView(model: telModel), to: output.appendingPathComponent("18-usage-overview.png"), width: 580)
+    }
+
+    @MainActor
+    func testPanelTelemetryTabsAndStatusBarBadge() async throws {
+        let fixture = try Fixture(blob: makeBlob(email: "alice@example.com", refresh: "a"))
+        defer { fixture.cleanup() }
+        XCTAssertEqual(fixture.run(["save", "alice"]).code, 0)
+        try seedSampleTelemetry(in: fixture.home)
+
+        _ = NSApplication.shared
+        let controller = MenuBarController { shown in
+            PanelModel(board: fixture.board, executable: "/somewhere/agy-cs", open: { _ in true })
+        }
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        defer { NSStatusBar.system.removeStatusItem(statusItem) }
+        controller.attachStatusItem(statusItem)
+
+        let model = controller.model
+        XCTAssertFalse(model.state.statusTelemetry)
+        XCTAssertNil(fixture.board.loadStatusBarSummary().badge)
+
+        model.toggleStatusBarTelemetry()
+        await settle(model)
+        XCTAssertTrue(model.state.statusTelemetry)
+
+        let summary = fixture.board.loadStatusBarSummary()
+        XCTAssertTrue(summary.changed)
+        XCTAssertEqual(summary.badge, "60% · 75.0t/s")
+        controller.applyStatusBadge(summary.badge)
+        XCTAssertEqual(statusItem.button?.title, " 60% · 75.0t/s")
+        XCTAssertEqual(statusItem.length, NSStatusItem.variableLength)
+
+        controller.applyStatusBadge(nil)
+        XCTAssertEqual(statusItem.button?.title, "")
+        XCTAssertEqual(statusItem.length, NSStatusItem.squareLength)
+
+        model.selectTab(.session)
+        await settleTelemetry(model)
+        XCTAssertEqual(model.sessionSnapshot?.conversationId, "panel-conv-main")
+        XCTAssertEqual(model.sessionSnapshot?.subagentTotals.count, 1)
+
+        model.selectTab(.stats)
+        await settleTelemetry(model)
+        XCTAssertEqual(model.usageSnapshot?.totalRequests, 3)
+
+        model.toggleProvider()
+        await settle(model)
+        XCTAssertEqual(model.provider, .colab)
+        XCTAssertEqual(model.tab, .accounts)
     }
 
     @MainActor
@@ -1453,11 +1538,122 @@ private func settle(_ model: PanelModel) async {
 }
 
 @MainActor
-private func picture(_ view: some View, to url: URL) throws {
+private func settleTelemetry(_ model: PanelModel) async {
+    for _ in 0 ..< 500 where model.loadingTelemetry {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
+private func seedSampleTelemetry(in home: URL) throws {
+    let cliRoot = home.appendingPathComponent(".gemini/antigravity-cli", isDirectory: true)
+    let nowSec = Int64(Date().timeIntervalSince1970) - 60
+    let mainID = "panel-conv-main"
+    let subID = "panel-conv-sub"
+
+    try SQLiteTestBuilder.createSummariesDB(
+        at: cliRoot.appendingPathComponent("conversation_summaries.db"),
+        rows: [
+            (cid: mainID, title: "Integrate telemetry tabs", parentId: "", source: "CORTEX_TRAJECTORY_SOURCE_CLI", depth: 0),
+            (cid: subID, title: "Code Reviewer", parentId: mainID, source: "CORTEX_TRAJECTORY_SOURCE_CLI", depth: 1),
+        ]
+    )
+
+    try SQLiteTestBuilder.createConversationDB(at: cliRoot.appendingPathComponent("conversations/\(mainID).db")) { db in
+        let g1 = ProtobufEncoder.makeGeneration(
+            requestId: "panel-req-1",
+            model: "Orchestrator (Neon)",
+            input: 20_000,
+            cache: 100_000,
+            output: 150,
+            ttftSeconds: 1,
+            streamingSeconds: 2,
+            stepIndices: [1],
+            maxTokens: 256_000,
+            usedTokens: 120_000,
+            categories: [
+                (label: "Chat Messages", tokens: 105_000, children: []),
+                (label: "Tools", tokens: 8_000, children: []),
+                (label: "System Prompt", tokens: 7_000, children: [("skills", 3_000)]),
+            ],
+            modelEnum: 1537,
+            executionModelEnum: 1669
+        )
+        let g2 = ProtobufEncoder.makeGeneration(
+            requestId: "panel-req-2",
+            model: "Gemini 4 Carbon (High)",
+            input: 3_600,
+            cache: 150_000,
+            output: 150,
+            ttftSeconds: 1,
+            streamingSeconds: 2,
+            stepIndices: [2],
+            maxTokens: 256_000,
+            usedTokens: 153_600,
+            categories: [
+                (label: "Chat Messages", tokens: 138_600, children: []),
+                (label: "Tools", tokens: 8_000, children: []),
+                (label: "System Prompt", tokens: 7_000, children: [("skills", 3_000)]),
+            ],
+            modelEnum: 1669,
+            executionModelEnum: 1669
+        )
+        try SQLiteTestBuilder.insertGeneration(db, idx: 0, data: g1)
+        try SQLiteTestBuilder.insertGeneration(db, idx: 1, data: g2)
+        try SQLiteTestBuilder.insertStep(
+            db,
+            idx: 1,
+            stepType: 2,
+            status: 3,
+            metadata: ProtobufEncoder.bytesField(1, ProtobufEncoder.intField(1, nowSec - 120))
+        )
+        try SQLiteTestBuilder.insertStep(
+            db,
+            idx: 2,
+            stepType: 2,
+            status: 3,
+            metadata: ProtobufEncoder.bytesField(1, ProtobufEncoder.intField(1, nowSec))
+        )
+    }
+
+    try SQLiteTestBuilder.createConversationDB(at: cliRoot.appendingPathComponent("conversations/\(subID).db")) { db in
+        let g = ProtobufEncoder.makeGeneration(
+            requestId: "panel-req-sub",
+            model: "Gemini 4 Hydrogen (High)",
+            input: 2_000,
+            cache: 18_000,
+            output: 120,
+            ttftSeconds: 1,
+            streamingSeconds: 2,
+            stepIndices: [1],
+            maxTokens: 512_000,
+            usedTokens: 20_000
+        )
+        try SQLiteTestBuilder.insertGeneration(db, idx: 0, data: g)
+        try SQLiteTestBuilder.insertStep(
+            db,
+            idx: 1,
+            stepType: 2,
+            status: 3,
+            metadata: ProtobufEncoder.bytesField(1, ProtobufEncoder.intField(1, nowSec - 30))
+        )
+    }
+
+    let mainLogs = cliRoot.appendingPathComponent("brain/\(mainID)/.system_generated/logs", isDirectory: true)
+    try FileManager.default.createDirectory(at: mainLogs, withIntermediateDirectories: true)
+    let subLogs = cliRoot.appendingPathComponent("brain/\(subID)/.system_generated/logs", isDirectory: true)
+    try FileManager.default.createDirectory(at: subLogs, withIntermediateDirectories: true)
+    try Data("{\"step_index\":0,\"type\":\"USER_INPUT\",\"content\":\"Integrate telemetry tabs\"}\n".utf8)
+        .write(to: mainLogs.appendingPathComponent("transcript.jsonl"))
+    try Data("{\"step_index\":0,\"type\":\"USER_INPUT\",\"content\":\"Review telemetry code\"}\n".utf8)
+        .write(to: subLogs.appendingPathComponent("transcript.jsonl"))
+}
+
+@MainActor
+private func picture(_ view: some View, to url: URL, width: CGFloat = 420) throws {
     _ = NSApplication.shared
     let host = NSHostingView(rootView: view)
     let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
+        contentRect: NSRect(x: 0, y: 0, width: width, height: 200),
         styleMask: [.borderless],
         backing: .buffered,
         defer: false

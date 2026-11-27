@@ -22,12 +22,31 @@ struct PanelView: View {
         _drag = State(initialValue: dragging)
     }
 
+    private var activeTab: PanelTab {
+        model.provider == .antigravity ? model.tab : .accounts
+    }
+
+    private var panelWidth: CGFloat {
+        activeTab == .accounts ? 420 : 580
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            accounts
-            if model.busyLabel != nil || !model.lines.isEmpty {
+            if model.provider == .antigravity {
+                tabHeader
                 Divider()
-                status
+            }
+            switch activeTab {
+            case .accounts:
+                accounts
+                if model.busyLabel != nil || !model.lines.isEmpty {
+                    Divider()
+                    status
+                }
+            case .session:
+                SessionTelemetryView(model: model)
+            case .stats:
+                UsageOverviewView(model: model)
             }
             Divider()
             if let prompt = model.prompt {
@@ -36,7 +55,120 @@ struct PanelView: View {
                 actions
             }
         }
-        .frame(width: 420)
+        .frame(width: panelWidth)
+    }
+
+    private var tabHeader: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                tabButton(.accounts, title: model.text(.panelTabAccounts))
+                tabButton(.session, title: model.text(.panelTabSession))
+                tabButton(.stats, title: model.text(.panelTabStats))
+            }
+            .padding(2)
+            .background(Capsule().fill(Color.primary.opacity(0.07)))
+
+            Spacer(minLength: 4)
+
+            if activeTab != .accounts {
+                sourceMenu
+                pricingMenu
+                Button {
+                    model.refreshTelemetry()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.loadingTelemetry)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
+    private func tabButton(_ target: PanelTab, title: String) -> some View {
+        let selected = activeTab == target
+        return Button {
+            model.selectTab(target)
+        } label: {
+            Text(title)
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(selected ? Color(nsColor: .controlBackgroundColor) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var sourceMenu: some View {
+        let currentSource = activeTab == .session ? model.sessionSourceFilter : model.statsSourceFilter
+        let options: [TelemetrySourceFilter] = activeTab == .session ? [.auto, .cli, .app] : [.all, .cli, .app]
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    if activeTab == .session {
+                        model.setSessionSource(option)
+                    } else {
+                        model.setStatsSource(option)
+                    }
+                } label: {
+                    menuSelectionLabel(sourceLabel(option), selected: currentSource == option)
+                }
+            }
+        } label: {
+            Text(sourceLabel(currentSource))
+        }
+        .menuStyle(.borderlessButton)
+        .font(.caption)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
+        .fixedSize()
+    }
+
+    private var pricingMenu: some View {
+        Menu {
+            ForEach([PricingMode.standard, .promo], id: \.self) { mode in
+                Button {
+                    model.setPricingMode(mode)
+                } label: {
+                    menuSelectionLabel(pricingLabel(mode), selected: model.pricingMode == mode)
+                }
+            }
+        } label: {
+            Text(pricingLabel(model.pricingMode))
+        }
+        .menuStyle(.borderlessButton)
+        .font(.caption)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
+        .fixedSize()
+    }
+
+    private func sourceLabel(_ filter: TelemetrySourceFilter) -> String {
+        switch filter {
+        case .auto, .all:
+            return model.text(.panelSourceAll)
+        case .cli:
+            return model.text(.panelSourceCLI)
+        case .app:
+            return model.text(.panelSourceApp)
+        }
+    }
+
+    private func pricingLabel(_ mode: PricingMode) -> String {
+        switch mode {
+        case .standard:
+            return model.text(.panelPricingStandard)
+        case .promo:
+            return model.text(.panelPricingPromo)
+        }
     }
 
     @ViewBuilder private var accounts: some View {
@@ -179,6 +311,15 @@ struct PanelView: View {
                             Label(model.text(.panelGuardToggle), systemImage: "checkmark")
                         } else {
                             Text(model.text(.panelGuardToggle))
+                        }
+                    }
+                    Button {
+                        model.toggleStatusBarTelemetry()
+                    } label: {
+                        if model.state.statusTelemetry {
+                            Label(model.text(.panelStatusBarToggle), systemImage: "checkmark")
+                        } else {
+                            Text(model.text(.panelStatusBarToggle))
                         }
                     }
                 }

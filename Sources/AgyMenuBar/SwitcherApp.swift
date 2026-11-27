@@ -29,6 +29,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
     let popover: NSPopover
     let model: PanelModel
     private(set) var item: NSStatusItem?
+    private var statusMonitor: StatusTelemetryMonitor?
 
     // make 拿到“面板现在是不是开着”，交给 PanelModel。
     init(model make: @MainActor (@escaping @MainActor () -> Bool) -> PanelModel = { PanelModel(shown: $0) }) {
@@ -44,6 +45,12 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
         model.onKeepsOpenChanged = { [weak self] keep in
             self?.popover.behavior = keep ? .applicationDefined : .transient
         }
+        statusMonitor = StatusTelemetryMonitor(board: model.board) { [weak self] badge in
+            self?.applyStatusBadge(badge)
+        }
+        model.onStatusTelemetryChanged = { [weak self] in
+            self?.statusMonitor?.refreshNow()
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -53,6 +60,32 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSPopoverDelegat
         item.button?.action = #selector(clicked(_:))
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         self.item = item
+        statusMonitor?.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        statusMonitor?.stop()
+    }
+
+    func attachStatusItem(_ statusItem: NSStatusItem) {
+        statusItem.button?.image = Self.makeStatusIcon()
+        self.item = statusItem
+    }
+
+    func applyStatusBadge(_ badge: String?) {
+        guard let item, let button = item.button else {
+            return
+        }
+        if let badge, !badge.isEmpty {
+            item.length = NSStatusItem.variableLength
+            button.imagePosition = .imageLeading
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+            button.title = " " + badge
+        } else {
+            item.length = NSStatusItem.squareLength
+            button.imagePosition = .imageOnly
+            button.title = ""
+        }
     }
 
     // 叠放的双账号卡片与双向切换箭头：与 App 图标同源的 18×18 菜单栏模板图标。

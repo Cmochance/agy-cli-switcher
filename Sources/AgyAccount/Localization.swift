@@ -291,6 +291,24 @@ public enum TextKey: String, CaseIterable {
     case telemetryWeeklyActive
     case telemetryWeeklyUnstarted
     case telemetryWeeklyFallback
+    case panelTabAccounts
+    case panelTabSession
+    case panelTabStats
+    case panelStatusBarToggle
+    case panelSessionAutoFollow
+    case panelSourceAll
+    case panelSourceCLI
+    case panelSourceApp
+    case panelPricingStandard
+    case panelPricingPromo
+    case panelContextUsed
+    case panelMoreStats
+    case panelSubagentSummaryHeader
+    case panelHeatmapTokens
+    case panelHeatmapRequests
+    case panelHeatmapCost
+    case panelThinkingTokens
+    case panelRequestErrors
 }
 
 struct AccountFailure: Error, Equatable {
