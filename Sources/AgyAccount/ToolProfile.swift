@@ -21,6 +21,11 @@ struct ToolLocations {
     var blockWritebackFile: URL
     var guardStateFile: URL
     var guardLockFile: URL
+    var statusTelemetryFile: URL
+    var accountTimelineFile: URL
+    var pricingFile: URL
+    var telemetryCacheFile: URL
+    var usageHistoryArchiveFile: URL
 
     init(home: URL, provider: AccountProvider = .antigravity) {
         self.provider = provider
@@ -33,6 +38,11 @@ struct ToolLocations {
         blockWritebackFile = global.appendingPathComponent("block-writeback")
         guardStateFile = global.appendingPathComponent("guard.json")
         guardLockFile = global.appendingPathComponent("guard.lock")
+        statusTelemetryFile = global.appendingPathComponent("status-telemetry")
+        accountTimelineFile = global.appendingPathComponent("account-timeline.json")
+        pricingFile = global.appendingPathComponent("pricing.json")
+        telemetryCacheFile = global.appendingPathComponent("telemetry-db-cache.json")
+        usageHistoryArchiveFile = global.appendingPathComponent("usage-history-cache.json")
 
         let scoped = provider == .antigravity
             ? global
@@ -271,6 +281,48 @@ struct ToolProfile {
                 throw AccountFailure(.writeFailed, locations.blockWritebackFile.path)
             }
         }
+    }
+
+    func statusTelemetryEnabled() -> Bool {
+        guard let text = try? readText(locations.statusTelemetryFile) else {
+            return false
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+    }
+
+    func setStatusTelemetry(_ enabled: Bool) throws {
+        try ensureGlobalRoot()
+        if enabled {
+            try AtomicFile.write(locations.statusTelemetryFile, "1\n")
+            return
+        }
+        if manager.fileExists(atPath: locations.statusTelemetryFile.path) {
+            do {
+                try manager.removeItem(at: locations.statusTelemetryFile)
+            } catch {
+                throw AccountFailure(.writeFailed, locations.statusTelemetryFile.path)
+            }
+        }
+    }
+
+    func recordAccountTimeline(email: String, nowMs: Int64? = nil) {
+        guard provider == .antigravity else {
+            return
+        }
+        let store = AccountTimelineStore(fileURL: locations.accountTimelineFile)
+        let timestampMs: Int64 = nowMs ?? {
+            let date = parseTimestamp(now()) ?? Date()
+            return Int64(date.timeIntervalSince1970 * 1000.0)
+        }()
+        let distinctEmails = Set(names().compactMap { try? read($0).email.lowercased() })
+        _ = store.record(email: email, nowMs: timestampMs, knownAccountCount: max(1, distinctEmails.count))
+    }
+
+    func accountTimelineLastEmail() -> String {
+        guard provider == .antigravity else {
+            return ""
+        }
+        return AccountTimelineStore(fileURL: locations.accountTimelineFile).load().last?.email ?? ""
     }
 
     func readGuardState() -> GuardState? {

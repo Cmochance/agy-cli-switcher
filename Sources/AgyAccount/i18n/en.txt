@@ -23,6 +23,9 @@ Commands
   rm <name> --force            Delete the only remaining copy of the recorded login
   guard                        Show whether old-session keychain write-back blocking is on
   guard on / off               Enable or disable blocking old-session write-backs
+  stats [options]              Show local Antigravity usage overview, heatmap, and model health timeline
+  session [<id>] [options]     Show session context window breakdown and live token speed telemetry
+  statusbar [on|off]           Enable or disable live context and speed in the menu bar
   language, lg                 Show the current language
   language <code>, lg <code>   Change the language
   help                         Show every command and what it does
@@ -484,3 +487,234 @@ Running agy still uses the old login: %1 (guarded; any write-back will restore t
 
 [panelGuardToggle]
 Block old-session write-backs
+
+[telemetryAntigravityOnly]
+Local usage and session telemetry is only supported for Antigravity, not Colab.
+
+[statsUsage]
+Usage: agy-cs stats [--range weekly|today|24h|yesterday|week|month|30d|all] [--account <name|email|all|unattributed>] [--source all|cli|app] [--pricing standard|promo] [--json]
+
+[sessionUsage]
+Usage: agy-cs session [<conversation-id>] [--source auto|cli|app] [--pricing standard|promo] [--json]
+
+[sessionNotFound]
+The requested Antigravity session was not found.
+
+[telemetryNoSessions]
+No local Antigravity sessions recorded yet.
+
+[statusBarUsage]
+Usage: agy-cs statusbar [on|off]
+
+[statusBarStatusOn]
+Menu bar context & speed: on
+
+[statusBarStatusOff]
+Menu bar context & speed: off
+
+[statusBarEnabled]
+Enabled menu bar context and speed display.
+
+[statusBarDisabled]
+Disabled menu bar context and speed display.
+
+[statusBarHint]
+Change: agy-cs statusbar on, or agy-cs statusbar off.
+
+[telemetryModelLabel]
+Model
+
+[telemetryContextHeader]
+Context window
+
+[telemetryCompactedEst]
+Compacted (est.)
+
+[telemetryCompactedCount]
+Compacted %1x
+
+[telemetryCachedContext]
+Cached context
+
+[telemetryNewInput]
+New input
+
+[telemetryOrchestrator]
+Orchestrator context
+
+[telemetryRoleExec]
+Exec
+
+[telemetryRolePlan]
+Plan
+
+[telemetryStatsHeader]
+Session stats
+
+[telemetryTurnsSteps]
+Turns / steps
+
+[telemetryTotalTokens]
+Total tokens
+
+[telemetryApiCost]
+API equivalent
+
+[telemetryAvgSpeed]
+Average speed
+
+[telemetryPeakSpeed]
+Peak speed
+
+[telemetryLatestSpeed]
+Latest speed
+
+[telemetryCacheHit]
+Cache hit
+
+[telemetryCacheWindow]
+Cache window
+
+[telemetryCacheUnconfirmed]
+Unconfirmed
+
+[telemetryModelTime]
+Model time
+
+[telemetryToolTime]
+Tool time
+
+[telemetryTtft]
+First token latency
+
+[telemetrySubagentsHeader]
+Subagent context
+
+[telemetrySubagentTokens]
+Subagent tokens
+
+[telemetryCombinedTokens]
+Combined total
+
+[telemetryReqTools]
+Requests / tool calls
+
+[telemetrySubagentCache]
+Subagent cache
+
+[telemetrySubagentCost]
+Subagent est. cost
+
+[telemetryCombinedCost]
+Combined est. cost
+
+[telemetryCatMessages]
+Messages
+
+[telemetryCatSystem]
+System prompt
+
+[telemetryCatTools]
+System tools
+
+[telemetryCatSkills]
+Skills
+
+[telemetryCatSubagents]
+Subagents
+
+[telemetryCatPlugins]
+Plugins
+
+[telemetryCatRules]
+Rules
+
+[telemetryCatMemories]
+Memory files
+
+[telemetryCatOther]
+Other
+
+[telemetryCatInput]
+Input context
+
+[telemetryCatFree]
+Free space
+
+[telemetryDurationMinSec]
+%1m %2s
+
+[telemetryDurationSec]
+%1s
+
+[telemetryAllAccounts]
+All accounts
+
+[telemetryUnattributed]
+Unattributed
+
+[telemetryOverviewHeader]
+Usage overview
+
+[telemetryReqCount]
+Requests
+
+[telemetrySuccess]
+success
+
+[telemetryError]
+error
+
+[telemetryInput]
+input
+
+[telemetryOutput]
+output
+
+[telemetryCostLabel]
+Cost
+
+[telemetryAvgPerReq]
+Avg %1 / req
+
+[telemetryHeatmapHeader]
+Usage heatmap
+
+[telemetryHealthHeader]
+Model health timeline
+
+[telemetryNoRequests]
+No requests in this time range
+
+[telemetryRangeWeekly]
+Current weekly quota
+
+[telemetryRangeToday]
+Today
+
+[telemetryRange24h]
+Last 24 hours
+
+[telemetryRangeYesterday]
+Yesterday
+
+[telemetryRangeWeek]
+This week
+
+[telemetryRangeMonth]
+This month
+
+[telemetryRange30d]
+Last 30 days
+
+[telemetryRangeAll]
+All time
+
+[telemetryWeeklyActive]
+%1 - Now (resets %2)
+
+[telemetryWeeklyUnstarted]
+Current weekly quota untouched (100% remaining)
+
+[telemetryWeeklyFallback]
+Last 7 days (weekly quota window unavailable)

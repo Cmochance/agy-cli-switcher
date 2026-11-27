@@ -23,6 +23,9 @@
   rm <名字> --force            当前记录只剩这一份副本时，确认后删除
   guard                        查看是否禁止旧会话回写登录
   guard on / off               开启或关闭禁止旧会话回写登录
+  stats [选项]                 查看本地 Antigravity 用量概览、热力图与模型健康时间线
+  session [<会话ID>] [选项]    查看会话上下文窗口拆解与实时速度统计
+  statusbar [on|off]           开启或关闭菜单栏实时显示上下文与速度
   language, lg                 显示当前语言
   language <代码>, lg <代码>   切换语言
   help                         显示已有的全部指令和对应功能
@@ -484,3 +487,234 @@ Colab 算力与会话已更新。
 
 [panelGuardToggle]
 禁止旧会话回写登录
+
+[telemetryAntigravityOnly]
+本地用量与会话遥测仅支持 Antigravity，不支持 Colab。
+
+[statsUsage]
+用法: agy-cs stats [--range weekly|today|24h|yesterday|week|month|30d|all] [--account <名字|邮箱|all|unattributed>] [--source all|cli|app] [--pricing standard|promo] [--json]
+
+[sessionUsage]
+用法: agy-cs session [<会话ID>] [--source auto|cli|app] [--pricing standard|promo] [--json]
+
+[sessionNotFound]
+没有找到指定的 Antigravity 会话记录。
+
+[telemetryNoSessions]
+暂无本地 Antigravity 会话记录。
+
+[statusBarUsage]
+用法: agy-cs statusbar [on|off]
+
+[statusBarStatusOn]
+菜单栏显示上下文与速度: 已开启
+
+[statusBarStatusOff]
+菜单栏显示上下文与速度: 已关闭
+
+[statusBarEnabled]
+已开启菜单栏显示上下文与速度。
+
+[statusBarDisabled]
+已关闭菜单栏显示上下文与速度。
+
+[statusBarHint]
+切换: agy-cs statusbar on，或 agy-cs statusbar off。
+
+[telemetryModelLabel]
+模型
+
+[telemetryContextHeader]
+上下文窗口
+
+[telemetryCompactedEst]
+刚完成压缩（估）
+
+[telemetryCompactedCount]
+已压缩 %1 次
+
+[telemetryCachedContext]
+缓存复用上下文
+
+[telemetryNewInput]
+本步新增输入
+
+[telemetryOrchestrator]
+Orchestrator 上下文
+
+[telemetryRoleExec]
+执行
+
+[telemetryRolePlan]
+规划
+
+[telemetryStatsHeader]
+会话统计
+
+[telemetryTurnsSteps]
+轮次 / 步数
+
+[telemetryTotalTokens]
+累计 Token
+
+[telemetryApiCost]
+API 参考费用
+
+[telemetryAvgSpeed]
+平均速度
+
+[telemetryPeakSpeed]
+峰值速度
+
+[telemetryLatestSpeed]
+最近速度
+
+[telemetryCacheHit]
+缓存命中
+
+[telemetryCacheWindow]
+缓存观察
+
+[telemetryCacheUnconfirmed]
+待确认
+
+[telemetryModelTime]
+模型用时
+
+[telemetryToolTime]
+工具用时
+
+[telemetryTtft]
+首 Token 延迟
+
+[telemetrySubagentsHeader]
+子智能体上下文
+
+[telemetrySubagentTokens]
+子智能体 Token
+
+[telemetryCombinedTokens]
+含子智能体总计
+
+[telemetryReqTools]
+请求 / 工具调用
+
+[telemetrySubagentCache]
+子智能体缓存命中
+
+[telemetrySubagentCost]
+子智能体参考费用
+
+[telemetryCombinedCost]
+含子智能体总费用
+
+[telemetryCatMessages]
+消息
+
+[telemetryCatSystem]
+系统提示
+
+[telemetryCatTools]
+系统工具
+
+[telemetryCatSkills]
+技能
+
+[telemetryCatSubagents]
+子智能体
+
+[telemetryCatPlugins]
+插件
+
+[telemetryCatRules]
+规则
+
+[telemetryCatMemories]
+记忆文件
+
+[telemetryCatOther]
+其他开销
+
+[telemetryCatInput]
+输入上下文
+
+[telemetryCatFree]
+剩余空间
+
+[telemetryDurationMinSec]
+%1分%2秒
+
+[telemetryDurationSec]
+%1秒
+
+[telemetryAllAccounts]
+全部账号
+
+[telemetryUnattributed]
+历史未归属
+
+[telemetryOverviewHeader]
+用量概览
+
+[telemetryReqCount]
+请求次数
+
+[telemetrySuccess]
+成功
+
+[telemetryError]
+错误
+
+[telemetryInput]
+输入
+
+[telemetryOutput]
+输出
+
+[telemetryCostLabel]
+费用
+
+[telemetryAvgPerReq]
+单次均价 %1
+
+[telemetryHeatmapHeader]
+用量热力图
+
+[telemetryHealthHeader]
+模型健康时间线
+
+[telemetryNoRequests]
+此时间范围内暂无请求
+
+[telemetryRangeWeekly]
+本轮周限额内用量
+
+[telemetryRangeToday]
+今天
+
+[telemetryRange24h]
+最近 24 小时
+
+[telemetryRangeYesterday]
+昨天
+
+[telemetryRangeWeek]
+本周
+
+[telemetryRangeMonth]
+本月
+
+[telemetryRange30d]
+最近 30 天
+
+[telemetryRangeAll]
+全部时间
+
+[telemetryWeeklyActive]
+%1 - 现在（%2 重置）
+
+[telemetryWeeklyUnstarted]
+本轮周限额尚未开始消耗（剩余 100%）
+
+[telemetryWeeklyFallback]
+最近 7 天（暂未读取到周限额周期）

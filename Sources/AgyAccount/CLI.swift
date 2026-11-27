@@ -25,6 +25,8 @@ struct CommandServices {
     var stateWait: TimeInterval = 5
     var provider: AccountProvider = .antigravity
     var colab: ProviderServices? = nil
+    var environment: [String: String] = ProcessInfo.processInfo.environment
+    var clock: () -> Date = Date.init
 
     static func system(terminal: any LineReading, provider: AccountProvider = .antigravity) -> CommandServices {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -104,7 +106,9 @@ struct CommandServices {
                 guarder: guarder,
                 stateWait: stateWait,
                 provider: .colab,
-                colab: overrides
+                colab: overrides,
+                environment: environment,
+                clock: clock
             )
         }
     }
@@ -137,6 +141,8 @@ struct CommandServices {
             codec: activeCodec,
             stateSync: sync,
             signer: provider == .colab ? colab?.signer : nil,
+            environment: environment,
+            clock: clock,
             text: text,
             stdout: stdout,
             stderr: stderr
@@ -175,6 +181,8 @@ public enum AgyAccountCLI {
         refresher: any QuotaRefreshStarting,
         guarder: any GuardStarting = NoopGuardStarter(),
         colab: ProviderServices? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        clock: @escaping () -> Date = Date.init,
         stdout: @escaping (String) -> Void,
         stderr: @escaping (String) -> Void
     ) -> Int32 {
@@ -191,7 +199,9 @@ public enum AgyAccountCLI {
                 usage: usage,
                 refresher: refresher,
                 guarder: guarder,
-                colab: colab
+                colab: colab,
+                environment: environment,
+                clock: clock
             ),
             stdout: stdout,
             stderr: stderr
@@ -301,6 +311,12 @@ func parse(_ arguments: [String]) throws -> AccountCommandKind {
         return try parseRemove(arguments)
     case "guard":
         return try parseGuard(arguments)
+    case "stats":
+        return try parseStats(arguments)
+    case "session":
+        return try parseSession(arguments)
+    case "statusbar":
+        return try parseStatusBar(arguments)
     case "language", "lg":
         return try parseLanguage(arguments)
     default:
@@ -402,6 +418,93 @@ private func parseGuard(_ arguments: [String]) throws -> AccountCommandKind {
         return .guardWorker
     default:
         throw UsageFailure(.guardUsage)
+    }
+}
+
+private func parseStats(_ arguments: [String]) throws -> AccountCommandKind {
+    var range: UsageRangePreset = .weekly
+    var accountFilter: String?
+    var sourceFilter: TelemetrySourceFilter = .all
+    var pricingMode: PricingMode = .standard
+    var jsonOutput = false
+    var rest = arguments.dropFirst()
+    while let arg = rest.popFirst() {
+        switch arg {
+        case "--range":
+            guard let value = rest.popFirst(), let parsed = UsageRangePreset.parse(value) else {
+                throw UsageFailure(.statsUsage)
+            }
+            range = parsed
+        case "--account":
+            guard let value = rest.popFirst(), !value.isEmpty else {
+                throw UsageFailure(.statsUsage)
+            }
+            accountFilter = value
+        case "--source":
+            guard let value = rest.popFirst(),
+                  let parsed = TelemetrySourceFilter(rawValue: value.lowercased()),
+                  parsed != .auto
+            else {
+                throw UsageFailure(.statsUsage)
+            }
+            sourceFilter = parsed
+        case "--pricing":
+            guard let value = rest.popFirst(), let parsed = PricingMode(rawValue: value.lowercased()) else {
+                throw UsageFailure(.statsUsage)
+            }
+            pricingMode = parsed
+        case "--json":
+            jsonOutput = true
+        default:
+            throw UsageFailure(.statsUsage)
+        }
+    }
+    return .stats(range: range, accountFilter: accountFilter, sourceFilter: sourceFilter, pricingMode: pricingMode, jsonOutput: jsonOutput)
+}
+
+private func parseSession(_ arguments: [String]) throws -> AccountCommandKind {
+    var conversationId: String?
+    var sourceFilter: TelemetrySourceFilter = .auto
+    var pricingMode: PricingMode = .standard
+    var jsonOutput = false
+    var rest = arguments.dropFirst()
+    while let arg = rest.popFirst() {
+        switch arg {
+        case "--source":
+            guard let value = rest.popFirst(),
+                  let parsed = TelemetrySourceFilter(rawValue: value.lowercased()),
+                  parsed != .all
+            else {
+                throw UsageFailure(.sessionUsage)
+            }
+            sourceFilter = parsed
+        case "--pricing":
+            guard let value = rest.popFirst(), let parsed = PricingMode(rawValue: value.lowercased()) else {
+                throw UsageFailure(.sessionUsage)
+            }
+            pricingMode = parsed
+        case "--json":
+            jsonOutput = true
+        default:
+            if arg.hasPrefix("-") || conversationId != nil {
+                throw UsageFailure(.sessionUsage)
+            }
+            conversationId = arg
+        }
+    }
+    return .session(conversationId: conversationId, sourceFilter: sourceFilter, pricingMode: pricingMode, jsonOutput: jsonOutput)
+}
+
+private func parseStatusBar(_ arguments: [String]) throws -> AccountCommandKind {
+    switch Array(arguments.dropFirst()) {
+    case []:
+        return .statusBarStatus
+    case ["on"]:
+        return .statusBarSet(true)
+    case ["off"]:
+        return .statusBarSet(false)
+    default:
+        throw UsageFailure(.statusBarUsage)
     }
 }
 

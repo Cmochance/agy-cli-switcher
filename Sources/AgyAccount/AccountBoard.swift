@@ -32,6 +32,7 @@ public struct BoardState {
     public var language: String
     public var provider: AccountProvider = .antigravity
     public var blockOldWriteback: Bool = false
+    public var statusTelemetry: Bool = false
 }
 
 public struct ActionOutcome {
@@ -87,7 +88,8 @@ public struct AccountBoard: @unchecked Sendable {
                 text: text,
                 language: text.language.rawValue,
                 provider: provider,
-                blockOldWriteback: provider == .antigravity ? profile.blockOldWritebackEnabled() : false
+                blockOldWriteback: provider == .antigravity ? profile.blockOldWritebackEnabled() : false,
+                statusTelemetry: provider == .antigravity ? profile.statusTelemetryEnabled() : false
             )
         }
         do {
@@ -112,6 +114,44 @@ public struct AccountBoard: @unchecked Sendable {
         let result = AgyAccountCLI.execute(arguments, services: services, stdout: output.add, stderr: errors.add)
         return ActionOutcome(
             code: result.code, failure: result.failure, details: result.details, output: output.all, errors: errors.all
+        )
+    }
+
+    public func loadSessionTelemetry(
+        conversationId: String? = nil,
+        sourceFilter: TelemetrySourceFilter = .auto,
+        pricingMode: PricingMode = .standard,
+        knownStamp: String? = nil
+    ) -> SessionTelemetryLoadResult {
+        let locations = ToolLocations(home: services.home, provider: .antigravity)
+        return SessionTelemetryEngine.load(
+            requestedId: conversationId,
+            home: services.home,
+            environment: services.environment,
+            sourceFilter: sourceFilter,
+            pricingMode: pricingMode,
+            pricingFile: locations.pricingFile,
+            knownStamp: knownStamp,
+            now: services.clock()
+        )
+    }
+
+    public func loadUsageOverview(
+        range: UsageRangePreset = .weekly,
+        accountFilter: String? = nil,
+        sourceFilter: TelemetrySourceFilter = .all,
+        pricingMode: PricingMode = .standard
+    ) -> UsageOverviewSnapshot {
+        let scoped = services.forProvider(.antigravity)
+        return UsageAnalyticsEngine.loadOverview(
+            home: services.home,
+            profile: scoped.profile,
+            environment: services.environment,
+            range: range,
+            accountFilter: accountFilter,
+            sourceFilter: sourceFilter,
+            pricingMode: pricingMode,
+            now: services.clock()
         )
     }
 

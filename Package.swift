@@ -23,7 +23,8 @@ let package = Package(
                 .embedInCode("i18n/ja.txt")
             ],
             linkerSettings: [
-                .linkedFramework("Security")
+                .linkedFramework("Security"),
+                .linkedLibrary("sqlite3")
             ]
         ),
         .target(

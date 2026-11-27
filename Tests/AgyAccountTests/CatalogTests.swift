@@ -46,7 +46,7 @@ final class CatalogTests: XCTestCase {
 
         for language in AppLanguage.allCases {
             let help = try XCTUnwrap(byLanguage[language]?.values["help"])
-            for token in ["current", "list", "save", "switch", "switch add", "next", "refresh quota", "rename", "move", "rm", "guard", "language", "help"] {
+            for token in ["current", "list", "save", "switch", "switch add", "next", "refresh quota", "rename", "move", "rm", "guard", "stats", "session", "statusbar", "language", "help"] {
                 XCTAssertTrue(help.contains(token), "\(language.rawValue) help missing \(token)")
             }
         }

@@ -23,6 +23,9 @@ Antigravity CLI のアカウントを切り替えます。
   rm <名前> --force            記録中のログインがこのコピーだけのとき、確認して削除します
   guard                        旧セッションの書き戻し防止が有効か表示します
   guard on / off               旧セッションによるキーチェーン書き戻し防止を切り替えます
+  stats [オプション]           ローカルの Antigravity 使用量概要、ヒートマップ、モデル健全性を表示します
+  session [<ID>] [オプション]  セッションのコンテキスト内訳とトークン生成速度を表示します
+  statusbar [on|off]           メニューバーでのコンテキスト・速度の常時表示を切り替えます
   language, lg                 現在の言語を表示します
   language <コード>, lg <コード>  言語を切り替えます
   help                         すべてのコマンドと機能を表示します
@@ -484,3 +487,234 @@ Colab のログイン設定が見つかりません。
 
 [panelGuardToggle]
 旧セッションの書き戻し防止
+
+[telemetryAntigravityOnly]
+ローカル使用量とセッション統計は Antigravity のみ対応しており、Colab では使えません。
+
+[statsUsage]
+使い方: agy-cs stats [--range weekly|today|24h|yesterday|week|month|30d|all] [--account <名前|メール|all|unattributed>] [--source all|cli|app] [--pricing standard|promo] [--json]
+
+[sessionUsage]
+使い方: agy-cs session [<会話ID>] [--source auto|cli|app] [--pricing standard|promo] [--json]
+
+[sessionNotFound]
+指定された Antigravity セッションが見つかりません。
+
+[telemetryNoSessions]
+ローカルの Antigravity セッション記録がまだありません。
+
+[statusBarUsage]
+使い方: agy-cs statusbar [on|off]
+
+[statusBarStatusOn]
+メニューバーのコンテキスト・速度表示: オン
+
+[statusBarStatusOff]
+メニューバーのコンテキスト・速度表示: オフ
+
+[statusBarEnabled]
+メニューバーのコンテキスト・速度表示を有効にしました。
+
+[statusBarDisabled]
+メニューバーのコンテキスト・速度表示を無効にしました。
+
+[statusBarHint]
+切り替え: agy-cs statusbar on または agy-cs statusbar off。
+
+[telemetryModelLabel]
+モデル
+
+[telemetryContextHeader]
+コンテキストウィンドウ
+
+[telemetryCompactedEst]
+圧縮直後（推定）
+
+[telemetryCompactedCount]
+%1 回圧縮済み
+
+[telemetryCachedContext]
+キャッシュ再利用コンテキスト
+
+[telemetryNewInput]
+今回新規入力
+
+[telemetryOrchestrator]
+Orchestrator コンテキスト
+
+[telemetryRoleExec]
+実行
+
+[telemetryRolePlan]
+計画
+
+[telemetryStatsHeader]
+セッション統計
+
+[telemetryTurnsSteps]
+ターン / ステップ
+
+[telemetryTotalTokens]
+累計トークン
+
+[telemetryApiCost]
+API 参考コスト
+
+[telemetryAvgSpeed]
+平均速度
+
+[telemetryPeakSpeed]
+ピーク速度
+
+[telemetryLatestSpeed]
+最新速度
+
+[telemetryCacheHit]
+キャッシュヒット
+
+[telemetryCacheWindow]
+キャッシュ観察
+
+[telemetryCacheUnconfirmed]
+要確認
+
+[telemetryModelTime]
+モデル時間
+
+[telemetryToolTime]
+ツール時間
+
+[telemetryTtft]
+初回トークン遅延
+
+[telemetrySubagentsHeader]
+サブエージェントコンテキスト
+
+[telemetrySubagentTokens]
+サブエージェントトークン
+
+[telemetryCombinedTokens]
+サブエージェント含む合計
+
+[telemetryReqTools]
+リクエスト / ツール呼び出し
+
+[telemetrySubagentCache]
+サブエージェントキャッシュ
+
+[telemetrySubagentCost]
+サブエージェント参考コスト
+
+[telemetryCombinedCost]
+合計参考コスト
+
+[telemetryCatMessages]
+メッセージ
+
+[telemetryCatSystem]
+システムプロンプト
+
+[telemetryCatTools]
+システムツール
+
+[telemetryCatSkills]
+スキル
+
+[telemetryCatSubagents]
+サブエージェント
+
+[telemetryCatPlugins]
+プラグイン
+
+[telemetryCatRules]
+ルール
+
+[telemetryCatMemories]
+メモリファイル
+
+[telemetryCatOther]
+その他
+
+[telemetryCatInput]
+入力コンテキスト
+
+[telemetryCatFree]
+空き容量
+
+[telemetryDurationMinSec]
+%1分%2秒
+
+[telemetryDurationSec]
+%1秒
+
+[telemetryAllAccounts]
+すべてのアカウント
+
+[telemetryUnattributed]
+未帰属履歴
+
+[telemetryOverviewHeader]
+使用量概要
+
+[telemetryReqCount]
+リクエスト数
+
+[telemetrySuccess]
+成功
+
+[telemetryError]
+エラー
+
+[telemetryInput]
+入力
+
+[telemetryOutput]
+出力
+
+[telemetryCostLabel]
+コスト
+
+[telemetryAvgPerReq]
+平均 %1 / 回
+
+[telemetryHeatmapHeader]
+使用量ヒートマップ
+
+[telemetryHealthHeader]
+モデル健全性タイムライン
+
+[telemetryNoRequests]
+この期間のリクエストはありません
+
+[telemetryRangeWeekly]
+今週間利用枠内
+
+[telemetryRangeToday]
+今日
+
+[telemetryRange24h]
+直近 24 時間
+
+[telemetryRangeYesterday]
+昨日
+
+[telemetryRangeWeek]
+今週
+
+[telemetryRangeMonth]
+今月
+
+[telemetryRange30d]
+直近 30 日
+
+[telemetryRangeAll]
+全期間
+
+[telemetryWeeklyActive]
+%1 - 現在（%2 リセット）
+
+[telemetryWeeklyUnstarted]
+今週間利用枠はまだ未使用です（残り 100%）
+
+[telemetryWeeklyFallback]
+直近 7 日間（週間利用枠ウィンドウ未取得）
